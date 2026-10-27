@@ -1,0 +1,191 @@
+<Window x:Class="VLMulti.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="VLMulti" Icon="vl.ico" Width="1600" Height="900" MinWidth="1000" MinHeight="560"
+        Background="{StaticResource WindowBg}" Foreground="{StaticResource TextMain}"
+        FontFamily="Segoe UI" FontSize="13">
+    <Window.InputBindings>
+        <KeyBinding Key="D1" Modifiers="Control" Command="{x:Static NavigationCommands.GoToPage}" CommandParameter="1" />
+        <KeyBinding Key="D2" Modifiers="Control" Command="{x:Static NavigationCommands.GoToPage}" CommandParameter="2" />
+        <KeyBinding Key="D3" Modifiers="Control" Command="{x:Static NavigationCommands.GoToPage}" CommandParameter="3" />
+        <KeyBinding Key="D4" Modifiers="Control" Command="{x:Static NavigationCommands.GoToPage}" CommandParameter="4" />
+        <KeyBinding Key="B" Modifiers="Control" Command="{x:Static NavigationCommands.BrowseHome}" />
+    </Window.InputBindings>
+    <Window.CommandBindings>
+        <CommandBinding Command="{x:Static NavigationCommands.GoToPage}" Executed="GoToAccount_Executed" />
+        <CommandBinding Command="{x:Static NavigationCommands.BrowseHome}" Executed="TogglePanel_Executed" />
+    </Window.CommandBindings>
+
+    <DockPanel>
+        <!-- Thanh trên cùng: acc (bấm để đưa lên khung lớn / bật lại), đếm ngược Boss HK, lệnh chung -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource BarBg}" Padding="10,6"
+                BorderBrush="{StaticResource FrameBorder}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <Image DockPanel.Dock="Left" Source="vl.ico" Width="22" Height="22" Margin="0,0,8,0" />
+                <TextBlock DockPanel.Dock="Left" Text="VLMulti" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" Margin="0,0,14,0" />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource BarButton}" Click="EnterAll_Click"
+                            ToolTip="Bấm &quot;Vào Game&quot; ở mọi khung đang ở màn chọn nhân vật">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE768;" VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <TextBlock Text="Vào game" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource BarButton}" Click="ReloadAll_Click" ToolTip="Tải lại cả 4 khung game">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE72C;" VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <TextBlock Text="Tải lại" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="MuteButton" Style="{StaticResource IconButton}" Content="&#xE767;" FontSize="15" Padding="9,0"
+                            Click="Mute_Click" ToolTip="Tắt tiếng game" />
+                    <Button x:Name="DashboardButton" Style="{StaticResource IconButton}" Content="&#xE8A9;" FontSize="15" Padding="9,0"
+                            Click="Dashboard_Click" ToolTip="Hiện / ẩn bảng chi tiết các acc" />
+                    <Button x:Name="AlertButton" Style="{StaticResource IconButton}" Padding="9,0" Click="Alerts_Click" ToolTip="Cảnh báo">
+                        <Grid>
+                            <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xEA8F;" FontSize="15" />
+                            <Border x:Name="AlertBadge" Background="{StaticResource ErrorFg}" CornerRadius="7" MinWidth="14" Height="14"
+                                    Padding="3,0" Margin="10,-7,-9,0" HorizontalAlignment="Right" VerticalAlignment="Top" Visibility="Collapsed">
+                                <TextBlock x:Name="AlertCount" FontSize="9" FontWeight="Bold" Foreground="White"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI" />
+                            </Border>
+                        </Grid>
+                    </Button>
+                    <Button x:Name="PanelButton" Style="{StaticResource IconButton}" Content="&#xE8A0;" FontSize="15" Padding="9,0"
+                            Click="TogglePanel_Click" ToolTip="Hiện / ẩn cột Tổng quan · Nhật ký · Cài đặt (Ctrl+B)" />
+                </StackPanel>
+                <Border x:Name="BossHkBox" DockPanel.Dock="Right" CornerRadius="6" Padding="9,3" Margin="0,0,10,0"
+                        Background="{StaticResource Card2Bg}" VerticalAlignment="Center"
+                        ToolTip="Boss Hoàng Kim: 12:00 · 15:30 · 19:30 · 22:00 giờ Việt Nam, mỗi đợt 30 phút. Trong đợt boss game tự đi đánh, app đứng yên.">
+                    <TextBlock x:Name="BossHkText" FontSize="12" Foreground="{StaticResource TextDim}" />
+                </Border>
+                <!-- Thanh acc: bấm để đưa lên khung lớn (Ctrl+1..4), acc đang tắt bấm để bật lại -->
+                <StackPanel x:Name="BigTabs" Orientation="Horizontal" VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
+
+        <!-- Thanh lệnh: đổi chế độ cho các acc đã chọn (ô ☑ trên khung), đồng bộ thao tác -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource WindowBg}" Padding="10,5"
+                BorderBrush="{StaticResource FrameBorder}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button x:Name="SyncButton" Style="{StaticResource BarButton}" Click="Sync_Click"
+                            ToolTip="Khi bật: thao tác của bạn ở một khung đã chọn sẽ được lặp lại ở các khung đã chọn khác (trừ ô chat)" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="GroupLabel" Margin="0,0,8,0" VerticalAlignment="Center" Foreground="{StaticResource TextDim}" />
+                    <Button Style="{StaticResource PrimaryButton}" Content="Nhiệm Vụ" Tag="quest" Click="Mode_Click"
+                            ToolTip="Bắt đầu vòng tự động: nhận quà, mua lệnh bài → Nhiệm Vụ → Phó Bản → Đi thuyền → Boss tuần → Sát Thủ → Leo Tháp → Luyện Công" />
+                    <Button Style="{StaticResource BarButton}" Content="Leo Tháp" Tag="tower" Click="Mode_Click"
+                            ToolTip="Vào Thông Thiên Tháp leo tiếp tầng đang dừng (tắt vòng tự động)" />
+                    <Button Style="{StaticResource BarButton}" Content="Phó Bản" Tag="dg" Click="Mode_Click"
+                            ToolTip="Vào phó bản cao nhất còn lượt (tắt vòng tự động)" />
+                    <Button Style="{StaticResource BarButton}" Content="Luyện Công" Tag="farm" Click="Mode_Click"
+                            ToolTip="Dịch chuyển tới bãi luyện công hợp cấp (tắt vòng tự động)" />
+                    <Button Style="{StaticResource BarButton}" Content="Chọn tất cả" Click="SelectAll_Click" Margin="10,0,3,0"
+                            ToolTip="Chọn / bỏ chọn mọi acc đang bật" />
+                    <TextBlock x:Name="CommandFeedback" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource TextDim}"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Bảng chi tiết (ẩn/hiện bằng nút bảng trên cùng); nội dung dựng trong code -->
+        <Border x:Name="DashboardPanel" DockPanel.Dock="Top" Background="{StaticResource BarBg}" Padding="10,6"
+                BorderBrush="{StaticResource FrameBorder}" BorderThickness="0,0,0,1">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <Grid x:Name="DashboardGrid" TextElement.Foreground="{StaticResource TextMain}" TextElement.FontSize="12" />
+            </ScrollViewer>
+        </Border>
+
+        <!-- Danh sách cảnh báo: Popup là cửa sổ riêng nên nổi được lên trên vùng game (WebView2) -->
+        <Popup x:Name="AlertPopup" PlacementTarget="{Binding ElementName=AlertButton}" Placement="Bottom"
+               StaysOpen="False" AllowsTransparency="True">
+            <Border Background="{StaticResource BarBg}" BorderBrush="{StaticResource FrameBorder}" BorderThickness="1"
+                    CornerRadius="8" Padding="12" Width="460">
+                <DockPanel>
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                        <Button DockPanel.Dock="Right" Style="{StaticResource BarButton}" Content="Xoá hết" Click="ClearAlerts_Click" />
+                        <TextBlock Text="Cảnh báo gần đây" VerticalAlignment="Center" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextMain}" />
+                    </DockPanel>
+                    <ScrollViewer MaxHeight="380" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="AlertList" />
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Popup>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="560" />
+                <ColumnDefinition x:Name="PanelSplitColumn" Width="5" />
+                <ColumnDefinition x:Name="PanelColumn" Width="330" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 4 khung game luôn là con của lưới này; đổi chỗ = đổi Row/Column,
+                 không gỡ khung ra khỏi lưới nên game không bị tải lại -->
+            <Grid x:Name="FrameGrid">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="BigColumn" Width="7*" MinWidth="400" />
+                    <ColumnDefinition Width="5" />
+                    <ColumnDefinition x:Name="SmallColumn" Width="3*" MinWidth="220" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition />
+                    <RowDefinition />
+                    <RowDefinition />
+                </Grid.RowDefinitions>
+                <GridSplitter x:Name="Splitter" Grid.Column="1" Grid.RowSpan="3" Width="5" HorizontalAlignment="Stretch"
+                              ResizeBehavior="PreviousAndNext" Background="{StaticResource WindowBg}"
+                              ToolTip="Kéo để đổi tỉ lệ khung lớn / khung nhỏ" />
+            </Grid>
+
+            <GridSplitter x:Name="PanelSplitter" Grid.Column="1" Width="5" HorizontalAlignment="Stretch"
+                          ResizeBehavior="PreviousAndNext" Background="{StaticResource FrameBorder}"
+                          ToolTip="Kéo để đổi bề rộng cột bên phải" DragCompleted="PanelSplitter_DragCompleted" />
+
+            <!-- Cột bên phải: Tổng quan · Nhật ký · Cài đặt (giống thanh dưới đáy của bản điện thoại) -->
+            <DockPanel x:Name="SidePanel" Grid.Column="2" Background="{StaticResource BarBg}">
+                <UniformGrid DockPanel.Dock="Top" Rows="1" Margin="8,2,8,0">
+                    <RadioButton x:Name="TabHome" Style="{StaticResource TabButton}" Content="Tổng quan" GroupName="side"
+                                 IsChecked="True" Checked="SideTab_Checked" />
+                    <RadioButton x:Name="TabLog" Style="{StaticResource TabButton}" Content="Nhật ký" GroupName="side"
+                                 Checked="SideTab_Checked" />
+                    <RadioButton x:Name="TabSettings" Style="{StaticResource TabButton}" Content="Cài đặt" GroupName="side"
+                                 Checked="SideTab_Checked" />
+                </UniformGrid>
+                <Border DockPanel.Dock="Top" Height="1" Background="{StaticResource FrameBorder}" />
+
+                <Grid>
+                    <!-- Tổng quan -->
+                    <ScrollViewer x:Name="HomeView" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="10">
+                            <UniformGrid x:Name="TotalsGrid" Rows="1" Margin="0,0,0,10" />
+                            <StackPanel x:Name="AccList" />
+                            <TextBlock Margin="2,10,2,0" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource TextFaint}"
+                                       Text="Bấm một acc để đưa lên khung lớn (hoặc Ctrl+1..4, bấm đúp thanh tiêu đề khung). Acc ở khung lớn hiện thêm chi tiết." />
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- Nhật ký chung của các acc -->
+                    <DockPanel x:Name="LogView" Visibility="Collapsed" Margin="10">
+                        <WrapPanel x:Name="LogKinds" DockPanel.Dock="Top" />
+                        <DockPanel DockPanel.Dock="Top" Margin="0,2,0,8">
+                            <TextBlock Text="Acc" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{StaticResource TextDim}" />
+                            <ComboBox x:Name="LogAccBox" SelectionChanged="LogFilter_Changed" />
+                        </DockPanel>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="LogList" />
+                        </ScrollViewer>
+                    </DockPanel>
+
+                    <!-- Cài đặt (dựng trong code) -->
+                    <ScrollViewer x:Name="SettingsView" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="SettingsBody" Margin="12" />
+                    </ScrollViewer>
+                </Grid>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</Window>

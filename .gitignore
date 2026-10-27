@@ -1,0 +1,15 @@
+# Build output
+bin/
+obj/
+dist/
+.vs/
+*.user
+
+# Runtime data: browser profiles, saved game passwords, settings, logs – never commit
+data/
+data-server/
+*.log
+
+# Local tooling
+TailScale/
+node_modules/

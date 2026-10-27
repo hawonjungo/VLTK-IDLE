@@ -1,0 +1,49 @@
+<UserControl x:Class="VLMulti.Desktop.Controls.GameFrame"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf">
+    <Border x:Name="Outer" Margin="2" BorderThickness="2" CornerRadius="4" BorderBrush="{StaticResource FrameBorder}">
+        <DockPanel>
+            <!-- Thanh tiêu đề: đèn sức khoẻ, chọn vào nhóm, tên, bước đang chạy, công tắc; là chỗ kéo thả để đổi chỗ.
+                 Không thể thả lên vùng game vì WebView2 luôn nằm trên mọi thứ WPF vẽ. -->
+            <Border x:Name="Header" DockPanel.Dock="Top" Height="30" Background="{StaticResource HeaderBg}"
+                    AllowDrop="True" Cursor="SizeAll"
+                    ToolTip="Kéo thả lên khung khác để đổi chỗ · bấm đúp để đưa lên khung lớn"
+                    MouseLeftButtonDown="Header_MouseLeftButtonDown" MouseMove="Header_MouseMove"
+                    DragEnter="Header_DragOver" DragOver="Header_DragOver"
+                    DragLeave="Header_DragLeave" Drop="Header_Drop">
+                <Grid Margin="6,0,3,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" MaxWidth="260" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" MinWidth="0" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <!-- Khung nhỏ: ẩn dòng trạng thái, công tắc chỉ còn biểu tượng (xem SetRole) -->
+                    <Ellipse x:Name="HealthDot" Width="8" Height="8" Fill="{StaticResource TextFaint}"
+                             VerticalAlignment="Center" Margin="0,0,7,0" />
+                    <CheckBox x:Name="SelectBox" Grid.Column="1" VerticalAlignment="Center" Margin="0,0,6,0"
+                              ToolTip="Chọn acc này để nhận lệnh chế độ / đồng bộ thao tác" Click="SelectBox_Click" />
+                    <TextBlock x:Name="TitleText" Grid.Column="2" VerticalAlignment="Center" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextMain}" TextTrimming="CharacterEllipsis" />
+                    <Border x:Name="StepPill" Grid.Column="3" CornerRadius="9" Padding="8,1" Margin="8,0,0,0"
+                            VerticalAlignment="Center" Background="{StaticResource Card2Bg}">
+                        <TextBlock x:Name="StepText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextDim}" />
+                    </Border>
+                    <TextBlock x:Name="InfoText" Grid.Column="4" Margin="8,0" VerticalAlignment="Center" FontSize="12"
+                               Foreground="{StaticResource TextDim}" TextTrimming="CharacterEllipsis" />
+                    <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="AutoModeButton" Style="{StaticResource ChipButton}" Content="Tự động" Click="AutoMode_Click" />
+                        <Button x:Name="KiteButton" Style="{StaticResource ChipButton}" Content="Kéo quái" Click="Kite_Click" />
+                        <Button Style="{StaticResource IconButton}" Content="&#xE72C;" ToolTip="Tải lại khung này" Click="Reload_Click" />
+                        <Button Style="{StaticResource IconButton}" Content="&#xE711;" FontSize="11"
+                                ToolTip="Tắt acc này (đóng game; bật lại ở cột Tổng quan hoặc thanh trên cùng)" Click="Close_Click" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <wv2:WebView2 x:Name="Web" AllowExternalDrop="False" />
+        </DockPanel>
+    </Border>
+</UserControl>

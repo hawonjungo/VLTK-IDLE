@@ -1,0 +1,18 @@
+[Unit]
+Description=VLMulti Server (Võ Lâm Idle – nhiều acc)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=vlmulti
+WorkingDirectory=/opt/vlmulti
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/vlmulti/ms-playwright
+ExecStart=/opt/vlmulti/VLMulti.Server --data /var/lib/vlmulti/data
+# Tắt nhẹ nhàng để kịp lưu dữ liệu trình duyệt của từng acc
+KillSignal=SIGTERM
+TimeoutStopSec=40
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

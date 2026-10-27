@@ -1,0 +1,51 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\VLMulti.Core\VLMulti.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Không nạp sẵn namespace WinForms / System.Drawing: trùng tên với WPF (Button, Brush, Color…) -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Icon nằm trong .exe (ApplicationIcon) và trong tài nguyên WPF cho thanh tiêu đề cửa sổ -->
+    <Resource Include="vl.ico" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <!-- Chỉ để dùng biểu tượng ở khay hệ thống (NotifyIcon); không dùng giao diện WinForms -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>VLMulti</AssemblyName>
+    <ApplicationIcon>vl.ico</ApplicationIcon>
+    <Product>VLMulti</Product>
+    <Version>1.0.0</Version>
+    <!-- Bỏ các gói ngôn ngữ của WPF/WebView2 không dùng tới → file .exe nhẹ hơn -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <!-- Đóng gói 1 file chạy độc lập (đã kèm .NET), xem publish.ps1 ở thư mục gốc -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+    <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
+    <AllowedReferenceRelatedFileExtensions>none</AllowedReferenceRelatedFileExtensions>
+  </PropertyGroup>
+
+</Project>
