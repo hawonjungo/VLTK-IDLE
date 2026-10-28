@@ -223,7 +223,7 @@ public sealed class SessionManager : IAsyncDisposable
                         : null,
                     autoCheckedAgo = c.LastAutoCheckAt == default ? (int?)null : (int)(now - c.LastAutoCheckAt).TotalSeconds,
                     tracker = c.Tracker,
-                    activity = c.Activity.Items.Take(8).Select(ActivityJson).ToList(),
+                    activity = c.Activity.Items.Take(15).Select(ActivityJson).ToList(), // 3 dòng trên thẻ, mở rộng thì 15
                     live = liveId == acc.Id,
                     levelsGained = st.LevelsGained,
                     lastDoPho = acc.LastDoPho,

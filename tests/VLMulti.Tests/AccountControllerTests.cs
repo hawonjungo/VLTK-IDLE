@@ -721,6 +721,13 @@ public class AccountControllerTests
         var (ctl, page, _) = Make();
         ctl.OnPageMessage("""{"t":"sysNote","text":"Phần thưởng Boss Hoàng Kim: 1 Tử Thủy Tinh","boss":true}""", T0);
         ctl.OnPageMessage("""{"t":"sysNote","text":"Nhặt được Lục Thủy Tinh","boss":false}""", T0);
+        // Boss Hoàng Kim do Lệnh Bài Sát Thủ gọi ra: ngoài giờ Boss HK theo lịch vẫn ghi (mẫu chép từ game)
+        ctl.OnPageMessage("""{"t":"sysNote","text":"🎁 Hạ Boss Hoàng Kim: 36.00M kinh nghiệm, 1 Lam Thủy Tinh","boss":false}""", T0);
+        ctl.OnPageMessage("""{"t":"sysNote","text":"👑 Boss Hoàng Kim rơi: Kim Phong Đồng Tước Xuân Thâm","boss":false}""", T0);
+        ctl.OnPageMessage("""{"t":"sysNote","text":"🎁 Hạ Sát Thủ cấp 90: 15,4 vạn lượng, 18.00M kinh nghiệm, 1 Lam Thủy Tinh","boss":false}""", T0);
+        Assert.Contains(ctl.Activity.Items, e => e.Text == "🎁 Hạ Boss Hoàng Kim: 36.00M kinh nghiệm, 1 Lam Thủy Tinh");
+        Assert.Contains(ctl.Activity.Items, e => e.Text == "👑 Boss Hoàng Kim rơi: Kim Phong Đồng Tước Xuân Thâm");
+        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("🎁 Hạ Sát Thủ cấp 90"));
         Assert.Contains(ctl.Activity.Items, e => e.Text == "👑 Phần thưởng Boss Hoàng Kim: 1 Tử Thủy Tinh");
         Assert.DoesNotContain(ctl.Activity.Items, e => e.Text.Contains("Lục Thủy Tinh"));
 

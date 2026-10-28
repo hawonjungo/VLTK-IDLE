@@ -156,16 +156,20 @@ function render() {
 let openId = prefs.get('open', null);
 let selecting = false;
 const moreOpen = new Set();
+// Thẻ nào đang mở rộng phần nhật ký (danh sách dựng lại mỗi 3 giây nên phải nhớ)
+const logOpenIds = new Set();
 
 function renderHome() {
   const accs = state.accounts.filter((a) => a.enabled);
   const sum = (k) => accs.reduce((n, a) => n + (a[k] || 0), 0);
   const gold = accs.reduce((n, a) => n + (a.goldValue || 0), 0);
   const doPho = accs.reduce((n, a) => n + (a.doPho || []).length, 0);
-  const tile = (k, v, cls) => h('div', { class: 'tile' }, [h('div', { class: 'k', text: k }), h('div', { class: 'v' + (cls ? ' ' + cls : ''), text: v })]);
+  // sub: dòng nhỏ thứ hai (KNB khóa nằm dưới KNB, không nhét chung một dòng – ô hẹp bị cắt thành "16,1k · 5…")
+  const tile = (k, v, cls, sub) => h('div', { class: 'tile' }, [h('div', { class: 'k', text: k }),
+    h('div', { class: 'v' + (cls ? ' ' + cls : ''), text: v }), sub ? h('div', { class: 'sub', text: sub }) : null]);
   $('#totals').replaceChildren(
     tile('Ngân lượng', `${(gold / 10000).toLocaleString('vi-VN', { maximumFractionDigits: 0 })} vạn`),
-    tile('KNB · khóa', `${short(sum('knb'))} · ${short(sum('knbLocked'))}`),
+    tile('KNB', short(sum('knb')), null, `🔒 ${short(sum('knbLocked'))} khóa`),
     tile('Đồ phổ', String(doPho), doPho ? 'gold' : null),
   );
   $('#updated').textContent = `${accs.length} acc · cập nhật ${ago(Math.round((Date.now() - lastOkAt) / 1000)) || 'vừa xong'}`;
@@ -228,10 +232,14 @@ function accCard(a) {
       h('span', { class: 'rate', text: a.ratePerHour ? `${a.ratePerHour}/giờ` : '—' }),
     ]),
   ]);
-  // 3 dòng nhật ký mới nhất hiện cả khi thẻ đang thu gọn (bấm vào cũng mở / đóng thẻ như dòng trên)
+  // Nhật ký ngay trên thẻ: 3 dòng mới nhất; bấm vào thì mở rộng (nhiều dòng, xuống dòng đủ chữ), bấm lần nữa thu lại
+  const logOpen = logOpenIds.has(a.id);
   const log = a.activity?.length
-    ? h('div', { class: 'mini-log card-log', onclick: () => row.click() },
-        a.activity.slice(0, 3).map((e) => h('div', {}, [h('time', { text: time(e.at) }), e.text])))
+    ? h('div', { class: 'mini-log card-log' + (logOpen ? ' open' : ''), title: logOpen ? 'Bấm để thu gọn' : 'Bấm để xem thêm',
+        onclick: () => { if (logOpen) logOpenIds.delete(a.id); else logOpenIds.add(a.id); renderHome(); } }, [
+        ...a.activity.slice(0, logOpen ? 15 : 3).map((e) => h('div', {}, [h('time', { text: time(e.at) }), e.text])),
+        a.activity.length > 3 ? h('div', { class: 'more-hint', text: logOpen ? 'Thu gọn ▴' : `Xem thêm ${Math.min(15, a.activity.length) - 3} dòng ▾` }) : null,
+      ])
     : null;
   return h('article', { class: `acc${open ? ' open' : ''}${a.health === 'bad' ? ' bad' : ''}`, 'data-id': a.id },
     [row, selecting ? null : log, open ? accDetail(a) : null]);

@@ -383,21 +383,20 @@ public partial class MainWindow : Window
         VerticalAlignment = VerticalAlignment.Center,
     };
 
-    private Border Tile(string key, string value, Brush? valueFg = null) => new()
+    // sub: dòng nhỏ thứ hai (KNB khóa nằm dưới KNB – chung một dòng thì ô hẹp bị cắt chữ)
+    private Border Tile(string key, string value, Brush? valueFg = null, string? sub = null)
     {
-        Background = Res("CardBg"),
-        CornerRadius = new CornerRadius(8),
-        Padding = new Thickness(9, 6, 9, 6),
-        Margin = new Thickness(0, 0, 6, 0),
-        Child = new StackPanel
+        var body = new StackPanel { Children = { Text(key, Res("TextDim"), 11), Text(value, valueFg ?? Res("TextMain"), 14, bold: true) } };
+        if (sub is not null) body.Children.Add(Text(sub, Res("TextDim"), 11));
+        return new Border
         {
-            Children =
-            {
-                Text(key, Res("TextDim"), 11),
-                Text(value, valueFg ?? Res("TextMain"), 14, bold: true),
-            },
-        },
-    };
+            Background = Res("CardBg"),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(9, 6, 9, 6),
+            Margin = new Thickness(0, 0, 6, 0),
+            Child = body,
+        };
+    }
 
     private void RefreshHome(DateTime now)
     {
@@ -432,7 +431,7 @@ public partial class MainWindow : Window
 
         TotalsGrid.Children.Clear();
         TotalsGrid.Children.Add(Tile("Ngân lượng", MoneyParser.Format(gold)));
-        TotalsGrid.Children.Add(Tile("KNB · khóa", $"{Short(knb)} · {Short(knbLocked)}"));
+        TotalsGrid.Children.Add(Tile("KNB", Short(knb), sub: $"🔒 {Short(knbLocked)} khóa"));
         TotalsGrid.Children.Add(Tile("Đồ phổ", doPho.ToString(), doPho > 0 ? Res("GoldFg") : null));
 
         AccList.Children.Clear();

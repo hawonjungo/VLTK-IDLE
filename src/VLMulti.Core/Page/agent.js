@@ -854,7 +854,8 @@
   // Đang đánh Sát Thủ: góc nhiệm vụ theo dấu có dòng "Sát Thủ · Truy sát mục tiêu"
   // Nút "Đi đến Boss Sát Thủ" (game hiện sau khi gọi boss, cùng nút "Hủy bỏ nhiệm vụ"). Chỉ nhận nút có chữ
   // "Đi đến"/"Đi tới"/"Tới"/"Dịch chuyển"; nút nào có "Hủy"/"Bỏ" thì tuyệt đối bỏ qua để không mất lệnh bài.
-  const GO_RE = /(Đi\s*(đến|tới)|Tới\s*(nơi|boss|chỗ)|Dịch\s*chuyển|Truy\s*sát)/i, CANCEL_RE = /Hủy|Huỷ|Bỏ/i;
+  // Game đã đổi chữ nút: "Đến chỗ Sát Thủ" (cạnh "Bỏ truy sát" – nút đó có chữ "Bỏ" nên không bao giờ bị bấm)
+  const GO_RE = /(Đi\s*(đến|tới)|Đến\s*chỗ|Tới\s*(nơi|boss|chỗ)|Dịch\s*chuyển|Truy\s*sát)/i, CANCEL_RE = /Hủy|Huỷ|Bỏ/i;
   const assassinGoButton = () => [...document.querySelectorAll('#askBox button, #modal button, #panel button, #u20trk button, #u20trk a')]
     .find((b) => isVisible(b) && !b.disabled && GO_RE.test(b.textContent) && !CANCEL_RE.test(b.textContent)) || null;
   // Chữ các nút đang hiện (để ghi log khi không tìm thấy nút Đi đến)
@@ -1048,7 +1049,7 @@
   };
   // Dòng rác của kênh Hệ thống (kinh nghiệm, lượng, KNB khóa rơi, tự mua thuốc…) và dòng đáng ghi nhưng chưa biết mẫu
   const SYS_NOISE_RE = /^(Nhận được [\d.,]+ điểm kinh nghiệm|Nhặt được [\d.,]+ lượng|💰 \+\d+ KNB khóa|Tự mua )/;
-  const SYS_NOTE_RE = /thưởng|Boss|Rương|Hoàng Kim|Mốc|Tinh Hồng|Khoáng Thạch|Thủy Tinh/i;
+  const SYS_NOTE_RE = /thưởng|Boss|Rương|Hoàng Kim|Mốc|Tinh Hồng|Khoáng Thạch|Thủy Tinh|Sát Thủ/i;
   const seenSys = new Set();
   let sysPrimed = false; // đã qua lượt vẽ đầu (lịch sử) của thẻ Hệ thống chưa
   const handleSysLine = (text, seedOnly) => {

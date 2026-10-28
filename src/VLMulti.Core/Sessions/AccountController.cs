@@ -905,9 +905,16 @@ public sealed class AccountController
     private void OnSysNote(string text, bool bossTime, DateTime now)
     {
         Log.Write($"[{Account.Id}] sys: {text}");
-        if (bossTime && BossRewardPattern.IsMatch(text)) Note(now, $"👑 {text}", StatusLevel.Ok);
+        // Mẫu đã biết (chép từ game): ghi vào nhật ký bất kể giờ nào – Boss Hoàng Kim do Lệnh Bài Sát Thủ gọi ra
+        // xuất hiện ngoài giờ Boss HK theo lịch
+        //   "🎁 Hạ Boss Hoàng Kim: 36.00M kinh nghiệm, 1 Lam Thủy Tinh"   "👑 Boss Hoàng Kim rơi: Kim Phong Đồng Tước Xuân Thâm"
+        //   "🎁 Hạ Sát Thủ cấp 90: 15,4 vạn lượng, …"                     "👑 May mắn! Lệnh Bài Sát Thủ gọi ra Boss Hoàng Kim …"
+        if (KnownRewardPattern.IsMatch(text)) Note(now, text, StatusLevel.Ok);
+        else if (bossTime && BossRewardPattern.IsMatch(text)) Note(now, $"👑 {text}", StatusLevel.Ok);
     }
 
+    private static readonly System.Text.RegularExpressions.Regex KnownRewardPattern =
+        new(@"^\W*(Hạ Boss Hoàng Kim\s*:|Boss Hoàng Kim rơi\s*:|Hạ Sát Thủ\b|May mắn!.*gọi ra Boss Hoàng Kim)");
     private static readonly System.Text.RegularExpressions.Regex BossRewardPattern =
         new(@"thưởng|Boss|Rương|Hoàng Kim", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 

@@ -120,6 +120,9 @@ input, select { background: var(--card-2); color: var(--text); border: 1px solid
 .mini-log { background: #191b1d; border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--dim); }
 .mini-log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card-log { margin: 0 12px 12px; cursor: pointer; }
+.card-log.open div { white-space: normal; overflow: visible; }
+.card-log .more-hint { color: var(--accent); font-size: 12px; text-align: right; }
+.tile .sub { font-size: 12px; color: var(--dim); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pause-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; padding: 12px 14px;
   border-radius: 14px; background: #2a2412; border: 1px solid #5c4a17; color: var(--gold); }
 .pause-bar .small-note { color: var(--dim); }
