@@ -9,7 +9,19 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const P = require('../../src/VLMulti.Core/Page/parse.js');
 const dir = new URL('./fixtures/', import.meta.url);
-const fixtures = readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => [f, JSON.parse(readFileSync(new URL(f, dir), 'utf8'))]);
+const all = readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => [f, JSON.parse(readFileSync(new URL(f, dir), 'utf8'))]);
+// Mẫu các bảng thường ngày của một acc (Nhiệm vụ, Kỳ Trân Các…) / mẫu bảng sự kiện (event-*.json)
+const fixtures = all.filter(([f]) => !f.startsWith('event-'));
+
+test('sự kiện Tri Ân Nhà Giáo (mẫu thật)', () => {
+  const ev = all.find(([f]) => f.startsWith('event-teacher-'))[1];
+  assert.deepEqual(P.teacher(ev.text), {
+    points: 198, today: 0, cap: 40, bouquets: 170, cards: 37, roses: 2222, wraps: 0, wrapPrice: 10, endsOn: '20/11',
+  });
+  // Giá Giấy Gói không ghi bằng lượng → không được mua
+  assert.equal(P.teacher(ev.text.replace('Giấy Gói 10 vạn lượng', 'Giấy Gói 10 KNB')).wrapPrice, null);
+  assert.equal(P.teacher('bảng khác'), null);
+});
 
 test('số viết gọn của game', () => {
   assert.equal(P.num('17.2k'), 17200);

@@ -50,6 +50,11 @@ public sealed class AppSettings
     public bool AutoModeWeekBoss { get; set; } = true; // đánh hết 3 lượt Boss tuần, nhận rương tuần
     public string AutoModeFallback { get; set; } = "tower"; // "tower" hoặc "farm"
 
+    // Sự kiện 🌹 Tri Ân Nhà Giáo (tới hết 20/11/2026): mỗi ngày tặng Thầy Đồ đủ 40 Bó Hoa, ghép thêm khi sắp hết.
+    // Giấy Gói mua bằng lượng, tối đa EventTeacherSpendCap vạn mỗi acc mỗi ngày; không bao giờ tiêu KNB.
+    public bool EventTeacher { get; set; } = true;
+    public int EventTeacherSpendCap { get; set; } = 400;
+
     // Chết trong tháp (game đẩy ra Luyện Công): vào lại tháp ngay. Chết nhanh (sống dưới TowerFastDeathMinutes phút)
     // TowerFastDeathCount lần trong TowerFastDeathWindowMinutes phút → nghỉ tháp TowerRestMinutes phút, Luyện Công và báo.
     public int TowerFastDeathMinutes { get; set; } = 3;
@@ -88,6 +93,7 @@ public sealed class AppSettings
         TowerFastDeathCount = Math.Clamp(TowerFastDeathCount, 2, 10);
         TowerFastDeathWindowMinutes = Math.Clamp(TowerFastDeathWindowMinutes, TowerFastDeathMinutes, 240);
         TowerRestMinutes = Math.Clamp(TowerRestMinutes, 5, 720);
+        EventTeacherSpendCap = Math.Clamp(EventTeacherSpendCap, 0, 5000);
     }
 
     // Mặc định 3 acc ở khung nhỏ nằm trong nhóm điều khiển, acc ở khung lớn thì không

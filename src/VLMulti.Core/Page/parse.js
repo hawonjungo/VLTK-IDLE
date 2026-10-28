@@ -78,6 +78,23 @@ var VLParse = (() => {
     return m ? { bought: +m[1], max: +m[2], have: +m[3] } : null;
   };
 
-  return { num, knb, daTau, dungeons, boat, weekBoss, assassin, ldtShop };
+  // Sự kiện 🌹 Tri Ân Nhà Giáo (🎁 Phần thưởng › Tri Ân Nhà Giáo):
+  //   "🎀 Giấy Gói: 0" · "Giấy Gói 10 vạn lượng · Lẵng Mây 100 KNB" · "✉ Thiệp Tri Ân: 37" · "💐 Bó Hoa Tri Ân: 170"
+  //   "🌹 Hoa Hồng: 2222" · "Bó Hoa 198 (hôm nay 0/40)" (điểm từ Bó Hoa, hôm nay đã tặng / tối đa mỗi ngày) · "hết ngày 20/11"
+  // wrapPrice: giá 1 Giấy Gói tính bằng vạn lượng; null nếu giá không ghi bằng lượng (không được mua).
+  const teacher = (text) => {
+    const t = clean(text);
+    const n = (re) => { const m = t.match(re); return m ? +m[1] : null; };
+    const today = t.match(/Bó Hoa\s+(\d+)\s*\(hôm nay\s*(\d+)\s*\/\s*(\d+)\)/);
+    const r = {
+      points: today ? +today[1] : null, today: today ? +today[2] : null, cap: today ? +today[3] : null,
+      bouquets: n(/💐\s*Bó Hoa Tri Ân:\s*(\d+)/), cards: n(/✉\s*Thiệp Tri Ân:\s*(\d+)/),
+      roses: n(/🌹\s*Hoa Hồng:\s*(\d+)/), wraps: n(/🎀\s*Giấy Gói:\s*(\d+)/),
+      wrapPrice: n(/Giấy Gói\s+(\d+)\s*vạn lượng/), endsOn: (t.match(/hết ngày\s*(\d{1,2}\/\d{1,2})/) || [])[1] || '',
+    };
+    return [r.today, r.cap, r.bouquets, r.cards, r.roses, r.wraps].some((v) => v == null) ? null : r;
+  };
+
+  return { num, knb, daTau, dungeons, boat, weekBoss, assassin, ldtShop, teacher };
 })();
 if (typeof module !== 'undefined') module.exports = VLParse;

@@ -621,6 +621,81 @@
     }
   };
 
+  // ---------- Sự kiện 🌹 Tri Ân Nhà Giáo: tặng Bó Hoa cho Thầy Đồ, ghép thêm khi sắp hết ----------
+  // 🎁 Phần thưởng › thẻ "Tri Ân Nhà Giáo" (data-g="ng"). Đã thử thật trên game:
+  //  - tặng: nút ×1 data-ng="du:bo:1" (KHÔNG bấm "Hết" = du:bo:1000, nút đó tặng sạch mọi Bó Hoa) tới khi "hôm nay x/40" đủ
+  //    – quá 40 / ngày không được thêm điểm, kinh nghiệm thì đã đủ 3 tỷ;
+  //  - ghép Bó Hoa ×1 (gh:bo:1) = 1 Thiệp + 3 Hoa Hồng + 1 Giấy Gói; Thiệp ×1 (gh:thiep:1) từ nguyên liệu nhặt được;
+  //  - Giấy Gói +10 (gg:10) giá "10 vạn lượng" mỗi tờ – chỉ mua khi dòng giá ghi bằng lượng (VLParse.teacher.wrapPrice),
+  //    trong trần chi; Lẵng Mây (100 KNB) và Lẵng Hoa không bao giờ đụng tới.
+  // arg: { keep: số Bó Hoa giữ sẵn cho ngày mai (40), spendCap: trần chi Giấy Gói hôm nay (vạn lượng) }
+  const teacherFlow = async (arg) => {
+    if (flowBusy || anyWindowOpen()) return { r: 'busy' };
+    if (inBossHk()) return { r: 'boss-hk' };
+    const open = $('#giftBtn');
+    if (!open) return { r: 'no-event' };
+    flowBusy = true;
+    const res = { r: 'ok', gifted: 0, crafted: 0, cards: 0, wrapsBought: 0, spent: 0 };
+    const st = () => VLParse.teacher(($('#mBody') || {}).innerText);
+    // Bấm nút `sel` một lần rồi chờ số `key` tăng; trả về trạng thái mới hoặc null
+    const press = async (sel, key) => {
+      const s = st(), b = $(`#mBody [data-ng="${sel}"]`);
+      if (!s || !b || b.disabled) return null;
+      b.click();
+      const n = await waitFor(() => { const x = st(); return x && x[key] > s[key] ? x : null; });
+      if (isVisible($('#askBox'))) { post({ t: 'log', msg: 'teacher: unexpected dialog ' + $('#askBox').innerText.replace(/\s+/g, ' ').slice(0, 120) }); return null; }
+      return n;
+    };
+    try {
+      open.click();
+      if (!(await waitFor(() => $('#giftTabs'), 2000))) return { ...res, r: 'no-event' };
+      const tab = $('#giftTabs [data-g="ng"]');
+      if (!tab) return { ...res, r: 'no-event' };
+      tab.click();
+      let s = await waitFor(st, 3000);
+      if (!s) { reportUnreadable('teacher', ($('#mBody') || {}).innerText); return { ...res, r: 'unreadable' }; }
+
+      // 1. Tặng từng Bó Hoa tới đủ điểm hôm nay
+      for (let i = 0; i < 100 && s.today < s.cap && s.bouquets > 0; i++) {
+        const n = await press('du:bo:1', 'today');
+        if (!n) { res.r = 'gift-stuck'; break; }
+        s = n; res.gifted++;
+      }
+
+      // 2. Giữ sẵn `keep` Bó Hoa cho ngày mai: ghép thêm (mua Giấy Gói bằng lượng nếu thiếu, trong trần chi)
+      const keep = arg.keep || 40;
+      let budget = Math.max(0, arg.spendCap || 0);
+      for (let i = 0; i < 200 && res.r === 'ok' && s.bouquets < keep; i++) {
+        if (s.roses < 3) break;
+        if (s.wraps < 1) {
+          if (s.wrapPrice == null || s.wrapPrice * 10 > budget) break; // giá không bằng lượng / hết trần chi → thôi
+          const n = await press('gg:10', 'wraps');
+          if (!n) { res.r = 'wrap-stuck'; break; }
+          res.wrapsBought += n.wraps - s.wraps; res.spent += s.wrapPrice * (n.wraps - s.wraps); budget -= s.wrapPrice * 10;
+          s = n;
+          continue;
+        }
+        if (s.cards < 1) {
+          const n = await press('gh:thiep:1', 'cards');
+          if (!n) break; // hết nguyên liệu ghép Thiệp
+          s = n; res.cards++;
+          continue;
+        }
+        const n = await press('gh:bo:1', 'bouquets');
+        if (!n) { res.r = 'craft-stuck'; break; }
+        s = n; res.crafted++;
+      }
+      Object.assign(res, { points: s.points, today: s.today, cap: s.cap, bouquets: s.bouquets, endsOn: s.endsOn });
+      $('#giftTabs [data-g="login"]')?.click(); // để bảng về mục mặc định như lúc bạn mở
+    } catch (err) {
+      res.r = 'error: ' + err.message;
+    } finally {
+      try { await closeModalSure(); } catch (_) {}
+      flowBusy = false;
+    }
+    return res;
+  };
+
   // want = số lệnh bài muốn mua (app tính: đủ dùng hết lượt lệnh bài hôm nay); keepKnb = KNB thường luôn giữ lại
   const buyLdtFlow = async (arg) => {
     if (anyWindowOpen() || flowBusy) return { r: 'busy' };
@@ -691,6 +766,8 @@
       enqueue(m.ev || {});
     } else if (m.t === 'keepSys') {
       keepSys = !!m.on; // tắt khi bạn đang xem / dùng khung này (để bạn tự chọn kênh chat)
+    } else if (m.t === 'teacher') {
+      teacherFlow(m.arg || {}).then((res) => post({ t: 'teacherResult', ...res }), (err) => post({ t: 'teacherResult', r: 'error: ' + err.message }));
     } else if (m.t === 'buyLdt') {
       buyLdtFlow(m.arg || {}).then((res) => post({ t: 'ldtResult', ...res }), (err) => post({ t: 'ldtResult', r: 'error: ' + err.message }));
     } else if (m.t === 'cmd' && commands[m.name]) {

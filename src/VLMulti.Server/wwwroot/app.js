@@ -462,6 +462,8 @@ function renderSettings() {
   const box = (checked) => { const c = h('input', { type: 'checkbox' }); c.checked = checked; return c; };
   const quest = box(s.autoQuest), dg = box(s.autoDungeon), assassin = box(s.autoAssassin);
   const boat = box(s.autoBoat !== false), weekBoss = box(s.autoWeekBoss !== false);
+  const teacher = box(s.eventTeacher !== false);
+  const teacherCap = h('input', { type: 'number', min: 0, max: 5000, value: s.eventTeacherCap ?? 400 });
   const fallback = h('select', {}, [['tower', 'Leo Tháp'], ['farm', 'Luyện Công']].map(([v, t]) => { const o = h('option', { value: v, text: t }); o.selected = v === s.autoFallback; return o; }));
   const rest = h('input', { type: 'number', min: 5, max: 720, value: s.towerRest });
 
@@ -517,6 +519,12 @@ function renderSettings() {
         autoDungeon: dg.checked, autoQuest: quest.checked, autoFallback: fallback.value, towerRest: +rest.value, autoAssassin: assassin.checked,
         autoBoat: boat.checked, autoWeekBoss: weekBoss.checked,
       }, 'Đã lưu cài đặt') }),
+    ]),
+    section('Sự kiện', [
+      h('p', { class: 'note', text: '🌹 Tri Ân Nhà Giáo (tới hết 20/11): mỗi ngày tặng Thầy Đồ đủ 40 Bó Hoa (mức tối đa có điểm), tự ghép thêm khi sắp hết. Giấy Gói mua bằng lượng, không bao giờ tiêu KNB.' }),
+      h('label', { class: 'check-row' }, [teacher, 'Tặng Bó Hoa mỗi ngày (cả 4 acc)']),
+      h('div', { class: 'form-grid' }, [h('label', { text: 'Chi Giấy Gói tối đa (vạn/acc/ngày)' }), teacherCap]),
+      h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', { eventTeacher: teacher.checked, eventTeacherCap: +teacherCap.value }, 'Đã lưu cài đặt sự kiện') }),
     ]),
     section('Mật khẩu acc game', [
       h('p', { class: 'note', text: 'Mật khẩu được mã hoá và chỉ lưu trên máy chủ này, dùng để tự đăng nhập lại.' }),

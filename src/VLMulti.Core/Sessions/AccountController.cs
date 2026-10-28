@@ -485,6 +485,9 @@ public sealed class AccountController
                 case "problem":
                     Raise(Str(m, "key"), Str(m, "msg"));
                     break;
+                case "teacherResult":
+                    OnTeacherResult(m, now);
+                    break;
                 case "unreadable":
                     OnUnreadable(Str(m, "what"), Str(m, "sample"), now);
                     break;
@@ -850,6 +853,7 @@ public sealed class AccountController
         SuperviseTowerReturn(now);
         SuperviseAssassin(now);
         SuperviseEvents(now);
+        SuperviseTeacher(now);
         SuperviseStuck(now);
         SuperviseRecovery(now);
     }
@@ -1234,6 +1238,72 @@ public sealed class AccountController
         _dgDoneHinted = true;
         Note(now, "🏯 Phó bản đã hết lượt – bấm Leo Tháp hoặc bật Tự động để đi tiếp", StatusLevel.Warn);
         SetStatus("🏯 Phó bản xong – bấm Leo Tháp hoặc bật Tự động", StatusLevel.Warn);
+    }
+
+    // ---------- Sự kiện 🌹 Tri Ân Nhà Giáo: mỗi ngày một lần tặng đủ Bó Hoa (trang làm, xem teacherFlow trong agent.js) ----------
+    // Chạy lúc rảnh: ngoài lúc đánh Boss HK, không chen lúc đang mua lệnh bài / đi thuyền / Boss tuần, sau 0:10 giờ VN.
+    // Hết sự kiện (sau TeacherEventEnds) tự thôi. Không thấy bảng sự kiện → thôi hôm đó; lỗi 3 lần → báo, thôi hôm đó.
+
+    public static readonly DateOnly TeacherEventEnds = new(2026, 11, 20);
+    private const int TeacherKeep = 40; // giữ sẵn chừng này Bó Hoa cho ngày hôm sau (= số tặng tối đa mỗi ngày)
+    private static readonly TimeSpan TeacherRetryGap = TimeSpan.FromMinutes(5);
+    private DateOnly _teacherDoneDay;
+    private DateTime _teacherLastTry;
+    private bool _teacherPending;
+    private int _teacherFails;
+
+    private void SuperviseTeacher(DateTime now)
+    {
+        var cfg = SettingsProvider?.Invoke();
+        if (cfg is null || !cfg.EventTeacher || Screen != "game" || Away) return;
+        var vn = now.ToUniversalTime().AddHours(7);
+        var day = DateOnly.FromDateTime(vn);
+        if (day > TeacherEventEnds || _teacherDoneDay == day || vn.TimeOfDay < TimeSpan.FromMinutes(10)) return;
+        if (_teacherPending && now - _teacherLastTry < TimeSpan.FromMinutes(3)) return; // đang chờ trang trả lời
+        _teacherPending = false;
+        if (_ldtBuyingSince is not null || EventRunning(now) || now - _screenSince < TimeSpan.FromSeconds(90)
+            || now - _teacherLastTry < TeacherRetryGap) return;
+        _teacherLastTry = now;
+        _teacherPending = true;
+        Post(new { t = "teacher", arg = new { keep = TeacherKeep, spendCap = cfg.EventTeacherSpendCap } });
+    }
+
+    private void OnTeacherResult(JsonElement m, DateTime now)
+    {
+        _teacherPending = false;
+        int Int(string name) => m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
+        var r = Str(m, "r");
+        int gifted = Int("gifted"), crafted = Int("crafted"), spent = Int("spent");
+        Log.Write($"[{Account.Id}] teacher event: {r} gifted={gifted} crafted={crafted} cards={Int("cards")} wraps={Int("wrapsBought")} " +
+                  $"spent={spent} vạn today={Int("today")}/{Int("cap")} points={Int("points")} bouquets={Int("bouquets")}");
+        var day = VnDate(now);
+        switch (r)
+        {
+            case "busy" or "boss-hk":
+                return; // thử lại sau TeacherRetryGap
+            case "no-event":
+                _teacherDoneDay = day;
+                Note(now, "🌹 Tri Ân Nhà Giáo: không thấy bảng sự kiện hôm nay – bỏ qua");
+                return;
+        }
+        if (gifted > 0 || crafted > 0)
+        {
+            var text = $"💐 Tri Ân Nhà Giáo: tặng {gifted} Bó Hoa (hôm nay {Int("today")}/{Int("cap")}, Điểm Tri Ân {Int("points")})";
+            if (crafted > 0) text += $" · ghép {crafted} Bó Hoa{(spent > 0 ? $" (−{spent} vạn)" : "")}";
+            Note(now, text + $" · còn {Int("bouquets")} Bó Hoa", StatusLevel.Ok);
+        }
+        if (r == "ok")
+        {
+            _teacherDoneDay = day;
+            _teacherFails = 0;
+            return;
+        }
+        if (++_teacherFails >= 3)
+        {
+            _teacherDoneDay = day;
+            _teacherFails = 0;
+            Raise("event-teacher", $"Tri Ân Nhà Giáo: tặng / ghép Bó Hoa không được ({r}) – bỏ qua hôm nay");
+        }
     }
 
     // ---------- Lưới an toàn: một bước kéo dài mà số lượt không đổi → bỏ qua bước đó ----------
@@ -1671,6 +1741,7 @@ public sealed class AccountController
     {
         ["knb"] = "số KNB", ["daTau"] = "số Dã Tẩu", ["dungeons"] = "số lượt Phó bản", ["boat"] = "số chuyến thuyền",
         ["weekBoss"] = "số lượt Boss tuần", ["assassin"] = "số Lệnh Bài Sát Thủ", ["shop"] = "Kỳ Trân Các (lệnh bài Dã Tẩu)",
+        ["teacher"] = "bảng sự kiện Tri Ân Nhà Giáo",
     };
     private readonly Dictionary<string, DateOnly> _unreadableNoted = new();
 

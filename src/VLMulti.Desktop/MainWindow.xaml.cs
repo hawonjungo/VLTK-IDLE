@@ -689,7 +689,8 @@ public partial class MainWindow : Window
 
     // ---------- Cài đặt ----------
 
-    private CheckBox _setRecover = null!, _setSound = null!, _setTray = null!;
+    private CheckBox _setRecover = null!, _setSound = null!, _setTray = null!, _setTeacher = null!;
+    private TextBox _setTeacherCap = null!;
     private CheckBox _setQuest = null!, _setDungeon = null!, _setBoat = null!, _setWeekBoss = null!, _setAssassin = null!;
     private ComboBox _setFallback = null!, _setKiteDir = null!;
     private TextBox _setRest = null!, _setKiteDist = null!, _setKiteInterval = null!;
@@ -751,6 +752,11 @@ public partial class MainWindow : Window
         body.Add(FormRow("6. Xong hết thì", _setFallback));
         body.Add(FormRow("Nghỉ tháp sau 3 lần chết nhanh (phút)", _setRest = Number("5–720 phút")));
 
+        body.Add(Section("Sự kiện"));
+        body.Add(Note("🌹 Tri Ân Nhà Giáo (tới hết 20/11): mỗi ngày tặng Thầy Đồ đủ 40 Bó Hoa (mức tối đa có điểm), tự ghép thêm khi sắp hết. Giấy Gói mua bằng lượng, không bao giờ tiêu KNB."));
+        body.Add(_setTeacher = Box("Tặng Bó Hoa mỗi ngày"));
+        body.Add(FormRow("Chi Giấy Gói tối đa (vạn/acc/ngày)", _setTeacherCap = Number("0–5000 vạn")));
+
         body.Add(Section("Kéo quái khi Leo Tháp"));
         body.Add(Note("Bật riêng từng acc bằng nút \"Kéo quái\" trên khung. Mỗi chu kỳ nhân vật chạy một đoạn cho quái dồn về một phía rồi đánh tiếp. Bạn tự tắt Auto (chơi tay) thì app không kéo."));
         _setKiteDir = new ComboBox();
@@ -781,6 +787,8 @@ public partial class MainWindow : Window
         _setKiteDir.SelectedItem = _setKiteDir.Items.Cast<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == _settings.KiteDirection);
         _setKiteDist.Text = _settings.KiteDistance.ToString();
         _setKiteInterval.Text = _settings.KiteIntervalSeconds.ToString();
+        _setTeacher.IsChecked = _settings.EventTeacher;
+        _setTeacherCap.Text = _settings.EventTeacherSpendCap.ToString();
         _loadingForm = false;
     }
 
@@ -805,6 +813,8 @@ public partial class MainWindow : Window
         if (_setKiteDir.SelectedItem is ComboBoxItem { Tag: string dir }) _settings.KiteDirection = dir;
         if (int.TryParse(_setKiteDist.Text, out var dist)) _settings.KiteDistance = dist;
         if (int.TryParse(_setKiteInterval.Text, out var interval)) _settings.KiteIntervalSeconds = interval;
+        _settings.EventTeacher = _setTeacher.IsChecked == true;
+        if (int.TryParse(_setTeacherCap.Text, out var cap)) _settings.EventTeacherSpendCap = cap;
         SaveSettings(); // Normalize giới hạn các giá trị về khoảng hợp lệ
         LoadSettingsForm(); // hiện lại giá trị đã giới hạn
         Log.Write($"settings: recover={_settings.AutoRecover} quest={_settings.AutoModeQuest} dg={_settings.AutoModeDungeon} boat={_settings.AutoModeBoat} " +

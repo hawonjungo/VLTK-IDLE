@@ -501,6 +501,33 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Teacher_event_runs_once_a_day_with_spend_cap_and_logs_result()
+    {
+        var (ctl, page, cfg) = Make();
+        cfg.EventTeacherSpendCap = 300;
+        var st = Status("game", mode: "tower", zone: "Thông Thiên Tháp · tầng 900");
+        List<JsonElement> Requests() => page.Sent.Where(m => m.GetProperty("t").GetString() == "teacher").ToList();
+
+        var t = Run(ctl, T0, 60, st);
+        Assert.Empty(Requests());                            // chờ 90 giây sau khi vào game
+        t = Run(ctl, t, 60, st);
+        var req = Assert.Single(Requests());
+        Assert.Equal(40, req.GetProperty("arg").GetProperty("keep").GetInt32());
+        Assert.Equal(300, req.GetProperty("arg").GetProperty("spendCap").GetInt32());
+
+        ctl.OnPageMessage("""{"t":"teacherResult","r":"ok","gifted":40,"crafted":10,"spent":100,"today":40,"cap":40,"points":238,"bouquets":140}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text == "💐 Tri Ân Nhà Giáo: tặng 40 Bó Hoa (hôm nay 40/40, Điểm Tri Ân 238) · ghép 10 Bó Hoa (−100 vạn) · còn 140 Bó Hoa");
+        Run(ctl, t, 30 * 60, st);
+        Assert.Single(Requests());                           // xong hôm nay → không chạy lại
+
+        // Tắt trong cài đặt → không chạy
+        var (ctl2, page2, cfg2) = Make();
+        cfg2.EventTeacher = false;
+        Run(ctl2, T0, 5 * 60, st);
+        Assert.DoesNotContain(page2.Sent, m => m.GetProperty("t").GetString() == "teacher");
+    }
+
+    [Fact]
     public void Account_not_pulled_into_boss_wave_returns_to_tower_after_grace()
     {
         var (ctl, page, _) = Make();

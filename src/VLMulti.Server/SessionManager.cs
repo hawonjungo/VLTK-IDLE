@@ -252,6 +252,8 @@ public sealed class SessionManager : IAsyncDisposable
                     autoAssassin = _settings.AutoModeAssassin,
                     autoBoat = _settings.AutoModeBoat,
                     autoWeekBoss = _settings.AutoModeWeekBoss,
+                    eventTeacher = _settings.EventTeacher,
+                    eventTeacherCap = _settings.EventTeacherSpendCap,
                     autoFallback = _settings.AutoModeFallback,
                     towerRest = _settings.TowerRestMinutes,
                 },
@@ -548,6 +550,8 @@ public sealed class SessionManager : IAsyncDisposable
             if (u.AutoAssassin is { } aa) _settings.AutoModeAssassin = aa;
             if (u.AutoBoat is { } ab) _settings.AutoModeBoat = ab;
             if (u.AutoWeekBoss is { } aw) _settings.AutoModeWeekBoss = aw;
+            if (u.EventTeacher is { } et) _settings.EventTeacher = et;
+            if (u.EventTeacherCap is { } ec) _settings.EventTeacherSpendCap = ec;
             if (u.AutoFallback is { } af) _settings.AutoModeFallback = af;
             if (u.TowerRest is { } tr) _settings.TowerRestMinutes = tr;
         }
@@ -591,4 +595,4 @@ public sealed class SessionManager : IAsyncDisposable
 public sealed record SettingsUpdate(
     string? KiteDirection, int? KiteDistance, int? KiteInterval,
     bool? AutoDungeon, bool? AutoQuest, string? AutoFallback, int? TowerRest, bool? AutoAssassin = null,
-    bool? AutoBoat = null, bool? AutoWeekBoss = null);
+    bool? AutoBoat = null, bool? AutoWeekBoss = null, bool? EventTeacher = null, int? EventTeacherCap = null);
