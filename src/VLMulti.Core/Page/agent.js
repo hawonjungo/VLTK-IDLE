@@ -432,6 +432,13 @@
     // Bảng Nhiệm vụ › 👹 Boss tuần › "Khiêu chiến" (75 giây) / "Nhận rương tuần"
     weekBoss: () => pressQuestButton('wb', '#wbGo'),
     weekClaim: () => pressQuestButton('wb', '#wbClaim'),
+    // "Tài khoản đang ở nơi khác" → "Chơi ở đây"
+    playHere: () => {
+      const b = playHereButton();
+      if (!b) return 'none';
+      b.click();
+      return 'ok';
+    },
     kite: (arg) => {
       const on = $('#mswMenu button.on');
       if (!on || on.dataset.msw !== 'tower') return 'not-tower';
@@ -478,10 +485,9 @@
     const end = Date.now() + ms;
     for (;;) { const v = fn(); if (v) return v; if (Date.now() > end) return null; await sleep(100); }
   };
-  const knbNow = () => {
-    const m = txt('#knbTop').replace(/\./g, '').match(/^(\d+)\s*🔒\s*(\d+)/);
-    return m ? { knb: +m[1], khoa: +m[2] } : null;
-  };
+  // Ô KNB trên cùng ("17.2k 🔒1113"): dùng chung VLParse với mọi chỗ khác (trước đây chỗ này không hiểu "17.2k"
+  // → acc trên 10 nghìn KNB bị coi là không có KNB, không mua được lệnh bài)
+  const knbNow = () => VLParse.knb(txt('#knbTop'));
   const shopOpen = () => { const m = $('#modal'); return !!m && isVisible(m) && !!$('#mBody [data-kb="0"]'); };
   const openShop = async () => {
     if (shopOpen()) return true;
@@ -491,29 +497,46 @@
     return !!(await waitFor(shopOpen, 3000));
   };
   const closeModal = () => { const c = $('#mClose'); if (c && isVisible(c)) c.click(); };
+  // Đóng hộp thoại và chắc chắn nó đã đóng (lần mua hỏng từng để Kỳ Trân Các mở → mọi lượt sau báo "đang bận")
+  const closeModalSure = async () => {
+    for (let i = 0; i < 3 && isVisible($('#modal')); i++) {
+      closeModal();
+      if (await waitFor(() => !isVisible($('#modal')), 1500)) return;
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+    }
+    if (isVisible($('#modal'))) post({ t: 'log', msg: 'modal did not close: ' + (($('#mBody h3') || {}).textContent || '') });
+  };
   const ldtCard = () => { const b = $('#mBody [data-ktc="ldt"]'); return b ? b.closest('.u2card') : null; };
   const ldtState = () => {
     const c = ldtCard();
-    const m = c && (c.querySelector('.kc-s')?.textContent || '').match(/Hôm nay\s+(\d+)\s*\/\s*(\d+)\s*·\s*có\s+(\d+)/i);
-    return m ? { bought: +m[1], max: +m[2], have: +m[3] } : null;
+    return c ? VLParse.ldtShop(c.querySelector('.kc-s')?.textContent) : null;
   };
   const showLdtTab = async () => {
     const t = $('#mBody [data-kb="0"]'); if (t) t.click();
     const u = $('#mBody [data-kc="1"]'); if (u) u.click();
     return !!(await waitFor(ldtState, 2000));
   };
-  // Mua n lệnh bài: ×10 khi còn ≥ 10, còn lại bấm Mua từng cái; chờ số "Hôm nay" tăng sau mỗi lần bấm
+  // Mua n lệnh bài: ×10 khi còn ≥ 10, còn lại bấm Mua từng cái; chờ số "Hôm nay" tăng sau mỗi lần bấm.
+  // Không thấy số tăng (game vẽ lại bảng / đổi thẻ giữa chừng – đã gặp: mua được 10 rồi đứng): mở lại thẻ lệnh bài,
+  // đọc lại số từ đầu rồi thử tiếp, tối đa 3 lần liền; thử lại vẫn không được mới thôi.
   const buyLdt = async (n) => {
-    let done = 0;
+    let done = 0, misses = 0;
+    const base = ldtState();
     while (done < n) {
-      const st = ldtState(); if (!st) break;
+      const st = ldtState() || (await showLdtTab() && ldtState());
+      if (!st || st.bought >= st.max) break;
       const step = n - done >= 10 ? 10 : 1;
-      const btn = ldtCard().querySelector(step === 10 ? 'button[data-ktc10="ldt"]' : 'button[data-ktc="ldt"]');
+      const btn = ldtCard()?.querySelector(step === 10 ? 'button[data-ktc10="ldt"]' : 'button[data-ktc="ldt"]');
       if (!btn || btn.disabled) break;
       btn.click();
       const now = await waitFor(() => { const s2 = ldtState(); return s2 && s2.bought > st.bought ? s2 : null; });
-      if (!now) break; // game không nhận (hết tiền, hết lượt…)
-      done += now.bought - st.bought;
+      if (now) { misses = 0; done += now.bought - st.bought; continue; }
+      post({ t: 'log', msg: `buy ldt: no change after click (${misses + 1}/3): card=${(ldtCard()?.innerText || '-').replace(/\s+/g, ' ').slice(0, 120)}` });
+      if (++misses >= 3) break;
+      await showLdtTab();
+      // Lần bấm vừa rồi có thể đã được tính mà bảng chưa vẽ lại: tính theo số "Hôm nay" thật
+      const fresh = ldtState();
+      if (fresh && base) done = fresh.bought - base.bought;
     }
     return done;
   };
@@ -607,11 +630,15 @@
     let left = 0;
     try {
       try { await claimGifts(); } catch (err) { post({ t: 'log', msg: 'claim gifts failed: ' + err.message }); }
-      if (!(await openShop()) || !(await showLdtTab())) return { ...res, r: 'no-shop' };
+      if (!(await openShop()) || !(await showLdtTab())) {
+        reportUnreadable('shop', (ldtCard() || {}).innerText || '');
+        return { ...res, r: 'no-shop' };
+      }
       const st0 = ldtState();
       left = Math.min(arg.want || 0, st0.max - st0.bought);
       for (let round = 0; left > 0 && round < 20; round++) {
-        const k = knbNow(); if (!k) { res.r = 'no-knb'; break; }
+        const k = knbNow();
+        if (!k) { res.r = 'knb-unreadable'; reportUnreadable('knb', txt('#knbTop')); break; }
         const canBuy = Math.floor(k.khoa / LDT_PRICE);
         if (canBuy < left) {
           // Thiếu KNB khóa → đổi KNB thường (làm tròn lên bội số 10, không đụng phần giữ lại)
@@ -638,7 +665,9 @@
         const k2 = knbNow();
         res.bought += n; left -= n;
         if (k1 && k2) res.spent += k1.khoa - k2.khoa;
-        if (n === 0) { res.r = 'stuck'; break; }
+        const after = ldtState();
+        if (after && after.bought >= after.max) left = 0; // đã mua đủ trong ngày (kể cả lượt mua chưa kịp tính)
+        if (n === 0 && left > 0) { res.r = 'stuck'; break; }
       }
       const st = ldtState();
       if (st) { res.boughtToday = `${st.bought}/${st.max}`; res.have = st.have; quests.ldtBuy = res.boughtToday; quests.ldtHave = String(st.have); }
@@ -648,7 +677,7 @@
     } finally {
       res.left = Math.max(0, left);
       const first = $('#mBody [data-kb="0"]'); if (first && shopOpen()) first.click();
-      closeModal();
+      try { await closeModalSure(); } catch (_) {}
       flowBusy = false;
     }
     return res;
@@ -660,6 +689,8 @@
       capturing = !!m.on;
     } else if (m.t === 'replay') {
       enqueue(m.ev || {});
+    } else if (m.t === 'keepSys') {
+      keepSys = !!m.on; // tắt khi bạn đang xem / dùng khung này (để bạn tự chọn kênh chat)
     } else if (m.t === 'buyLdt') {
       buyLdtFlow(m.arg || {}).then((res) => post({ t: 'ldtResult', ...res }), (err) => post({ t: 'ldtResult', r: 'error: ' + err.message }));
     } else if (m.t === 'cmd' && commands[m.name]) {
@@ -680,14 +711,12 @@
   const QUEST_REFRESH_MS = 60000;
   let quests = { dt: '', pb: '', ldtHave: '', ldtUsed: '', dtMax: '' }, questsAt = 0, gameSince = 0;
 
+  // Thẻ Dã Tẩu: "Hôm nay 52/52 (+12 lệnh bài)", "Lệnh Bài Dã Tẩu: có 22 · … · đã dùng 35/160 (tối đa 200 …)" (xem VLParse.daTau).
+  // Chỉ đọc khi đúng thẻ Dã Tẩu đang hiện.
   const readQuestTab = (tab) => {
-    const label = [...tab.querySelectorAll('span')].find((el) => el.textContent.trim() === 'Hôm nay');
-    const dt = label && label.nextElementSibling ? label.nextElementSibling.textContent.trim() : '';
-    // "Lệnh Bài Dã Tẩu: có 22 · … · đã dùng 35/160 (tối đa 200 nhiệm vụ / ngày) · mua ở Kỳ Trân Các tối đa 100 / ngày"
-    const b = [...tab.querySelectorAll('b')].find((el) => /Lệnh Bài Dã Tẩu/i.test(el.textContent));
-    const line = b && b.parentElement ? b.parentElement.textContent.replace(/\s+/g, ' ') : '';
-    const have = line.match(/có\s+(\d+)/i), used = line.match(/đã dùng\s+(\d+)\s*\/\s*(\d+)/i), max = line.match(/tối đa\s+(\d+)\s+nhiệm vụ/i);
-    return { dt, ldtHave: have ? have[1] : '', ldtUsed: used ? `${used[1]}/${used[2]}` : '', dtMax: max ? max[1] : '' };
+    const sel = tab.querySelector('[data-qt].on');
+    if (sel && sel.dataset.qt !== 'dt') return {};
+    return VLParse.daTau((tab.querySelector('.u2qd') || tab).innerText);
   };
 
   // Chỉ ghi đè giá trị đọc được (bảng đang ở mục khác thì một số dòng không có)
@@ -708,8 +737,9 @@
       const taskTab = tabs.find((b) => /Ủy thác/i.test(b.textContent));
       if (taskTab) taskTab.click();
       const card = body.querySelector('[data-ktc="ldt"]')?.closest('.u2card');
-      const m = card && (card.querySelector('.kc-s')?.textContent || '').match(/Hôm nay\s+(\d+)\s*\/\s*(\d+)/i);
-      if (m) quests.ldtBuy = `${m[1]}/${m[2]}`;
+      const shop = card ? VLParse.ldtShop(card.querySelector('.kc-s')?.textContent) : null;
+      if (shop) quests.ldtBuy = `${shop.bought}/${shop.max}`;
+      else if (card) reportUnreadable('shop', card.innerText);
       const first = tabs.find((b) => /Bảng KNB khóa/i.test(b.textContent));
       if (first) first.click();
     } finally {
@@ -851,16 +881,14 @@
     return line ? line.textContent.replace(/\s+/g, ' ').trim().slice(0, 160) : '';
   };
   // Đi thuyền: "Chuyến còn hôm nay 2/3" → "2/3"
-  const readBoat = (tab) => {
-    const m = ((tab.querySelector('.u2qd') || tab).innerText || '').match(/Chuyến còn hôm nay\s*(\d+\s*\/\s*\d+)/);
-    return m ? m[1].replace(/\s+/g, '') : '';
-  };
+  const tabText = (tab) => (tab.querySelector('.u2qd') || tab).innerText || '';
+  const readBoat = (tab) => VLParse.boat(tabText(tab));
   // Boss tuần: "Lượt còn 3/3" (3 lượt mỗi tuần) + nút "Nhận rương tuần" sáng → "3/3" hoặc "0/3 claim"
   const readWeekBoss = (tab) => {
-    const m = ((tab.querySelector('.u2qd') || tab).innerText || '').match(/Lượt còn\s*(\d+\s*\/\s*\d+)/);
-    if (!m) return '';
+    const n = VLParse.weekBoss(tabText(tab));
+    if (!n) return '';
     const claim = $('#wbClaim');
-    return m[1].replace(/\s+/g, '') + (claim && !claim.disabled ? ' claim' : '');
+    return n + (claim && !claim.disabled ? ' claim' : '');
   };
   // Mở bảng Nhiệm vụ › tab `qt`, bấm nút `sel` (không bấm khi nút mờ), đóng bảng. Trả lời ngắn cho app.
   const pressQuestButton = async (qt, sel) => {
@@ -898,24 +926,22 @@
     return 'ok: ' + label + extra;
   };
   // "Lệnh Bài Sát Thủ | 10 | Đã hạ | 60 (cao nhất cấp 90)" → "10/60"
-  const readAssassin = (tab) => {
-    const card = [...tab.querySelectorAll('.card.stats')].find((c) => /Lệnh Bài Sát Thủ/.test(c.textContent));
-    if (!card) return '';
-    const cells = [...card.children].map((c) => c.textContent.trim());
-    const i = cells.findIndex((c) => /Lệnh Bài Sát Thủ/.test(c)), k = cells.indexOf('Đã hạ');
-    const have = i >= 0 ? parseInt(cells[i + 1], 10) : NaN, killed = k >= 0 ? parseInt(cells[k + 1], 10) : NaN;
-    return Number.isNaN(have) ? '' : `${have}/${Number.isNaN(killed) ? '?' : killed}`;
-  };
+  const readAssassin = (tab) => VLParse.assassin(tabText(tab));
+  // Phó bản: "Hết lượt" tính 0 (xem VLParse.dungeons)
+  const readDungeons = (tab) => (tab.querySelector('.u2qd') ? VLParse.dungeons(tabText(tab)) : '');
 
-  const readDungeons = (tab) => {
-    const detail = tab.querySelector('.u2qd');
-    if (!detail) return '';
-    // Mỗi phó bản đã mở khoá có dòng "Vào còn/tối đa"; cộng lại cho cả acc
-    let left = 0, max = 0, found = false;
-    for (const m of detail.innerText.matchAll(/Vào\s+(\d+)\s*\/\s*(\d+)/g)) {
-      left += +m[1]; max += +m[2]; found = true;
-    }
-    return found ? `${left}/${max}` : '';
+  // Có bảng mà không đọc được số (game đổi chữ / giao diện): báo app một lần mỗi lần tải trang, kèm một đoạn chữ để sửa
+  const unreadable = new Set();
+  const reportUnreadable = (what, text) => {
+    if (unreadable.has(what)) return;
+    unreadable.add(what);
+    post({ t: 'unreadable', what, sample: String(text || '').replace(/\s+/g, ' ').trim().slice(0, 300) });
+  };
+  // Đọc một thẻ của bảng Nhiệm vụ; không ra số thì báo
+  const readOrReport = (what, tab, read) => {
+    const v = read(tab);
+    if (!v) reportUnreadable(what, tabText(tab));
+    return v;
   };
 
   const refreshQuests = () => {
@@ -928,7 +954,7 @@
       if (isVisible(tab)) {
         mergeQuest(readQuestTab(tab));
         const sel = tab.querySelector('[data-qt].on');
-        if (sel && sel.dataset.qt === 'dg') quests.pb = readDungeons(tab) || quests.pb;
+        if (sel && sel.dataset.qt === 'dg') quests.pb = readDungeons(tab);
       }
       return;
     }
@@ -937,17 +963,23 @@
     try {
       const previous = tab.querySelector('[data-qt].on');
       const dtBtn = tab.querySelector('[data-qt="dt"]'), dgBtn = tab.querySelector('[data-qt="dg"]');
-      if (dtBtn) dtBtn.click();
-      mergeQuest(readQuestTab(tab));
-      if (dgBtn) { dgBtn.click(); quests.pb = readDungeons(tab) || quests.pb; }
+      if (dtBtn) {
+        dtBtn.click();
+        const dt = readQuestTab(tab);
+        if (!dt.dt) reportUnreadable('daTau', tabText(tab));
+        mergeQuest(dt);
+      }
+      // Phó bản không đọc được → coi là chưa biết ('', app bỏ qua bước Phó Bản), KHÔNG giữ số cũ
+      // (giữ số cũ "còn 1 lượt" từng làm acc kẹt ở Phó Bản hàng giờ)
+      if (dgBtn) { dgBtn.click(); quests.pb = readOrReport('dungeons', tab, readDungeons); }
       // Boss Hoàng Kim: dòng trạng thái ngay dưới tiêu đề, ví dụ "Đã hạ Boss đợt này. Đợt sau: 22:00".
       // Lịch theo giờ Việt Nam nên đọc chữ của game, không dựa vào đồng hồ máy. Sát Thủ: số lệnh bài đang có.
       const wbBtn = tab.querySelector('[data-qt="wb"]');
-      if (wbBtn) { wbBtn.click(); quests.hk = readBossHk(tab); quests.wb = readWeekBoss(tab); }
+      if (wbBtn) { wbBtn.click(); quests.hk = readBossHk(tab); quests.wb = readOrReport('weekBoss', tab, readWeekBoss); }
       const boatBtn = tab.querySelector('[data-qt="boat"]');
-      if (boatBtn) { boatBtn.click(); quests.boat = readBoat(tab); }
+      if (boatBtn) { boatBtn.click(); quests.boat = readOrReport('boat', tab, readBoat); }
       const stBtn = tab.querySelector('[data-qt="st"]');
-      if (stBtn) { stBtn.click(); const st = readAssassin(tab); if (st) quests.st = st; }
+      if (stBtn) { stBtn.click(); const st = readOrReport('assassin', tab, readAssassin); if (st) quests.st = st; }
       // Trả bảng về mục người chơi đang chọn lần trước
       const back = previous && previous.dataset.qt ? tab.querySelector(`[data-qt="${previous.dataset.qt}"]`) : dtBtn;
       if (back) back.click();
@@ -976,6 +1008,11 @@
   // Gửi app mọi dòng (app chỉ ghi mốc 100 tầng và dòng có đồ Hoàng Kim). Lịch sử cũ khi mở trang bỏ qua nhờ giờ đầu dòng.
   const TOWER_REWARD_RE = /Tháp\s*tầng\s*(\d+)\s*:\s*(.+)$/i;
   const seenReward = new Set();
+  // Nhớ dòng đã xử lý; đầy thì bỏ dòng cũ nhất (không xoá sạch – dòng còn trên màn hình sẽ bị báo lại)
+  const remember = (set, text, max = 400) => {
+    set.add(text);
+    if (set.size > max) set.delete(set.values().next().value);
+  };
   const EVENT_BOAT_RE = /Qua\s*sông|Thủy\s*Tặc|Phong\s*Lăng\s*Độ/i, EVENT_WB_RE = /Boss\s*tuần|Rương\s*tuần|Khiêu\s*chiến/i;
   // seedOnly: lần đọc đầu sau khi vào game chỉ ghi nhớ (lịch sử cũ), không báo
   const checkTowerReward = (text, seedOnly = false) => {
@@ -986,32 +1023,41 @@
     // Phần thưởng sau chuyến thuyền / lượt Boss tuần (app ghi vào nhật ký, coi là đã xong lượt đó)
     const event = !m && !golden ? (EVENT_BOAT_RE.test(text) ? 'boat' : EVENT_WB_RE.test(text) ? 'weekBoss' : '') : '';
     if ((!m && !golden && !event) || seenReward.has(text) || !isRecent(text)) return;
-    if (seenReward.size > 300) seenReward.clear();
-    seenReward.add(text);
+    remember(seenReward, text);
     if (seedOnly) return;
     if (event) post({ t: 'eventReward', kind: event, text: text.slice(0, 200) });
     else if (m) post({ t: 'towerReward', floor: +m[1], reward: m[2].trim().slice(0, 200) });
     else post({ t: 'towerReward', floor: 0, reward: text.slice(0, 200) }); // đồ Hoàng Kim nhặt được (không ghi tầng)
   };
 
-  // Kênh Hệ thống của khung chat: game chỉ vẽ dòng của kênh đang chọn → mỗi phút chuyển sang "Hệ thống", đọc,
-  // rồi chuyển về kênh cũ ngay trong cùng một lượt (không kịp vẽ ra màn hình). Game vẽ lại nút kênh khi chuyển
-  // → luôn tìm lại nút sau khi bấm. Đang gõ chat thì bỏ qua cho khỏi phiền.
-  const SYS_REFRESH_MS = 60000;
-  let sysAt = 0, sysSeeded = false;
-  const readSystemChannel = () => {
-    const sys = $('[data-lt="sys"]'), lines = $('#u20lines');
-    if (!sys || !lines || document.activeElement === $('#u20in')) return;
-    const prev = (document.querySelector('[data-lt].on') || {}).dataset?.lt || 'chat';
-    if (prev === 'sys') { for (const l of lines.children) checkTowerReward(l.textContent.trim().replace(/\s+/g, ' '), !sysSeeded); sysSeeded = true; return; }
-    sys.click();
-    try {
-      for (const l of [...$('#u20lines').children]) checkTowerReward(l.textContent.trim().replace(/\s+/g, ' '), !sysSeeded);
-      sysSeeded = true;
-    } finally {
-      const back = $(`[data-lt="${prev}"]`);
-      if (back) back.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    }
+  // Kênh Hệ thống của khung chat: game chỉ vẽ dòng của kênh đang chọn (#u20lines), và kênh này bị ngập dòng
+  // "Nhận được … điểm kinh nghiệm" (vài dòng mỗi giây, game chỉ giữ vài chục dòng) → đọc định kỳ sẽ trôi mất dòng thưởng.
+  // Vì vậy: giữ thẻ chat ở "Hệ thống" (app tắt khi bạn đang xem / dùng khung đó) và nghe từng dòng mới ngay khi game vẽ.
+  // Không bấm gì trong game nên chạy cả trong đợt Boss Hoàng Kim.
+  let keepSys = true, sysTabAt = 0;
+  const sysActive = () => {
+    const l = $('#u20lines');
+    return !!l && (l.dataset.lt === 'sys' || !!document.querySelector('[data-lt="sys"].on'));
+  };
+  const ensureSysTab = () => {
+    if (!keepSys || sysActive() || Date.now() - sysTabAt < 20000 || document.activeElement === $('#u20in')) return;
+    const tab = $('[data-lt="sys"]:not(#u20lines)');
+    if (!tab) return;
+    sysTabAt = Date.now();
+    tab.click();
+  };
+  // Dòng rác của kênh Hệ thống (kinh nghiệm, lượng, KNB khóa rơi, tự mua thuốc…) và dòng đáng ghi nhưng chưa biết mẫu
+  const SYS_NOISE_RE = /^(Nhận được [\d.,]+ điểm kinh nghiệm|Nhặt được [\d.,]+ lượng|💰 \+\d+ KNB khóa|Tự mua )/;
+  const SYS_NOTE_RE = /thưởng|Boss|Rương|Hoàng Kim|Mốc|Tinh Hồng|Khoáng Thạch|Thủy Tinh/i;
+  const seenSys = new Set();
+  let sysPrimed = false; // đã qua lượt vẽ đầu (lịch sử) của thẻ Hệ thống chưa
+  const handleSysLine = (text, seedOnly) => {
+    if (!text || SYS_NOISE_RE.test(text)) return;
+    checkTowerReward(text, seedOnly);
+    // Dòng có từ khoá phần thưởng mà chưa có mẫu riêng (ví dụ thưởng Boss Hoàng Kim): gửi app ghi lại để học mẫu
+    if (TOWER_REWARD_RE.test(text) || /Chúc mừng|📢|Hệ thống\s*:/.test(text) || !SYS_NOTE_RE.test(text) || seenSys.has(text)) return;
+    remember(seenSys, text);
+    if (!seedOnly) post({ t: 'sysNote', text: text.slice(0, 200), boss: inBossHk() });
   };
   const checkLoot = (node) => {
     if (!(node instanceof Element)) return;
@@ -1034,7 +1080,19 @@
     if (!root) { setTimeout(watchLoot, 50); return; }
     try {
       new MutationObserver((mutations) => {
-        for (const m of mutations) m.addedNodes.forEach((n) => { try { checkLoot(n); } catch (_) {} });
+        for (const m of mutations) {
+          m.addedNodes.forEach((n) => { try { checkLoot(n); } catch (_) {} });
+          // Kênh Hệ thống: game xoá rồi vẽ lại cả khung (40 dòng) mỗi lần có dòng mới → chỉ xử lý dòng chưa từng thấy.
+          // Lượt vẽ đầu tiên sau khi tải trang / vừa chuyển sang thẻ Hệ thống là lịch sử cũ: chỉ ghi nhớ, không báo.
+          const host = m.target instanceof Element ? m.target.closest('#u20lines') : null;
+          if (!host || !m.addedNodes.length) continue;
+          if (!sysActive()) { sysPrimed = false; continue; }
+          const seed = !sysPrimed;
+          sysPrimed = true;
+          m.addedNodes.forEach((n) => {
+            try { handleSysLine((n.textContent || '').trim().replace(/\s+/g, ' '), seed); } catch (_) {}
+          });
+        }
       }).observe(root, { childList: true, subtree: true });
     } catch (err) {
       post({ t: 'log', msg: 'watch loot failed: ' + err.message });
@@ -1058,8 +1116,50 @@
     go.click();
   };
 
+  // "Tài khoản đang ở nơi khác": game đẩy ra, hiện 2 nút "Chơi ở đây" / "Đăng xuất". Trang chỉ báo (status.away),
+  // app quyết định lúc nào bấm "Chơi ở đây" (chờ một lúc, chống giành phiên qua lại). Không bao giờ bấm "Đăng xuất".
+  const PLAY_HERE_RE = /Chơi\s*ở\s*đây/i;
+  const playHereButton = () => [...document.querySelectorAll('button, a, [role="button"]')]
+    .find((b) => isVisible(b) && !b.disabled && PLAY_HERE_RE.test(b.textContent || '')) || null;
+
+  // Hộp thông báo lạ của game: chỉ ghi chữ và các nút vào log (mỗi nội dung một lần) để biết cách xử lý về sau.
+  // Bỏ qua bảng/cửa sổ thường dùng (#panel, #modal) và hộp đã biết (#maint, #tabLockBox).
+  const seenDialogs = new Set();
+  let dialogLogs = 0; // tối đa 30 dòng mỗi lần tải trang
+  // Hộp nổi: position fixed (hoặc nằm trong một lớp fixed), không phải khung chat / thanh cố định của game
+  const floating = (el) => el.id === 'askBox' || el.getAttribute('role') === 'dialog'
+    || [el, el.parentElement].some((x) => x && getComputedStyle(x).position === 'fixed');
+  const DIALOG_SEL = '#askBox, [role="dialog"], [id*="box" i], [id*="dlg" i], [id*="popup" i], [id*="overlay" i], [class*="dialog" i], [class*="popup" i]';
+  const logDialogs = () => {
+    if (dialogLogs >= 30) return;
+    const found = [...document.querySelectorAll(DIALOG_SEL)].filter(floating);
+    const ph = playHereButton();
+    if (ph) found.push(ph.closest('div:not(body)') || ph.parentElement);
+    for (const el of found) {
+      if (!el || ['panel', 'modal', 'maint', 'tabLockBox', 'ptBox'].includes(el.id) || el.closest('#panel, #modal')) continue;
+      if (!isVisible(el) || !el.querySelector('button, a, [role="button"]')) continue;
+      const full = (el.innerText || '').replace(/\s+/g, ' ').trim();
+      if (full.length > 600) continue; // khối lớn (cả màn hình game), không phải hộp thông báo
+      const text = full.slice(0, 200);
+      const key = (el.id || el.className || el.tagName) + '|' + text;
+      if (!text || seenDialogs.has(key)) continue;
+      seenDialogs.add(key);
+      dialogLogs++;
+      const buttons = [...el.querySelectorAll('button, a, [role="button"]')].filter(isVisible)
+        .map((b) => (b.textContent || '').trim().slice(0, 30) + (b.id ? '#' + b.id : '')).join(' | ');
+      post({ t: 'log', msg: `dialog ${el.id ? '#' + el.id : el.tagName + '.' + String(el.className).slice(0, 40)}: "${text}" buttons: ${buttons}` });
+    }
+  };
+
+  // Chỉ để kiểm tra sau khi cập nhật (đọc qua DevTools): trang đang hiểu số liệu thế nào. Không thay đổi gì.
+  window.__vlDebug = () => ({
+    version: 2, quests: { ...quests }, bag, doPho, knb: knbNow(), maintenance: inMaintenance(), keepSys,
+    sysActive: sysActive(), away: !!playHereButton(), flowBusy, unreadable: [...unreadable],
+  });
+
   const report = () => {
     try { handleTabLock(); } catch (err) { post({ t: 'log', msg: 'tab lock failed: ' + err.message }); }
+    try { logDialogs(); } catch (err) { post({ t: 'log', msg: 'dialog scan failed: ' + err.message }); }
     const screen = screenOf();
     if (screen !== 'game') gameSince = 0;
     else if (!gameSince) gameSince = Date.now();
@@ -1072,9 +1172,8 @@
       shopAt = Date.now();
       try { refreshShop(); } catch (err) { post({ t: 'log', msg: 'read shop failed: ' + err.message }); }
     }
-    if (screen === 'game' && !flowBusy && !inBossHk() && Date.now() - gameSince > 30000 && Date.now() - sysAt > SYS_REFRESH_MS) {
-      sysAt = Date.now();
-      try { readSystemChannel(); } catch (err) { post({ t: 'log', msg: 'read system channel failed: ' + err.message }); }
+    if (screen === 'game' && !flowBusy && !anyWindowOpen() && Date.now() - gameSince > 10000) {
+      try { ensureSysTab(); } catch (err) { post({ t: 'log', msg: 'system tab failed: ' + err.message }); }
     }
     if (screen === 'game' && !flowBusy && !inBossHk() && Date.now() - gameSince > 25000 && Date.now() - bagAt > BAG_REFRESH_MS) {
       bagAt = Date.now();
@@ -1101,6 +1200,7 @@
       boat: screen === 'game' ? quests.boat || '' : '',     // chuyến thuyền còn hôm nay "2/3"
       wb: screen === 'game' ? quests.wb || '' : '',         // lượt Boss tuần còn "3/3" (+ " claim" khi nhận được rương tuần)
       bt: inMaintenance() ? 1 : 0,                          // máy chủ game đang bảo trì
+      away: playHereButton() ? 1 : 0,                       // "Tài khoản đang ở nơi khác" (nút Chơi ở đây đang hiện)
       bag: screen === 'game' ? bag : '',                     // hòm đồ "18/120"
       // Đồ phổ đang giữ, mỗi dòng một món; chưa quét xong lần đầu thì không gửi
       dp: screen === 'game' && doPho ? doPho.join('\n') : undefined,

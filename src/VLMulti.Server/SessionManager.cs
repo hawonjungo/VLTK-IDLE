@@ -57,8 +57,10 @@ public sealed class SessionManager : IAsyncDisposable
         _initScript = ServerScripts.Build(_options.MaxFps);
         Log.Write($"server started: {_options.ViewportWidth}x{_options.ViewportHeight}, fps {_options.MaxFps}");
 
-        foreach (var acc in _settings.Accounts.Where(a => a.Enabled))
-            await StartSessionAsync(acc, TimeSpan.FromSeconds(Sessions.Count * 6));
+        if (_options.Paused) Log.Write("server paused: game sessions not started");
+        else
+            foreach (var acc in _settings.Accounts.Where(a => a.Enabled))
+                await StartSessionAsync(acc, TimeSpan.FromSeconds(Sessions.Count * 6));
 
         _loopCts = new CancellationTokenSource();
         _loop = Task.Run(() => LoopAsync(_loopCts.Token));
@@ -236,6 +238,7 @@ public sealed class SessionManager : IAsyncDisposable
             {
                 accounts = rows,
                 autoRecover = _settings.AutoRecover,
+                paused = _options.Paused,
                 alerts = _alerts.Items.Take(50).Select(a => new { at = a.At, account = a.AccountName, message = a.Message }),
                 live = liveId,
                 settings = new
@@ -328,6 +331,7 @@ public sealed class SessionManager : IAsyncDisposable
         {
             if (cts.IsCancellationRequested) return;
             lock (_gate) _liveId = id;
+            lock (session.Gate) session.Controller.Watched = true; // đang xem: không tự tải lại acc này
 
             async Task SendAsync(ArraySegment<byte> data, WebSocketMessageType type)
             {
@@ -376,6 +380,7 @@ public sealed class SessionManager : IAsyncDisposable
                 if (_liveId == id) _liveId = null;
                 if (_liveCts == cts) _liveCts = null;
             }
+            lock (session.Gate) session.Controller.Watched = false;
             Log.Write($"[{id}] live view ended: {endReason} (kết nối: {ws.State})");
             try { await session.StopLiveAsync(); } catch (InvalidOperationException) { }
             if (ws.State == WebSocketState.Open)
@@ -445,12 +450,50 @@ public sealed class SessionManager : IAsyncDisposable
         SaveSettings();
     }
 
+    public bool Paused => _options.Paused;
+
+    // Tạm dừng: đóng game của mọi acc (lưu phiên đăng nhập trước khi đóng) để nhường acc cho máy khác.
+    // Chạy lại: mở lại các acc đang bật, đăng nhập lệch nhau 6 giây như lúc khởi động.
+    public async Task SetPausedAsync(bool paused)
+    {
+        await _lifecycle.WaitAsync();
+        try
+        {
+            if (paused == _options.Paused) return;
+            _options.Paused = paused;
+            _options.Save();
+            if (paused)
+            {
+                List<GameSession> closing;
+                lock (_gate)
+                {
+                    closing = _sessions.Values.ToList();
+                    _sessions.Clear();
+                    _liveCts?.Cancel();
+                }
+                foreach (var s in closing) await s.DisposeAsync();
+                Log.Write("server paused: all game sessions closed");
+            }
+            else
+            {
+                foreach (var acc in _settings.Accounts.Where(a => a.Enabled))
+                    await StartSessionAsync(acc, TimeSpan.FromSeconds(Sessions.Count * 6));
+                Log.Write("server resumed");
+            }
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
     public async Task<string?> SetEnabledAsync(string id, bool enabled)
     {
         if (AccountOf(id) is not { } acc) return "Không có acc này";
         await _lifecycle.WaitAsync();
         try
         {
+            if (_options.Paused) return "Server đang tạm dừng – bấm Chạy lại trước";
             if (enabled)
             {
                 if (Find(id) is not null) return null;

@@ -664,6 +664,112 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Account_used_elsewhere_clicks_play_here_after_delay_and_backs_off_on_repeat()
+    {
+        var (ctl, page, _) = Make();
+        var problems = new List<string>();
+        ctl.Problem += (key, _) => problems.Add(key);
+        string St(int away) => JsonSerializer.Serialize(new
+        {
+            t = "status", screen = "game", lv = "139", gold = "1 vạn", knb = "1 🔒1", mode = "farm", modeText = "farm", zone = "Hoa Sơn", away,
+        });
+        int PlayHere() => page.Commands.Count(c => c == "playHere");
+
+        var t = Run(ctl, T0, 15, St(0));
+        t = Run(ctl, t, 90, St(1));                 // bị đẩy ra: chưa bấm ngay (chờ 2 phút)
+        Assert.True(ctl.Away);
+        Assert.Equal(0, PlayHere());
+        Assert.Equal(Health.Warn, ctl.HealthAt(t).Level);
+        t = Run(ctl, t, 60, St(1));
+        Assert.Equal(1, PlayHere());
+        t = Run(ctl, t, 60, St(0));                 // vào lại được
+
+        // Vừa vào lại đã bị đẩy ra lần nữa → có người chơi thật ở máy khác: ngừng hẳn, báo
+        t = Run(ctl, t, 60 * 60, St(1));
+        Assert.Contains("elsewhere", problems);
+        Assert.Equal(1, PlayHere());
+        // Bạn bấm Tải lại acc này → app vào lại ngay
+        ctl.ManualReload();
+        Run(ctl, t, 6, St(1));
+        Assert.Equal(2, PlayHere());
+    }
+
+    [Fact]
+    public void Stuck_account_is_reloaded_at_most_twice_an_hour_then_reported()
+    {
+        var (ctl, page, _) = Make();
+        var problems = new List<string>();
+        ctl.Problem += (key, _) => problems.Add(key);
+        var still = Status("game", mode: "farm", zone: "Hoa Sơn");
+        var t = Run(ctl, T0, 15, still);
+        t = Run(ctl, t, 9 * 60, still);
+        Assert.Equal(0, page.Reloads);
+        t = Run(ctl, t, 2 * 60, still);             // quá 10 phút không tiến triển
+        Assert.Equal(1, page.Reloads);
+        ctl.Watched = true;                          // đang xem Live → không tải lại
+        t = Run(ctl, t, 15 * 60, still);
+        Assert.Equal(1, page.Reloads);
+        ctl.Watched = false;
+        t = Run(ctl, t, 25 * 60, still);
+        Assert.Equal(2, page.Reloads);               // tối đa 2 lần / giờ
+        Assert.Contains("stuck", problems);
+    }
+
+    [Fact]
+    public void Boss_reward_lines_are_logged_and_live_view_releases_system_chat()
+    {
+        var (ctl, page, _) = Make();
+        ctl.OnPageMessage("""{"t":"sysNote","text":"Phần thưởng Boss Hoàng Kim: 1 Tử Thủy Tinh","boss":true}""", T0);
+        ctl.OnPageMessage("""{"t":"sysNote","text":"Nhặt được Lục Thủy Tinh","boss":false}""", T0);
+        Assert.Contains(ctl.Activity.Items, e => e.Text == "👑 Phần thưởng Boss Hoàng Kim: 1 Tử Thủy Tinh");
+        Assert.DoesNotContain(ctl.Activity.Items, e => e.Text.Contains("Lục Thủy Tinh"));
+
+        ctl.Watched = true;   // đang xem Live → trả quyền chọn kênh chat cho bạn
+        ctl.Watched = false;
+        var keep = page.Sent.Where(m => m.GetProperty("t").GetString() == "keepSys").Select(m => m.GetProperty("on").GetBoolean()).ToList();
+        Assert.Equal(new[] { false, true }, keep);
+    }
+
+    [Fact]
+    public void Dungeon_step_with_frozen_count_is_skipped_after_30_minutes()
+    {
+        var (ctl, page, _) = Make();
+        var problems = new List<string>();
+        ctl.Problem += (key, _) => problems.Add(key);
+        // Game đã đi hết phó bản nhưng app đọc sai "còn 1 lượt" mãi
+        var dg = Status("game", mode: "dg", zone: "Tiến Cúc động", dt: "200/200", pb: "1/10", ldtHave: "0", ldtUsed: "160/160", ldtBuy: "100/100");
+        var t = Run(ctl, T0, 15, dg);
+        ctl.SetAutoMode(true, t);
+        t = Run(ctl, t, 25 * 60, dg);
+        Assert.Empty(ModeCommands(page));          // còn trong thời gian chờ
+        t = RunUntilMode(ctl, page, t, dg, "tower", 10 * 60);
+        Assert.Contains("stuck-dg", problems);
+        t = Run(ctl, t, 6, Status("game", mode: "tower", zone: "Thông Thiên Tháp · tầng 900", dt: "200/200", pb: "1/10",
+            ldtHave: "0", ldtUsed: "160/160", ldtBuy: "100/100"));
+        Assert.Equal("rest", ctl.AutoChain(t).Single(x => x.Mode == "dg").State); // bỏ qua tới hết ngày
+    }
+
+    [Fact]
+    public void Unreadable_numbers_are_reported_once_a_day_and_appear_in_daily_summary()
+    {
+        var (ctl, _, _) = Make();
+        var problems = new List<string>();
+        ctl.Problem += (key, _) => problems.Add(key);
+        ctl.OnPageMessage("""{"t":"unreadable","what":"knb","sample":"17.2x 🔒1113"}""", T0);
+        ctl.OnPageMessage("""{"t":"unreadable","what":"knb","sample":"17.2x 🔒1113"}""", T0.AddHours(1));
+        Assert.Equal(new[] { "unreadable-knb" }, problems);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("Không đọc được số KNB"));
+
+        Run(ctl, T0.AddHours(1), 15, Status("game", mode: "tower", zone: "Thông Thiên Tháp · tầng 900", dt: "200/200", pb: "0/12",
+            ldtHave: "0", ldtUsed: "160/160", ldtBuy: "0/100"));
+        var summary = ctl.DailySummary(DateOnly.FromDateTime(T0.ToUniversalTime().AddHours(7)));
+        Assert.Contains("Dã Tẩu 200/200 ✅", summary);
+        Assert.Contains("Lệnh bài mua 0/100 ❌", summary);
+        Assert.Contains("Phó bản còn 0 ✅", summary);
+        Assert.Contains("1 lỗi: Không đọc được số KNB", summary);
+    }
+
+    [Fact]
     public void Boat_waits_when_boss_hk_is_about_to_start()
     {
         var (ctl, page, _) = Make();

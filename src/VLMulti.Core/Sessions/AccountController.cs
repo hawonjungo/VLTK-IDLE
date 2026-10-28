@@ -220,6 +220,7 @@ public sealed class AccountController
         if (Screen == "login" && Account.AutoLogin && CredentialProvider?.Invoke(Account.Id) is null)
             return (Health.Bad, "Bị đăng xuất, chưa lưu mật khẩu game (🔑)");
         if (_pageLoaded && _lastStatusAt != default && now - _lastStatusAt > HealthNoStatus) return (Health.Bad, "Trang game không phản hồi");
+        if (Away) return (Health.Warn, "📱 Tài khoản đang mở ở nơi khác");
         if (Screen != "game")
             return StatusLevel == StatusLevel.Error ? (Health.Bad, StatusText)
                 : now - _screenSince > HealthOutOfGame
@@ -248,6 +249,7 @@ public sealed class AccountController
     public void RequestMode(string code, DateTime now)
     {
         _userModeAt = now;
+        ResumeAway();
         Account.StayInTower = code == ModeRules.Tower;
         if (code == ModeRules.Tower) { _fastDeaths.Clear(); _modeBlockedUntil.Remove(ModeRules.Tower); }
         _modeBlockedUntil.Remove(code);
@@ -375,6 +377,7 @@ public sealed class AccountController
     // Bạn tự bấm tải lại → cho bộ giám sát thử tải lại từ đầu
     public void ManualReload()
     {
+        ResumeAway();
         _reloadLimiter.Reset();
         _page.Reload();
     }
@@ -482,6 +485,12 @@ public sealed class AccountController
                 case "problem":
                     Raise(Str(m, "key"), Str(m, "msg"));
                     break;
+                case "unreadable":
+                    OnUnreadable(Str(m, "what"), Str(m, "sample"), now);
+                    break;
+                case "sysNote":
+                    OnSysNote(Str(m, "text"), m.TryGetProperty("boss", out var bossFlag) && bossFlag.ValueKind == JsonValueKind.True, now);
+                    break;
                 case "eventReward":
                     OnEventReward(Str(m, "kind"), Str(m, "text"), now);
                     break;
@@ -537,6 +546,7 @@ public sealed class AccountController
         }
 
         changed |= SetScreen(screen, now);
+        changed |= ApplyAway(s.TryGetProperty("away", out var away) && away.ValueKind == JsonValueKind.Number && away.GetInt32() == 1, now);
 
         // Vài giây đầu sau khi vào game, ô cấp/tiền còn hiện giá trị tạm ("1", "0") trước khi
         // game tải xong dữ liệu → bỏ qua, nếu không sẽ lấy nhầm làm mốc "cấp đầu phiên"
@@ -712,6 +722,8 @@ public sealed class AccountController
         {
             Stats.ResetActivity(now);
             Note(now, "▶ Vào game");
+            // Trang vừa tải lại thì quên cài đặt (mặc định giữ thẻ Hệ thống) → gửi lại
+            if (!_keepSystemChat) Post(new { t = "keepSys", on = false });
         }
         InfoChanged?.Invoke();
         return true;
@@ -763,8 +775,10 @@ public sealed class AccountController
     {
         _lastNow = now;
         // Bảo trì: chỉ giữ phần tự hồi phục (trang treo / bị đẩy ra), không làm gì trong game
-        if (Maintenance && Screen == "game") { SuperviseRecovery(now); return; }
-        if (Screen == "game" && Stats.IdleFor(now) > IdleAlertAfter)
+        SuperviseDailySummary(now);
+        if (Maintenance && Screen == "game") { _stepWatch = null; SuperviseRecovery(now); return; }
+        SuperviseAway(now); // cả trong đợt Boss Hoàng Kim
+        if (Screen == "game" && !Away && Stats.IdleFor(now) > IdleAlertAfter)
             Raise("idle", $"Đứng yên hơn {IdleAlertAfter.TotalMinutes:0} phút (tiền, cấp và tầng tháp không đổi)");
 
         // Đợt Boss Hoàng Kim: game tự đưa nhân vật đi đánh rồi về lại tháp → app đứng yên, không chen vào
@@ -776,7 +790,12 @@ public sealed class AccountController
                                : "👑 Hết đợt Boss Hoàng Kim: app chạy lại bình thường");
             if (!bossTime) _towerReturnAt = now; // game chưa đưa về tháp thì vòng tự đưa về
         }
-        if (bossTime) { SuperviseRecovery(now); return; }
+        if (bossTime)
+        {
+            _stepWatch = null; // game tự đưa đi đánh boss: thời gian này không tính là kẹt
+            SuperviseRecovery(now);
+            return;
+        }
 
         SuperviseKite(now);
         if (_ldtBuyingSince is { } since && now - since > LdtBuyTimeout)
@@ -790,7 +809,125 @@ public sealed class AccountController
         SuperviseTowerReturn(now);
         SuperviseAssassin(now);
         SuperviseEvents(now);
+        SuperviseStuck(now);
         SuperviseRecovery(now);
+    }
+
+    // ---------- "Tài khoản đang ở nơi khác" ----------
+    // Game đẩy ra với 2 nút "Chơi ở đây" / "Đăng xuất". Chờ AwayClickDelay (người dùng ở máy khác kịp chơi) rồi bấm
+    // "Chơi ở đây". Vừa bấm mà trong AwayRepeatWindow lại bị đẩy ra → có người đang dùng thật: ngừng AwayPause và báo.
+
+    private static readonly TimeSpan AwayClickDelay = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan AwayRetryGap = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan AwayRepeatWindow = TimeSpan.FromMinutes(10);
+    private DateTime? _awaySince;
+    private DateTime _lastPlayHereAt, _awayPausedUntil;
+
+    public bool Away { get; private set; }
+
+    private bool ApplyAway(bool away, DateTime now)
+    {
+        if (away == Away) return false;
+        Away = away;
+        if (!away)
+        {
+            _awaySince = null;
+            Stats.ResetActivity(now); // thời gian nằm ở hộp "nơi khác" không tính là đứng yên
+            Log.Write($"[{Account.Id}] away dialog gone");
+            return true;
+        }
+        _awaySince = now;
+        if (_lastPlayHereAt != default && now - _lastPlayHereAt < AwayRepeatWindow)
+        {
+            // Có người đang chơi thật ở máy khác (thường là bạn, bằng bản PC): thôi hẳn, không giành lại nữa
+            _awayPausedUntil = DateTime.MaxValue;
+            Raise("elsewhere", "Acc đang được chơi ở nơi khác (vừa bấm \"Chơi ở đây\" lại bị đẩy ra) – app ngừng tự vào lại. " +
+                               "Muốn server chơi tiếp: bấm Tải lại acc này hoặc bấm một chế độ");
+        }
+        else
+        {
+            Note(now, $"📱 Tài khoản đang mở ở nơi khác – {AwayClickDelay.TotalMinutes:0} phút nữa app bấm \"Chơi ở đây\"", StatusLevel.Warn);
+        }
+        SetStatus("📱 Tài khoản đang mở ở nơi khác", StatusLevel.Warn);
+        return true;
+    }
+
+    // Bạn bấm Tải lại / chọn chế độ cho acc này: cho app tự vào lại như bình thường (bấm "Chơi ở đây" ngay nếu đang bị đẩy ra)
+    private void ResumeAway()
+    {
+        _awayPausedUntil = default;
+        _lastPlayHereAt = default;
+        if (Away) _awaySince = DateTime.MinValue;
+    }
+
+    private void SuperviseAway(DateTime now)
+    {
+        if (!Away || !AutoRecover || _awaySince is not { } since) return;
+        if (now < _awayPausedUntil || now - since < AwayClickDelay || now - _lastPlayHereAt < AwayRetryGap) return;
+        _lastPlayHereAt = now;
+        Note(now, "📱 Bấm \"Chơi ở đây\" để vào lại", StatusLevel.Ok);
+        RunCommand("playHere");
+    }
+
+    // ---------- Đứng yên quá lâu: tải lại trang ----------
+    // Lưới an toàn cho mọi trường hợp kẹt (mất kết nối, hộp thoại lạ, trang đơ). Không tải lại trong lúc game tự lo
+    // (Boss HK, bảo trì, đi thuyền / Boss tuần), khi đang có hộp "nơi khác", hoặc khi bạn đang xem Live acc đó.
+    // Tối đa 2 lần / giờ; vẫn đứng yên thì chỉ báo.
+
+    public static readonly TimeSpan StuckReloadAfter = TimeSpan.FromMinutes(10);
+    private readonly AttemptLimiter _stuckReloadLimiter = new(2, TimeSpan.FromHours(1));
+    private bool _stuckNoted;
+
+    // Bản Server: đang có người xem Live acc này (khi đó để bạn tự chọn kênh chat)
+    private bool _watched;
+    public bool Watched
+    {
+        get => _watched;
+        set { _watched = value; KeepSystemChat = !value; }
+    }
+
+    // Giữ thẻ chat ở "Hệ thống" để nghe dòng phần thưởng (tháp, Boss Hoàng Kim). Tắt khi bạn đang xem / dùng khung đó:
+    // Server khi xem Live, Desktop ở khung lớn.
+    private bool _keepSystemChat = true;
+    public bool KeepSystemChat
+    {
+        get => _keepSystemChat;
+        set
+        {
+            if (value == _keepSystemChat) return;
+            _keepSystemChat = value;
+            Post(new { t = "keepSys", on = value });
+        }
+    }
+
+    // Dòng kênh Hệ thống có từ khoá phần thưởng mà trang chưa có mẫu riêng. Trong đợt Boss Hoàng Kim: thưởng boss
+    // → ghi vào nhật ký. Mọi dòng đều ghi vào file log để học mẫu chính xác.
+    private void OnSysNote(string text, bool bossTime, DateTime now)
+    {
+        Log.Write($"[{Account.Id}] sys: {text}");
+        if (bossTime && BossRewardPattern.IsMatch(text)) Note(now, $"👑 {text}", StatusLevel.Ok);
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex BossRewardPattern =
+        new(@"thưởng|Boss|Rương|Hoàng Kim", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    private void SuperviseStuck(DateTime now)
+    {
+        if (!AutoRecover || Screen != "game" || Away || Maintenance || Watched || EventRunning(now)) return;
+        var idle = Stats.IdleFor(now);
+        if (idle < StuckReloadAfter) { _stuckNoted = false; return; }
+        if (_stuckReloadLimiter.TryAcquire(now))
+        {
+            Note(now, $"🔄 Đứng yên {idle.TotalMinutes:0} phút – tự tải lại game", StatusLevel.Warn);
+            Log.Write($"[{Account.Id}] stuck {idle.TotalMinutes:0} min → reload");
+            Stats.ResetActivity(now); // tính lại từ lúc tải lại
+            _page.Reload();
+        }
+        else if (!_stuckNoted)
+        {
+            _stuckNoted = true;
+            Raise("stuck", $"Đứng yên {idle.TotalMinutes:0} phút, đã tự tải lại 2 lần trong 1 giờ mà chưa chạy lại – hãy xem acc này");
+        }
     }
 
     // Tự hồi phục: tải lại khi crash/treo, tự đăng nhập, tự vào game (chạy cả trong đợt Boss Hoàng Kim)
@@ -1005,6 +1142,8 @@ public sealed class AccountController
         // (nút Nhận rương tuần chỉ sáng khi không ở tháp)
         if (EventRunning(now) || _eventCheck is not null) return;
 
+        WatchStepProgress(now);
+
         // Hôm nay đã thử mua lệnh bài rồi: không tính "còn mua được" nữa, tránh quay lại Nhiệm Vụ khi đã hết tiền
         var quest = _ldtTriedDay == now.Date ? QuestCounts with { LdtBuy = "" } : QuestCounts;
         if (ModeRules.Decide(quest, PhoBan, m => IsModeBlocked(m, now) || EventTooCloseToBossHk(m, now), s,
@@ -1027,6 +1166,43 @@ public sealed class AccountController
         SetStatus($"🔁 → {ModeRules.Label(want.Mode)} ({want.Reason})", StatusLevel.Ok);
         if (gameMode == ModeRules.Quest) StartQuest(now, byYou: false);
         else RunCommand("mode", gameMode);
+    }
+
+    // ---------- Lưới an toàn: một bước kéo dài mà số lượt không đổi → bỏ qua bước đó ----------
+    // Ví dụ game đổi chữ trên bảng (đi hết phó bản thì ghi "Hết lượt" chứ không phải "Vào 0/2") khiến app đọc sai
+    // "còn lượt" mãi, giữ acc ở Phó Bản hàng giờ trong khi game đã cho nhân vật đứng luyện công.
+    // Phó Bản: mỗi phó bản vài phút → 30 phút không giảm lượt = kẹt, bỏ tới hết ngày. Nhiệm Vụ: bỏ 60 phút.
+
+    public static readonly TimeSpan StepStuckAfter = TimeSpan.FromMinutes(30);
+    private (string Mode, string Counter, DateTime Since)? _stepWatch;
+
+    private void WatchStepProgress(DateTime now)
+    {
+        if (!Account.AutoMode || ModeCode is not (ModeRules.Dungeon or ModeRules.Quest))
+        {
+            _stepWatch = null;
+            return;
+        }
+        var counter = ModeCode == ModeRules.Dungeon ? PhoBan : DaTau;
+        if (_stepWatch is not { } w || w.Mode != ModeCode || w.Counter != counter)
+        {
+            _stepWatch = (ModeCode, counter, now);
+            return;
+        }
+        if (now - w.Since < StepStuckAfter || IsModeBlocked(w.Mode, now)) return;
+
+        _stepWatch = null;
+        var until = w.Mode == ModeRules.Dungeon ? NextVnMidnight(now) : now + ModeBlockDefault;
+        _modeBlockedUntil[w.Mode] = until;
+        Raise($"stuck-{w.Mode}", $"{ModeRules.Label(w.Mode)}: {StepStuckAfter.TotalMinutes:0} phút số lượt không đổi ({(counter.Length > 0 ? counter : "?")}) – " +
+                                 $"bỏ qua tới {until:HH:mm}, vòng chạy tiếp");
+    }
+
+    // 0 giờ (giờ Việt Nam) hôm sau, theo giờ máy chạy app
+    private static DateTime NextVnMidnight(DateTime now)
+    {
+        var until = DateTime.SpecifyKind(now.ToUniversalTime().AddHours(7).Date.AddDays(1).AddHours(-7), DateTimeKind.Utc).ToLocalTime();
+        return until > now ? until : now + ModeBlockDefault;
     }
 
     // ---------- Bước Sát Thủ: ở Luyện Công, gọi từng con tới khi hết Lệnh Bài Sát Thủ ----------
@@ -1266,10 +1442,7 @@ public sealed class AccountController
         _eventFailures = 0;
         _eventPhase = null;
         // Thuyền: tới 0 giờ (giờ Việt Nam) hôm sau; Boss tuần: 60 phút
-        var until = mode == ModeRules.Boat
-            ? DateTime.SpecifyKind(now.ToUniversalTime().AddHours(7).Date.AddDays(1).AddHours(-7), DateTimeKind.Utc).ToLocalTime()
-            : now + ModeBlockDefault;
-        if (until <= now) until = now + ModeBlockDefault;
+        var until = mode == ModeRules.Boat ? NextVnMidnight(now) : now + ModeBlockDefault;
         _modeBlockedUntil[mode] = until;
         Note(now, $"{EventIcon(mode)} {label} hỏng {EventMaxFailures} lần liền ({why}) – bỏ qua tới {until:HH:mm}", StatusLevel.Warn);
     }
@@ -1411,8 +1584,72 @@ public sealed class AccountController
     // Báo vấn đề cho trung tâm cảnh báo và ghi vào nhật ký hoạt động
     private void Raise(string key, string message)
     {
-        Note(_lastNow == default ? DateTime.Now : _lastNow, "⚠ " + message, StatusLevel.Warn);
+        var now = _lastNow == default ? DateTime.Now : _lastNow;
+        Note(now, "⚠ " + message, StatusLevel.Warn);
+        // Ghi vào báo cáo cuối ngày (bỏ qua cảnh báo thường gặp, không phải việc hỏng)
+        if (key is not ("idle" or "bag" or "kicked" or "login-net"))
+        {
+            if (_problemsDay != VnDate(now)) { _problemsToday.Clear(); _problemsDay = VnDate(now); }
+            _problemsToday.Add(Shorten(message, 70) ?? message);
+        }
         Problem?.Invoke(key, message);
+    }
+
+    // ---------- Không đọc được số liệu từ game ----------
+    // Trang thấy bảng nhưng chữ không đúng mẫu (game vừa đổi giao diện…). Báo một lần mỗi ngày cho mỗi loại,
+    // ghi đoạn chữ vào log để sửa. Bước liên quan tự bỏ qua (số liệu "chưa biết" thì luật không chọn bước đó).
+
+    private static readonly Dictionary<string, string> UnreadableLabels = new()
+    {
+        ["knb"] = "số KNB", ["daTau"] = "số Dã Tẩu", ["dungeons"] = "số lượt Phó bản", ["boat"] = "số chuyến thuyền",
+        ["weekBoss"] = "số lượt Boss tuần", ["assassin"] = "số Lệnh Bài Sát Thủ", ["shop"] = "Kỳ Trân Các (lệnh bài Dã Tẩu)",
+    };
+    private readonly Dictionary<string, DateOnly> _unreadableNoted = new();
+
+    private void OnUnreadable(string what, string sample, DateTime now)
+    {
+        Log.Write($"[{Account.Id}] unreadable {what}: {sample}");
+        var day = VnDate(now);
+        if (_unreadableNoted.TryGetValue(what, out var d) && d == day) return;
+        _unreadableNoted[what] = day;
+        var label = UnreadableLabels.GetValueOrDefault(what, what);
+        Raise($"unreadable-{what}", $"Không đọc được {label} từ game – có thể game vừa đổi giao diện; bước liên quan tạm bỏ qua");
+    }
+
+    // ---------- Báo cáo cuối ngày (23:55 giờ Việt Nam, trước khi game đặt lại lượt) ----------
+
+    private static readonly TimeSpan SummaryAt = new(23, 55, 0);
+    private readonly List<string> _problemsToday = new();
+    private DateOnly _problemsDay, _summaryDay, _floorDay;
+    private int? _dayStartFloor;
+
+    private static DateOnly VnDate(DateTime now) => DateOnly.FromDateTime(now.ToUniversalTime().AddHours(7));
+
+    private void SuperviseDailySummary(DateTime now)
+    {
+        var vn = now.ToUniversalTime().AddHours(7);
+        var day = DateOnly.FromDateTime(vn);
+        if (TowerFloor is { } f && _floorDay != day) { _floorDay = day; _dayStartFloor = f; }
+        if (Screen != "game" || vn.TimeOfDay < SummaryAt || _summaryDay == day) return;
+        _summaryDay = day;
+        Note(now, DailySummary(day), _problemsDay == day && _problemsToday.Count > 0 ? StatusLevel.Warn : StatusLevel.Ok);
+    }
+
+    // "📋 Tổng kết 28/10: Dã Tẩu 200/200 ✅ · Lệnh bài mua 100/100 ✅ · Phó bản 0/12 ✅ · Thuyền 0/3 ✅ · … · Tháp +85 tầng · 1 lỗi: …"
+    public string DailySummary(DateOnly day)
+    {
+        string Mark(bool ok) => ok ? "✅" : "❌";
+        var parts = new List<string>();
+        if (ModeRules.TryFraction(DaTau, out var dtDone, out var dtMax)) parts.Add($"Dã Tẩu {dtDone}/{dtMax} {Mark(dtDone >= dtMax)}");
+        if (ModeRules.TryFraction(LdtBuy, out var bought, out var buyMax)) parts.Add($"Lệnh bài mua {bought}/{buyMax} {Mark(bought >= buyMax)}");
+        if (ModeRules.TryFraction(PhoBan, out var dgLeft, out _)) parts.Add($"Phó bản còn {dgLeft} {Mark(dgLeft == 0)}");
+        if (Boat.Length > 0) parts.Add($"Thuyền còn {BoatLeft} {Mark(BoatLeft == 0)}");
+        if (WeekBoss.Length > 0) parts.Add($"Boss tuần còn {WeekBossLeft}");
+        if (Assassin.Length > 0) parts.Add($"LB Sát Thủ còn {AssassinTokens}");
+        if (TowerFloor is { } floor && _dayStartFloor is { } start && floor > start) parts.Add($"Tháp +{floor - start} tầng (tới {floor})");
+        var problems = _problemsDay == day ? _problemsToday.Distinct().ToList() : new List<string>();
+        if (problems.Count > 0) parts.Add($"{problems.Count} lỗi: {string.Join("; ", problems.Take(3))}");
+        return $"📋 Tổng kết {day.ToString("dd'/'MM")}: " + (parts.Count > 0 ? string.Join(" · ", parts) : "chưa đọc được số liệu");
     }
 
     private void SetStatus(string text, StatusLevel level)

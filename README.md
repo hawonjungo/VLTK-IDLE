@@ -14,7 +14,7 @@
   <img alt="Windows" src="https://img.shields.io/badge/Desktop-Windows%2010%2F11-0078D6?logo=windows&logoColor=white">
   <img alt="Linux" src="https://img.shields.io/badge/Server-Linux%20x64%20%7C%20ARM64-FCC624?logo=linux&logoColor=black">
   <img alt="Playwright" src="https://img.shields.io/badge/Playwright-Chromium-2EAD33?logo=playwright&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-93%20passing-3fb950">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-99%20passing-3fb950">
 </p>
 
 <p align="center">
@@ -91,6 +91,7 @@ src/
   VLMulti.Server/    ASP.NET Core minimal API + Playwright; web UI in wwwroot/
 tests/
   VLMulti.Tests/     xUnit tests for the controller, rules and parsers
+  agent/             Page-parser tests on text captured from the real game (node --test), post-deploy smoke check
 deploy/linux/        install.sh + systemd unit
 publish.ps1          Package the desktop app (single self-contained .exe)
 publish-server.ps1   Package the server for linux-x64, linux-arm64 and win-x64
@@ -177,7 +178,7 @@ That folder is git-ignored.
 ## Development
 
 ```powershell
-dotnet test tests/VLMulti.Tests                  # 93 tests
+dotnet test tests/VLMulti.Tests                  # 99 tests (also runs tests/agent with Node)
 dotnet run --project src/VLMulti.Desktop          # desktop, data goes to .\data next to the .sln
 dotnet run --project src/VLMulti.Server -- --data data-server
 ```

@@ -2,7 +2,8 @@ namespace VLMulti.Core.Page;
 
 public static class PageScripts
 {
-    private static readonly Lazy<string> AgentScript = new(() => Load("agent.js"));
+    // parse.js (đọc số từ chữ của game, test được riêng) chạy trước agent.js
+    private static readonly Lazy<string> AgentScript = new(() => Load("parse.js") + "\n" + Load("agent.js"));
 
     // Script nạp vào trang game của mỗi khung (xem agent.js)
     public static string Agent => AgentScript.Value;

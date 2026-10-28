@@ -136,7 +136,8 @@ app.MapPost("/api/acc/{id}/credentials", (string id, CredentialRequest req) =>
 
 app.MapPost("/api/mode", (ModeRequest req) => Results.Json(new { count = manager.Mode(req.Code) }));
 app.MapPost("/api/enter-all", () => { manager.EnterAll(); return Results.Ok(); });
-app.MapPost("/api/auto-recover", (ToggleRequest req) => { manager.SetAutoRecover(req.On); return Results.Ok(); });
+app.MapPost("/api/pause", async (ToggleRequest req) => { await manager.SetPausedAsync(req.On); return Results.Ok(); });
+app.MapPost("/api/auto-recover",(ToggleRequest req) => { manager.SetAutoRecover(req.On); return Results.Ok(); });
 app.MapPost("/api/alerts/clear", () => { manager.ClearAlerts(); return Results.Ok(); });
 app.MapPost("/api/settings", (SettingsUpdate req) => { manager.UpdateSettings(req); return Results.Ok(); });
 

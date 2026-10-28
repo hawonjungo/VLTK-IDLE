@@ -170,6 +170,13 @@ function renderHome() {
   );
   $('#updated').textContent = `${accs.length} acc · cập nhật ${ago(Math.round((Date.now() - lastOkAt) / 1000)) || 'vừa xong'}`;
 
+  // Server đang tạm dừng (nhường acc cho máy khác): dải thông báo + nút chạy lại
+  $('#pauseBar').replaceChildren(...(state.paused ? [
+    h('div', {}, [h('b', { text: '⏸ Server đang tạm dừng' }), h('div', { class: 'small-note', text: 'Các acc đã thoát game, bạn chơi ở máy khác thoải mái.' })]),
+    h('button', { class: 'btn primary small', text: 'Chạy lại', onclick: () => act('pause', { on: false }, 'Đang mở lại các acc…') }),
+  ] : []));
+  $('#pauseBar').classList.toggle('hidden', !state.paused);
+
   const list = $('#accList');
   const seen = new Set();
   for (const a of state.accounts) {
@@ -221,7 +228,13 @@ function accCard(a) {
       h('span', { class: 'rate', text: a.ratePerHour ? `${a.ratePerHour}/giờ` : '—' }),
     ]),
   ]);
-  return h('article', { class: `acc${open ? ' open' : ''}${a.health === 'bad' ? ' bad' : ''}`, 'data-id': a.id }, [row, open ? accDetail(a) : null]);
+  // 3 dòng nhật ký mới nhất hiện cả khi thẻ đang thu gọn (bấm vào cũng mở / đóng thẻ như dòng trên)
+  const log = a.activity?.length
+    ? h('div', { class: 'mini-log card-log', onclick: () => row.click() },
+        a.activity.slice(0, 3).map((e) => h('div', {}, [h('time', { text: time(e.at) }), e.text])))
+    : null;
+  return h('article', { class: `acc${open ? ' open' : ''}${a.health === 'bad' ? ' bad' : ''}`, 'data-id': a.id },
+    [row, selecting ? null : log, open ? accDetail(a) : null]);
 }
 
 function accDetail(a) {
@@ -252,10 +265,6 @@ function accDetail(a) {
     ? h('div', { class: 'dopho-box' }, [h('b', { text: `Đồ phổ đang giữ: ${doPho.length}` }), ...doPho.map((n) => h('div', { text: n }))])
     : null;
 
-  const log = a.activity?.length
-    ? h('div', { class: 'mini-log' }, a.activity.slice(0, 3).map((e) => h('div', {}, [h('time', { text: time(e.at) }), e.text])))
-    : null;
-
   // Số liệu phụ gom vào "Thêm"
   const chip = (k, v) => (v == null || v === '' ? null : h('span', { class: 'chip' }, [`${k} `, h('b', { text: String(v) })]));
   // Danh sách dựng lại mỗi 3 giây → nhớ mục "Thêm số liệu" đang mở của acc nào
@@ -281,15 +290,16 @@ function accDetail(a) {
     h('button', { class: 'btn primary', onclick: () => openLive(a.id, a.name) }, [icon(ICON_LIVE), a.live ? 'Live •' : 'Live']),
     h('button', { class: 'icon-btn', 'aria-label': 'Thêm thao tác', onclick: () => openAccMenu(a.id) }, [icon(ICON_MORE)]),
   ]);
-  return h('div', { class: 'acc-detail' }, [stats, chain, dopho, log, more, actions]);
+  return h('div', { class: 'acc-detail' }, [stats, chain, dopho, more, actions]);
 }
 
 function offCard(a) {
   return h('article', { class: 'acc off', 'data-id': a.id }, [
     h('div', { class: 'acc-row' }, [
       h('span', { class: 'dot', 'aria-hidden': 'true' }),
-      h('span', { class: 'acc-main' }, [h('span', { class: 'acc-name' }, [h('b', { text: a.name })]), h('span', { class: 'acc-sub', text: 'Đã tắt' })]),
-      h('button', { class: 'btn small', text: 'Bật lại', onclick: () => act(`acc/${a.id}/enabled`, { on: true }, 'Đang mở lại acc…') }),
+      h('span', { class: 'acc-main' }, [h('span', { class: 'acc-name' }, [h('b', { text: a.name })]),
+        h('span', { class: 'acc-sub', text: state.paused ? 'Đang tạm dừng' : 'Đã tắt' })]),
+      state.paused ? null : h('button', { class: 'btn small', text: 'Bật lại', onclick: () => act(`acc/${a.id}/enabled`, { on: true }, 'Đang mở lại acc…') }),
     ]),
   ]);
 }
@@ -472,6 +482,13 @@ function renderSettings() {
   $('#settingsBody').replaceChildren(
     section('Chung', [
       toggleRow('Kêu và thông báo khi có cảnh báo mới', notifyOn, toggleNotify),
+      h('div', { class: 'set-row' }, [
+        h('span', {}, [h('span', { text: 'Tạm dừng server' }), h('div', { class: 'note', text: 'Thoát game cả 4 acc để chơi ở máy khác (bản PC, điện thoại). Đăng xuất trang này không dừng game.' })]),
+        h('button', { class: 'btn small' + (state.paused ? ' on' : ''), text: state.paused ? 'Chạy lại' : 'Tạm dừng', onclick: () => {
+          if (!state.paused && !confirm('Tạm dừng server? Cả 4 acc sẽ thoát game cho tới khi bạn bấm Chạy lại.')) return;
+          act('pause', { on: !state.paused }, state.paused ? 'Đang mở lại các acc…' : 'Đã tạm dừng – các acc đã thoát game').then(() => setTimeout(renderSettings, 500));
+        } }),
+      ]),
       toggleRow('Tự hồi phục (tải lại, tự đăng nhập)', state.autoRecover, () => act('auto-recover', { on: !state.autoRecover }).then(() => setTimeout(renderSettings, 300))),
       h('div', { class: 'set-row' }, [h('span', { text: 'Bấm "Vào Game" ở mọi acc' }), h('button', { class: 'btn small', text: 'Vào Game', onclick: () => act('enter-all', {}, 'Đã bấm Vào Game ở mọi acc') })]),
     ]),

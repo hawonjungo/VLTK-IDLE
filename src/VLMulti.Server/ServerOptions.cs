@@ -27,6 +27,9 @@ public sealed class ServerOptions
     // false = hiện cửa sổ trình duyệt (để gỡ lỗi trên máy có màn hình)
     public bool Headless { get; set; } = true;
 
+    // Tạm dừng: mọi acc thoát game để nhường cho máy khác (bản PC, điện thoại). Giữ nguyên khi khởi động lại.
+    public bool Paused { get; set; }
+
     // Mật khẩu trang web (PBKDF2), đặt bằng --set-password
     public string? PasswordHash { get; set; }
     public string? PasswordSalt { get; set; }

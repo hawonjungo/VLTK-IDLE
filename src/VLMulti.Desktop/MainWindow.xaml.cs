@@ -412,7 +412,7 @@ public partial class MainWindow : Window
             var (health, reason) = c.HealthAt(now);
             var big = r.acc.Id == BigId;
             var chain = big && r.acc.AutoMode ? string.Join(",", c.AutoChain(now).Select(s => s.State + s.Detail)) : "";
-            var log = big && c.Activity.Items.Count > 0 ? c.Activity.Items[0].Text + c.Activity.Items[0].At : "";
+            var log = c.Activity.Items.Count > 0 ? c.Activity.Items[0].Text + c.Activity.Items[0].At : "";
             return string.Join("|", r.acc.Id, big, health, reason, r.acc.DisplayName, f.Stats.Level, GameFrame.StepOf(c, now),
                 f.TowerFloor, f.Stats.GoldPerHour(now) is { } g ? (long)(g / 1000) : 0, chain, log, c.DoPhoHeld.Count,
                 big ? c.InfoLine + c.Boat + c.WeekBoss + c.Assassin + c.Exp + c.BagUsed : "");
@@ -499,6 +499,19 @@ public partial class MainWindow : Window
         body.Children.Add(Text(sub.Length > 0 ? sub : c.ScreenLabel,
             health == Health.Good ? Res("TextDim") : GameFrame.HealthBrush(health), 12));
 
+        // 3 dòng nhật ký mới nhất (mọi acc, kể cả khi không ở khung lớn)
+        foreach (var entry in c.Activity.Items.Take(3))
+        {
+            var line = new TextBlock { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 2, 0, 0) };
+            line.Inlines.Add(new System.Windows.Documents.Run($"{entry.At:HH:mm}  ") { Foreground = Res("TextFaint") });
+            line.Inlines.Add(new System.Windows.Documents.Run(entry.Text)
+            {
+                Foreground = entry.Level is StatusLevel.Info or StatusLevel.Ok ? Res("TextDim") : GameFrame.LevelBrush(entry.Level),
+            });
+            line.ToolTip = entry.Text;
+            body.Children.Add(line);
+        }
+
         if (big) AddBigDetails(body, frame, now);
         return card;
     }
@@ -576,14 +589,6 @@ public partial class MainWindow : Window
             box.Children.Add(Text($"Đồ phổ đang giữ: {c.DoPhoHeld.Count}", Res("GoldFg"), 12, bold: true));
             foreach (var item in c.DoPhoHeld) box.Children.Add(Text(item, Res("GoldFg"), 12));
             body.Children.Add(box);
-        }
-
-        foreach (var entry in c.Activity.Items.Take(3))
-        {
-            var line = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) };
-            line.Inlines.Add(new System.Windows.Documents.Run($"{entry.At:HH:mm}  ") { Foreground = Res("TextFaint") });
-            line.Inlines.Add(new System.Windows.Documents.Run(entry.Text) { Foreground = GameFrame.LevelBrush(entry.Level) == Res("TextDim") ? Res("TextMain") : GameFrame.LevelBrush(entry.Level) });
-            body.Children.Add(line);
         }
     }
 
