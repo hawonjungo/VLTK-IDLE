@@ -681,9 +681,46 @@ public sealed class AccountController
         return true;
     }
 
-    // Đang trong đợt Boss Hoàng Kim (theo lịch giờ Việt Nam, hoặc đang đánh Boss Hoàng Kim do Sát Thủ gọi ra)
+    // Đang trong đợt Boss Hoàng Kim (theo lịch giờ Việt Nam, hoặc đang đánh Boss Hoàng Kim do Sát Thủ gọi ra).
+    // Trong lúc này game tự đổi chế độ để đưa nhân vật đi / về: không tính là chết, không khoá gì (OnModeChanged).
     private bool _bossTime;
     public bool BossHkTime(DateTime now) => BossHkSchedule(now) || Tracker.Contains("Hoàng Kim");
+
+    // App có nên đứng yên vì Boss Hoàng Kim không:
+    //  - đang đánh: góc nhiệm vụ có "Hoàng Kim", hoặc kênh Hệ thống vừa báo boss xuất hiện / đưa tới mà chưa báo hạ xong
+    //    (tối đa BossFightMax, phòng khi không thấy dòng báo xong);
+    //  - BossGrace đầu mỗi đợt theo lịch: chờ game kịp đưa nhân vật đi.
+    // Ngoài hai trường hợp đó (không dính boss, hoặc đã hạ xong) → vòng tự động chạy bình thường, về tháp ngay.
+    private static readonly TimeSpan BossGrace = TimeSpan.FromMinutes(3);
+    private static readonly TimeSpan BossFightMax = TimeSpan.FromMinutes(15);
+    private bool _inBossWindow;
+    private DateTime _bossWindowSince;
+    private DateTime? _bossEngagedAt, _bossDoneAt;
+
+    private bool BossHandsOff(DateTime now)
+    {
+        bool window = BossHkSchedule(now);
+        if (window && !_inBossWindow) _bossWindowSince = now;
+        _inBossWindow = window;
+        if (Tracker.Contains("Hoàng Kim")) return true;
+        bool engaged = _bossEngagedAt is { } e && now - e < BossFightMax && !(_bossDoneAt is { } d && d >= e);
+        return engaged || (window && now - _bossWindowSince < BossGrace);
+    }
+
+    // Dòng kênh Hệ thống về boss của chính acc (chép từ game):
+    //   "👑 Boss Hoàng Kim Hà Linh Phiêu xuất hiện — tạm rời Tháp tầng 4288 đi săn Boss."  "🗺 Boss Hoàng Kim …: tới …"
+    //   "🎁 Hạ Boss Hoàng Kim: 36.00M kinh nghiệm, …"  "Hạ Boss Hoàng Kim · Hà Linh Phiêu"  "🗼 Xong Boss Hoàng Kim — quay lại Tháp …"
+    private static readonly System.Text.RegularExpressions.Regex BossEngagedPattern =
+        new(@"Boss Hoàng Kim\b.*(xuất hiện|:\s*tới\b|ở ngay gần)");
+    private static readonly System.Text.RegularExpressions.Regex BossDonePattern =
+        new(@"(Hạ Boss Hoàng Kim|Xong Boss Hoàng Kim)");
+
+    private void TrackBossLine(string text, DateTime now)
+    {
+        if (text.Contains("Chúc mừng")) return; // thông báo chung của server
+        if (BossDonePattern.IsMatch(text)) _bossDoneAt = now;
+        else if (BossEngagedPattern.IsMatch(text)) _bossEngagedAt = now;
+    }
     // Lịch đợt boss (test thay bằng hàm khác để không phụ thuộc múi giờ máy chạy test)
     public Func<DateTime, bool> BossHkSchedule { get; set; } = now => GameData.BossHkSchedule.IsActive(now.ToUniversalTime());
 
@@ -781,16 +818,19 @@ public sealed class AccountController
         if (Screen == "game" && !Away && Stats.IdleFor(now) > IdleAlertAfter)
             Raise("idle", $"Đứng yên hơn {IdleAlertAfter.TotalMinutes:0} phút (tiền, cấp và tầng tháp không đổi)");
 
-        // Đợt Boss Hoàng Kim: game tự đưa nhân vật đi đánh rồi về lại tháp → app đứng yên, không chen vào
-        bool bossTime = BossHkTime(now);
-        if (bossTime != _bossTime)
+        // Boss Hoàng Kim: game tự đưa nhân vật đi đánh rồi (thường) về lại tháp → app đứng yên, không chen vào.
+        // Chỉ đứng yên khi acc thật sự đang bận với boss (xem BossHandsOff), không đứng yên cả khung giờ: acc không
+        // dính boss (vừa chết ra Luyện Công, game không đưa đi…) hoặc đánh xong mà game không đưa về tháp thì
+        // trước đây đứng ở Luyện Công tới hết đợt (~30 phút).
+        bool handsOff = BossHandsOff(now);
+        if (handsOff != _bossTime)
         {
-            _bossTime = bossTime;
-            Note(now, bossTime ? "👑 Đợt Boss Hoàng Kim: để game tự đi đánh, app tạm đứng yên"
-                               : "👑 Hết đợt Boss Hoàng Kim: app chạy lại bình thường");
-            if (!bossTime) _towerReturnAt = now; // game chưa đưa về tháp thì vòng tự đưa về
+            _bossTime = handsOff;
+            Note(now, handsOff ? "👑 Boss Hoàng Kim: để game tự đi đánh, app tạm đứng yên"
+                               : "👑 Xong Boss Hoàng Kim: app chạy lại bình thường");
+            if (!handsOff) _towerReturnAt = now; // game chưa đưa về tháp thì vòng tự đưa về
         }
-        if (bossTime)
+        if (handsOff)
         {
             _stepWatch = null; // game tự đưa đi đánh boss: thời gian này không tính là kẹt
             SuperviseRecovery(now);
@@ -806,6 +846,7 @@ public sealed class AccountController
             GoQuest(now);
         }
         SuperviseAutoMode(now);
+        HintDungeonDone(now);
         SuperviseTowerReturn(now);
         SuperviseAssassin(now);
         SuperviseEvents(now);
@@ -905,6 +946,7 @@ public sealed class AccountController
     private void OnSysNote(string text, bool bossTime, DateTime now)
     {
         Log.Write($"[{Account.Id}] sys: {text}");
+        TrackBossLine(text, now);
         // Mẫu đã biết (chép từ game): ghi vào nhật ký bất kể giờ nào – Boss Hoàng Kim do Lệnh Bài Sát Thủ gọi ra
         // xuất hiện ngoài giờ Boss HK theo lịch
         //   "🎁 Hạ Boss Hoàng Kim: 36.00M kinh nghiệm, 1 Lam Thủy Tinh"   "👑 Boss Hoàng Kim rơi: Kim Phong Đồng Tước Xuân Thâm"
@@ -1137,7 +1179,11 @@ public sealed class AccountController
             _pendingAutoMode = null;
         }
 
-        if (now - _screenSince < AutoModeWarmup || now - _lastAutoModeCheck < AutoModeCheckInterval) return;
+        // Vừa vào game: chờ đọc xong số lượt. Riêng trường hợp game khôi phục chế độ Phó Bản mà đã đọc được 0 lượt
+        // (thoát game giữa phó bản) thì không cần chờ đủ – chuyển đi luôn
+        bool dgDone = ModeCode == ModeRules.Dungeon && ModeRules.TryFraction(PhoBan, out var dgLeftNow, out _) && dgLeftNow == 0;
+        var warmup = dgDone ? TimeSpan.FromSeconds(15) : AutoModeWarmup;
+        if (now - _screenSince < warmup || now - _lastAutoModeCheck < AutoModeCheckInterval) return;
         _lastAutoModeCheck = now;
         if (now - _lastAutoModeCmd < AutoModeMinGap) return;
         if (SettingsProvider?.Invoke() is not { } s) return;
@@ -1173,6 +1219,21 @@ public sealed class AccountController
         SetStatus($"🔁 → {ModeRules.Label(want.Mode)} ({want.Reason})", StatusLevel.Ok);
         if (gameMode == ModeRules.Quest) StartQuest(now, byYou: false);
         else RunCommand("mode", gameMode);
+    }
+
+    // Vòng tự động đang TẮT (bạn tự chọn chế độ, ví dụ ở bản PC) mà acc đứng ở Phó Bản đã hết lượt: app không tự
+    // chuyển, nhưng nhắc một lần để không lặng lẽ đứng mãi (game cho nhân vật đứng luyện công trong chế độ Phó Bản).
+    private bool _dgDoneHinted;
+
+    private void HintDungeonDone(DateTime now)
+    {
+        bool done = !Account.AutoMode && Screen == "game" && ModeCode == ModeRules.Dungeon
+                    && ModeRules.TryFraction(PhoBan, out var left, out _) && left == 0;
+        if (!done) { _dgDoneHinted = false; return; }
+        if (_dgDoneHinted) return;
+        _dgDoneHinted = true;
+        Note(now, "🏯 Phó bản đã hết lượt – bấm Leo Tháp hoặc bật Tự động để đi tiếp", StatusLevel.Warn);
+        SetStatus("🏯 Phó bản xong – bấm Leo Tháp hoặc bật Tự động", StatusLevel.Warn);
     }
 
     // ---------- Lưới an toàn: một bước kéo dài mà số lượt không đổi → bỏ qua bước đó ----------

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(scp -i C:\\\\keys\\\\ssh-key-2026-10-25.key *\\) PowerShell\\(ssh -i C:\\\\keys\\\\ssh-key-2026-10-25.key *)",
+      "PowerShell(scp -i C:\\\\keys\\\\ssh-key-2026-10-25.key *)",
+      "PowerShell(ssh -i C:\\\\keys\\\\ssh-key-2026-10-25.key *)"
+    ]
+  }
+}
