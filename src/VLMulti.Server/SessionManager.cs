@@ -254,6 +254,11 @@ public sealed class SessionManager : IAsyncDisposable
                     autoWeekBoss = _settings.AutoModeWeekBoss,
                     eventTeacher = _settings.EventTeacher,
                     eventTeacherCap = _settings.EventTeacherSpendCap,
+                    eventTeacherExchange = _settings.EventTeacherExchange,
+                    dailyKnb = _settings.DailyKnbBuy,
+                    buffTtl = _settings.BuffTtl,
+                    buffTtlSpecial = _settings.BuffTtlSpecial,
+                    buffQht = _settings.BuffQht,
                     autoFallback = _settings.AutoModeFallback,
                     towerRest = _settings.TowerRestMinutes,
                 },
@@ -552,6 +557,11 @@ public sealed class SessionManager : IAsyncDisposable
             if (u.AutoWeekBoss is { } aw) _settings.AutoModeWeekBoss = aw;
             if (u.EventTeacher is { } et) _settings.EventTeacher = et;
             if (u.EventTeacherCap is { } ec) _settings.EventTeacherSpendCap = ec;
+            if (u.EventTeacherExchange is { } ex) _settings.EventTeacherExchange = ex;
+            if (u.DailyKnb is { } dk) _settings.DailyKnbBuy = dk;
+            if (u.BuffTtl is { } b1) _settings.BuffTtl = b1;
+            if (u.BuffTtlSpecial is { } b2) _settings.BuffTtlSpecial = b2;
+            if (u.BuffQht is { } b3) _settings.BuffQht = b3;
             if (u.AutoFallback is { } af) _settings.AutoModeFallback = af;
             if (u.TowerRest is { } tr) _settings.TowerRestMinutes = tr;
         }
@@ -595,4 +605,5 @@ public sealed class SessionManager : IAsyncDisposable
 public sealed record SettingsUpdate(
     string? KiteDirection, int? KiteDistance, int? KiteInterval,
     bool? AutoDungeon, bool? AutoQuest, string? AutoFallback, int? TowerRest, bool? AutoAssassin = null,
-    bool? AutoBoat = null, bool? AutoWeekBoss = null, bool? EventTeacher = null, int? EventTeacherCap = null);
+    bool? AutoBoat = null, bool? AutoWeekBoss = null, bool? EventTeacher = null, int? EventTeacherCap = null,
+    bool? EventTeacherExchange = null, bool? DailyKnb = null, bool? BuffTtl = null, bool? BuffTtlSpecial = null, bool? BuffQht = null);

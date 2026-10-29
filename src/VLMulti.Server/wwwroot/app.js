@@ -359,7 +359,7 @@ for (const b of document.querySelectorAll('[data-mode]')) {
     try {
       const r = await api('mode', { code: b.dataset.mode });
       toast(!r.count ? 'Chưa chọn acc nào'
-        : b.dataset.mode === 'quest' ? `Đã bắt đầu vòng tự động cho ${r.count} acc`
+        : b.dataset.mode === 'auto' ? `Đã bắt đầu vòng tự động cho ${r.count} acc`
         : `Đã chuyển ${r.count} acc sang ${b.textContent} (tắt vòng tự động)`);
       setSelecting(false);
       refresh();
@@ -464,6 +464,9 @@ function renderSettings() {
   const boat = box(s.autoBoat !== false), weekBoss = box(s.autoWeekBoss !== false);
   const teacher = box(s.eventTeacher !== false);
   const teacherCap = h('input', { type: 'number', min: 0, max: 5000, value: s.eventTeacherCap ?? 400 });
+  const teacherEx = box(s.eventTeacherExchange !== false);
+  const dailyKnb = box(s.dailyKnb !== false);
+  const buffTtl = box(s.buffTtl !== false), buffTtlSp = box(s.buffTtlSpecial !== false), buffQht = box(s.buffQht !== false);
   const fallback = h('select', {}, [['tower', 'Leo Tháp'], ['farm', 'Luyện Công']].map(([v, t]) => { const o = h('option', { value: v, text: t }); o.selected = v === s.autoFallback; return o; }));
   const rest = h('input', { type: 'number', min: 5, max: 720, value: s.towerRest });
 
@@ -507,7 +510,7 @@ function renderSettings() {
       h('div', { class: 'form-grid' }, [h('label', { text: 'Hướng chạy' }), dir, h('label', { text: 'Khoảng cách (px)' }), dist, h('label', { text: 'Chu kỳ (giây)' }), interval]),
     ]),
     section('Vòng tự động', [
-      h('p', { class: 'note', text: 'Bấm Nhiệm Vụ để bắt đầu vòng. Chết nhanh 3 lần trong 15 phút thì Luyện Công, nghỉ tháp theo số phút bên dưới.' }),
+      h('p', { class: 'note', text: 'Bấm 🔁 Auto để bắt đầu vòng. Chết nhanh 3 lần trong 15 phút thì Luyện Công, nghỉ tháp theo số phút bên dưới.' }),
       h('label', { class: 'check-row' }, [quest, '1. Dã Tẩu còn làm được → Nhiệm Vụ']),
       h('label', { class: 'check-row' }, [dg, '2. Còn lượt Phó bản → Phó Bản']),
       h('label', { class: 'check-row' }, [boat, '3. Còn chuyến thuyền → Đi thuyền']),
@@ -523,8 +526,22 @@ function renderSettings() {
     section('Sự kiện', [
       h('p', { class: 'note', text: '🌹 Tri Ân Nhà Giáo (tới hết 20/11): mỗi ngày tặng Thầy Đồ đủ 40 Bó Hoa (mức tối đa có điểm), tự ghép thêm khi sắp hết. Giấy Gói mua bằng lượng, không bao giờ tiêu KNB.' }),
       h('label', { class: 'check-row' }, [teacher, 'Tặng Bó Hoa mỗi ngày (cả 4 acc)']),
+      h('label', { class: 'check-row' }, [teacherEx, 'Đổi nguyên liệu thừa: Đại Hồng Bao → Tiên Thảo Lộ Đặc Biệt → Hồng Bao (chừa đủ để tặng tới hết sự kiện)']),
       h('div', { class: 'form-grid' }, [h('label', { text: 'Chi Giấy Gói tối đa (vạn/acc/ngày)' }), teacherCap]),
-      h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', { eventTeacher: teacher.checked, eventTeacherCap: +teacherCap.value }, 'Đã lưu cài đặt sự kiện') }),
+      h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', {
+        eventTeacher: teacher.checked, eventTeacherCap: +teacherCap.value, eventTeacherExchange: teacherEx.checked,
+      }, 'Đã lưu cài đặt sự kiện') }),
+    ]),
+    section('Việc mỗi ngày', [
+      h('p', { class: 'note', text: 'Chạy lúc rảnh ở cả 4 acc, không phụ thuộc vòng tự động.' }),
+      h('label', { class: 'check-row' }, [dailyKnb, '💰 Đổi vạn → KNB tới giới hạn 1.000 KNB/ngày (thiếu vạn thì mở Hồng Bao)']),
+      h('p', { class: 'note', text: '✨ Giữ trạng thái có lợi: trạng thái tắt hoặc còn dưới 5 phút thì dùng 1 cái trong Hành trang, luôn chừa 10 cái mỗi loại.' }),
+      h('label', { class: 'check-row' }, [buffTtl, '🌿 Tiên Thảo Lộ (+50% kinh nghiệm)']),
+      h('label', { class: 'check-row' }, [buffTtlSp, '🌺 Tiên Thảo Lộ Đặc Biệt (+100% kinh nghiệm)']),
+      h('label', { class: 'check-row' }, [buffQht, '🍶 Quế Hoa Tửu (+20 may mắn)']),
+      h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', {
+        dailyKnb: dailyKnb.checked, buffTtl: buffTtl.checked, buffTtlSpecial: buffTtlSp.checked, buffQht: buffQht.checked,
+      }, 'Đã lưu việc mỗi ngày') }),
     ]),
     section('Mật khẩu acc game', [
       h('p', { class: 'note', text: 'Mật khẩu được mã hoá và chỉ lưu trên máy chủ này, dùng để tự đăng nhập lại.' }),

@@ -588,6 +588,156 @@
     return got;
   };
 
+  // ---------- Đồ trong Hành trang: tìm theo ảnh (ô đồ không ghi tên) ----------
+  // img/ep/hb.png Hồng Bao · tt.png Tiên Thảo Lộ · ttsp.png Tiên Thảo Lộ Đặc Biệt · qht.png Quế Hoa Tửu
+  const bagItem = (img) => [...document.querySelectorAll('#t-inv .it')].find((b) => b.querySelector(`img[src$="/${img}.png"]`));
+  const bagCount = (img) => { const b = bagItem(img); return b ? +((b.querySelector('i') || {}).textContent || 0) || 0 : 0; };
+  const openBag = async () => {
+    const inv = $('#u20menu > button[data-u="inv"]');
+    if (!inv) return false;
+    if (!isOpen($('#u2bagw'))) inv.click();
+    return !!(await waitFor(() => $('#bHbOpen'), 2000));
+  };
+  const closeBag = () => { const w = $('#u2bagw'), x = $('#u2bwx'); if (x && isOpen(w)) x.click(); };
+  // Bấm món `img` trong Hành trang → hộp của món (tiêu đề khớp `title`) → nút `sel` (#kiUse "Dùng 1" / #kiUse10 "Mở ×10"),
+  // chờ `changed()` báo đã có tác dụng rồi đóng hộp. Trả về true nếu thấy tác dụng.
+  const useBagItem = async (img, title, sel, changed) => {
+    const it = bagItem(img);
+    if (!it) return false;
+    it.click();
+    const btn = await waitFor(() => {
+      const h = $('#mBody h3'), b = $(sel);
+      return h && title.test(h.textContent.trim()) && b && isVisible(b) && !b.disabled ? b : null;
+    }, 2000);
+    if (!btn) { await closeModalSure(); return false; }
+    btn.click();
+    const ok = !!(await waitFor(changed, 6000));
+    if (isVisible($('#askBox'))) post({ t: 'log', msg: 'use item: unexpected dialog ' + $('#askBox').innerText.replace(/\s+/g, ' ').slice(0, 120) });
+    await closeModalSure();
+    return ok;
+  };
+
+  // Ngân lượng (vạn) ở ô #gold ("12.754 vạn")
+  const silverNow = () => VLParse.silver(txt('#gold'));
+  // Thiếu vạn lượng: mở Hồng Bao (1–1000 vạn mỗi cái, máy chủ quay số), ×10 mỗi lần, tới khi đủ `need` vạn hoặc hết Hồng Bao.
+  // Đại Hồng Bao (ra KNB) để dành cho mua lệnh bài, không mở ở đây.
+  const openRedForSilver = async (need) => {
+    const res = { opened: 0, gained: 0 };
+    const start = silverNow();
+    if (start == null || !(await openBag())) return res;
+    try {
+      for (let i = 0; i < 5 && (silverNow() ?? 0) < need; i++) {
+        const have = bagCount('hb');
+        if (have <= 0) break;
+        const before = silverNow() ?? 0, ten = have >= 10;
+        if (!(await useBagItem('hb', /^Hồng Bao/, ten ? '#kiUse10' : '#kiUse', () => (silverNow() ?? 0) > before))) break;
+        res.opened += ten ? 10 : 1;
+      }
+    } finally {
+      await closeModalSure();
+      closeBag();
+    }
+    res.gained = (silverNow() ?? start) - start;
+    return res;
+  };
+
+  // ---------- Đổi vạn lượng → KNB: Kỳ Trân Các › 💰 Bảng Kim Nguyên Bảo › Đổi KNB (1 vạn = 1 KNB, tối đa 1.000 / ngày) ----------
+  // Mỗi ngày một lần (app gọi). Không đủ vạn cho phần còn đổi được → mở Hồng Bao trước. Bấm ×100 / ×10 / Mua,
+  // chờ số "Hôm nay đã đổi" tăng sau mỗi lần bấm; không thấy tăng 3 lần liền thì thôi.
+  const knbCard = () => { const b = $('#mBody [data-ktc="knb"]'); return b ? b.closest('.u2card') : null; };
+  const knbState = () => { const c = knbCard(); return c ? VLParse.knbShop(c.innerText) : null; };
+  const showKnbTab = async () => {
+    $('#mBody [data-kb="1"]')?.click();
+    $('#mBody [data-kc="3"]')?.click();
+    return !!(await waitFor(knbState, 2000));
+  };
+  const knbFlow = async () => {
+    if (flowBusy || anyWindowOpen()) return { r: 'busy' };
+    if (inBossHk()) return { r: 'boss-hk' };
+    flowBusy = true;
+    const res = { r: 'ok', bought: 0, spent: 0, opened: 0, gained: 0, left: 0 };
+    try {
+      const open = async () => (await openShop()) && (await showKnbTab());
+      if (!(await open())) {
+        reportUnreadable('knb-shop', (knbCard() || $('#mBody') || {}).innerText || '');
+        return { ...res, r: 'no-shop' };
+      }
+      let st = knbState(), misses = 0, topped = false;
+      for (let i = 0; i < 40 && st && st.left > 0; i++) {
+        const silver = silverNow();
+        if (silver == null) { res.r = 'silver-unreadable'; reportUnreadable('silver', txt('#gold')); break; }
+        if (!topped && silver < st.left * st.price) {
+          topped = true; // chỉ mở Hồng Bao một đợt
+          await closeModalSure();
+          const got = await openRedForSilver(st.left * st.price);
+          res.opened += got.opened; res.gained += got.gained;
+          if (!(await open())) { res.r = 'no-shop'; break; }
+          st = knbState();
+          continue;
+        }
+        const step = [100, 10, 1].find((n) => n <= st.left && n * st.price <= silver);
+        if (!step) { res.r = 'no-silver'; break; }
+        const sel = step === 100 ? 'button[data-ktc100="knb"]' : step === 10 ? 'button[data-ktc10="knb"]' : 'button[data-ktc="knb"]';
+        const btn = knbCard()?.querySelector(sel);
+        if (!btn || btn.disabled) { res.r = 'no-button'; break; }
+        btn.click();
+        const now = await waitFor(() => { const x = knbState(); return x && x.done > st.done ? x : null; });
+        if (isVisible($('#askBox'))) { post({ t: 'log', msg: 'knb: unexpected dialog ' + $('#askBox').innerText.replace(/\s+/g, ' ').slice(0, 120) }); res.r = 'dialog'; break; }
+        if (!now) {
+          if (++misses >= 3) { res.r = 'stuck'; break; }
+          await showKnbTab();
+          st = knbState() || st;
+          continue;
+        }
+        misses = 0;
+        res.bought += now.done - st.done; res.spent += (now.done - st.done) * st.price;
+        st = now;
+      }
+      if (st) { res.left = st.left; res.done = st.done; }
+    } catch (err) {
+      res.r = 'error: ' + err.message;
+    } finally {
+      try { await closeModalSure(); } catch (_) {}
+      flowBusy = false;
+    }
+    return res;
+  };
+
+  // ---------- Giữ trạng thái có lợi: Tiên Thảo Lộ (+50% KN), Tiên Thảo Lộ Đặc Biệt (+100% KN), Quế Hoa Tửu (+20 may mắn) ----------
+  // Cả ba cộng dồn thời gian. Thanh #skBuffs (mỗi trạng thái một ô, ảnh trùng ảnh món đồ, "40h" / "1m" / "22s") không có
+  // hoặc còn dưới arg.minLeft giây → dùng 1 cái trong Hành trang, luôn chừa lại arg.keep cái. Đủ cả thì không mở gì.
+  const BUFF_TITLES = { tt: /^Tiên Thảo Lộ\s*×/, ttsp: /^Tiên Thảo Lộ Đặc Biệt/, qht: /^Quế Hoa Tửu/ };
+  // Giây còn lại: 0 = không có; null = có mà không đọc được chữ
+  const buffSecs = (img) => {
+    const el = [...document.querySelectorAll('#skBuffs .sti')].find((x) => x.querySelector(`img[src$="/${img}.png"]`));
+    return el ? VLParse.buffLeft((el.querySelector('b') || {}).textContent) : 0;
+  };
+  const buffFlow = async (arg) => {
+    const keep = arg.keep ?? 10, minLeft = arg.minLeft ?? 300;
+    const want = (arg.items || []).filter((k) => BUFF_TITLES[k] && (buffSecs(k) ?? Infinity) < minLeft);
+    if (!want.length) return { r: 'ok', used: '', low: '' };
+    if (flowBusy || anyWindowOpen()) return { r: 'busy' };
+    if (inBossHk()) return { r: 'boss-hk' };
+    flowBusy = true;
+    const used = [], low = [], failed = [];
+    try {
+      if (!(await openBag())) return { r: 'no-bag' };
+      for (const k of want) {
+        const have = bagCount(k);
+        if (have <= keep) { low.push(`${k}:${have}`); continue; }
+        const before = buffSecs(k) ?? 0;
+        if (await useBagItem(k, BUFF_TITLES[k], '#kiUse', () => bagCount(k) < have || (buffSecs(k) ?? 0) > before)) used.push(`${k}:${have - 1}`);
+        else failed.push(k);
+      }
+    } catch (err) {
+      failed.push('error: ' + err.message);
+    } finally {
+      try { await closeModalSure(); closeBag(); } catch (_) {}
+      flowBusy = false;
+    }
+    return { r: failed.length ? 'failed' : 'ok', used: used.join(','), low: low.join(','), failed: failed.join(',') };
+  };
+
   // ---------- Tự nhận quà: 🎁 Phần thưởng › Điểm danh (mỗi ngày) và Mốc cấp ----------
   // Chạy đầu lượt bấm 📜 Nhiệm Vụ (trong buyLdtFlow). Nút còn nhận được thì không bị khoá (disabled);
   // đã nhận thì game đổi chữ thành "Đã nhận" và khoá lại.
@@ -628,7 +778,24 @@
   //  - ghép Bó Hoa ×1 (gh:bo:1) = 1 Thiệp + 3 Hoa Hồng + 1 Giấy Gói; Thiệp ×1 (gh:thiep:1) từ nguyên liệu nhặt được;
   //  - Giấy Gói +10 (gg:10) giá "10 vạn lượng" mỗi tờ – chỉ mua khi dòng giá ghi bằng lượng (VLParse.teacher.wrapPrice),
   //    trong trần chi; Lẵng Mây (100 KNB) và Lẵng Hoa không bao giờ đụng tới.
-  // arg: { keep: số Bó Hoa giữ sẵn cho ngày mai (40), spendCap: trần chi Giấy Gói hôm nay (vạn lượng) }
+  // arg: { keep: số Bó Hoa giữ sẵn cho ngày mai (40), spendCap: trần chi Giấy Gói hôm nay (vạn lượng),
+  //        exchange: đổi nguyên liệu thừa lấy quà }
+  // Đổi nguyên liệu thừa: thứ tự ưu tiên (tên đúng như trên bảng)
+  const TEACHER_EXCHANGE = ['Đại Hồng Bao', 'Tiên Thảo Lộ Đặc Biệt', 'Hồng Bao'];
+  // Số nguyên liệu (mỗi loại) còn dư để đổi: chừa đủ cho số Bó Hoa còn tặng tới hết sự kiện (hôm nay còn cap − today,
+  // mỗi ngày sau thêm cap), trừ Bó Hoa và Thiệp đã có; mỗi Bó Hoa = 1 Thiệp (1 Giấy + 1 Bút + 1 Mực) + 3 Hoa Hồng.
+  // Không đọc được số ngày còn lại → 0 (không đổi).
+  const teacherSpare = (s) => {
+    if (!s.daysLeft || [s.paper, s.brush, s.ink].some((v) => v == null)) return 0;
+    const gifts = s.cap * (s.daysLeft - 1) + Math.max(0, s.cap - s.today);
+    const bouquets = Math.max(0, gifts - s.bouquets), cards = Math.max(0, bouquets - s.cards);
+    return Math.max(0, Math.min(s.paper - cards, s.brush - cards, s.ink - cards, s.roses - 3 * bouquets));
+  };
+  // Nút "Đổi" của dòng "1 <name> <giá> mỗi loại …" (tên phải khớp hết: "Hồng Bao" ≠ "Đại Hồng Bao", "Tiên Thảo Lộ" ≠ "… Đặc Biệt")
+  const exchangeButton = (name) => [...document.querySelectorAll('#mBody [data-ng^="doi:"]')].find((b) => {
+    const row = ((b.closest('.qrow') || {}).innerText || '').replace(/\s+/g, ' ').trim();
+    return row.startsWith(`1 ${name} `) && /^\d/.test(row.slice(name.length + 3));
+  });
   const teacherFlow = async (arg) => {
     if (flowBusy || anyWindowOpen()) return { r: 'busy' };
     if (inBossHk()) return { r: 'boss-hk' };
@@ -685,6 +852,25 @@
         if (!n) { res.r = 'craft-stuck'; break; }
         s = n; res.crafted++;
       }
+      // 3. Đổi nguyên liệu thừa (arg.exchange): Đại Hồng Bao → Tiên Thảo Lộ Đặc Biệt → Hồng Bao, chỉ đổi phần DƯ sau khi
+      //    đã chừa đủ nguyên liệu tặng Bó Hoa mỗi ngày tới hết sự kiện (teacherSpare)
+      const exchanged = [];
+      for (let i = 0; arg.exchange && res.r === 'ok' && i < 20; i++) {
+        const spare = teacherSpare(s);
+        const pick = TEACHER_EXCHANGE.find((name) => {
+          const e = s.exchanges.find((x) => x.name === name);
+          return e && e.done < e.max && e.cost <= spare;
+        });
+        if (!pick) break;
+        const before = s.exchanges.find((x) => x.name === pick).done;
+        const b = exchangeButton(pick);
+        if (!b || b.disabled) { res.r = 'exchange-stuck'; break; }
+        b.click();
+        const n = await waitFor(() => { const x = st(); const e = x && x.exchanges.find((y) => y.name === pick); return e && e.done > before ? x : null; });
+        if (!n || isVisible($('#askBox'))) { res.r = 'exchange-stuck'; break; }
+        s = n; exchanged.push(pick);
+      }
+      res.exchanged = exchanged.join('|');
       Object.assign(res, { points: s.points, today: s.today, cap: s.cap, bouquets: s.bouquets, endsOn: s.endsOn });
       $('#giftTabs [data-g="login"]')?.click(); // để bảng về mục mặc định như lúc bạn mở
     } catch (err) {
@@ -768,6 +954,10 @@
       keepSys = !!m.on; // tắt khi bạn đang xem / dùng khung này (để bạn tự chọn kênh chat)
     } else if (m.t === 'teacher') {
       teacherFlow(m.arg || {}).then((res) => post({ t: 'teacherResult', ...res }), (err) => post({ t: 'teacherResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'knbBuy') {
+      knbFlow().then((res) => post({ t: 'knbResult', ...res }), (err) => post({ t: 'knbResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'buffs') {
+      buffFlow(m.arg || {}).then((res) => post({ t: 'buffResult', ...res }), (err) => post({ t: 'buffResult', r: 'error: ' + err.message }));
     } else if (m.t === 'buyLdt') {
       buyLdtFlow(m.arg || {}).then((res) => post({ t: 'ldtResult', ...res }), (err) => post({ t: 'ldtResult', r: 'error: ' + err.message }));
     } else if (m.t === 'cmd' && commands[m.name]) {

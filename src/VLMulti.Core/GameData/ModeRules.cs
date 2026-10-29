@@ -17,6 +17,8 @@ public static partial class ModeRules
     public const string Farm = "farm", Dungeon = "dg", Quest = "quest", Tower = "tower";
     // Không phải chế độ của game: "ở Luyện Công rồi gọi Boss Sát Thủ / lên thuyền / khiêu chiến Boss tuần"
     public const string Assassin = "assassin", Boat = "boat", WeekBoss = "weekboss";
+    // Nút 🔁 Auto: bật vòng tự động (Nhiệm Vụ → Phó Bản → … → Leo Tháp / Luyện Công), không phải chế độ của game
+    public const string Auto = "auto";
 
     [GeneratedRegex(@"^\s*(\d+)\s*/\s*(\d+)")]
     private static partial Regex FractionPattern();
@@ -79,6 +81,7 @@ public static partial class ModeRules
         Assassin => "Sát Thủ",
         Boat => "Đi thuyền",
         WeekBoss => "Boss tuần",
+        Auto => "Auto",
         _ => "Luyện Công",
     };
 }

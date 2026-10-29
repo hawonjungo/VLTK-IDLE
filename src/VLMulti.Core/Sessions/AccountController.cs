@@ -243,9 +243,10 @@ public sealed class AccountController
     // Lệnh thực hiện trong trang: "mode" (arg = farm/dg/quest/tower), "enter", "login", "kite"
     public void RunCommand(string name, object? arg = null) => Post(new { t = "cmd", name, arg });
 
-    // Bạn bấm nút chế độ (Luyện Công / Phó Bản / Nhiệm Vụ / Leo Tháp) cho acc này.
-    // Nhiệm Vụ = bắt đầu vòng tự động: mua lệnh bài → Nhiệm Vụ → Phó Bản → Leo Tháp → (chết nhanh) Luyện Công → lại Tháp.
-    // Chế độ khác = bạn tự chọn → tắt vòng tự động để app không đổi đi mất.
+    // Bạn bấm nút cho acc này: 🔁 Auto = bắt đầu vòng tự động: nhận quà, mua lệnh bài → Nhiệm Vụ → Phó Bản → Đi thuyền →
+    // Boss tuần → Sát Thủ → Leo Tháp → (chết nhanh) Luyện Công → lại Tháp.
+    // Chế độ của game (Nhiệm Vụ / Leo Tháp / Phó Bản / Luyện Công) = bạn tự chọn → tắt vòng tự động để app không đổi đi mất;
+    // Nhiệm Vụ vẫn nhận quà + mua lệnh bài trước như khi vòng chạy.
     public void RequestMode(string code, DateTime now)
     {
         _userModeAt = now;
@@ -253,7 +254,7 @@ public sealed class AccountController
         Account.StayInTower = code == ModeRules.Tower;
         if (code == ModeRules.Tower) { _fastDeaths.Clear(); _modeBlockedUntil.Remove(ModeRules.Tower); }
         _modeBlockedUntil.Remove(code);
-        if (code == ModeRules.Quest)
+        if (code == ModeRules.Auto)
         {
             if (!Account.AutoMode)
             {
@@ -261,24 +262,23 @@ public sealed class AccountController
                 Note(now, "🔁 Bắt đầu vòng tự động: Nhiệm Vụ → Phó Bản → Đi thuyền → Boss tuần → Sát Thủ → Leo Tháp → Luyện Công");
             }
             // Đang trên thuyền / đang đánh Boss tuần / đang bảo trì: không đổi chế độ (sẽ kéo nhân vật ra giữa chừng);
-            // vòng tự động đã bật sẽ tự đi tiếp khi xong
+            // vòng đã bật sẽ tự đi tiếp khi xong
             if (EventRunning(now) || _eventCheck is not null || Maintenance)
             {
                 var why = Maintenance ? "máy chủ game đang bảo trì" : $"đang {ModeRules.Label(_eventCheck?.Mode ?? _eventPhase ?? ModeRules.Boat)}";
-                Note(now, $"🔁 Nhiệm Vụ: {why} – chờ xong rồi vòng tự chạy tiếp");
+                Note(now, $"🔁 Auto: {why} – chờ xong rồi vòng tự chạy tiếp");
                 return;
             }
             StartQuest(now, byYou: true);
+            return;
         }
-        else
+        if (Account.AutoMode)
         {
-            if (Account.AutoMode)
-            {
-                SetAutoMode(false, now);
-                Note(now, $"🔁 Dừng vòng tự động (bạn chọn {ModeRules.Label(code)})");
-            }
-            RunCommand("mode", code);
+            SetAutoMode(false, now);
+            Note(now, $"🔁 Dừng vòng tự động (bạn chọn {ModeRules.Label(code)})");
         }
+        if (code == ModeRules.Quest) StartQuest(now, byYou: true);
+        else RunCommand("mode", code);
     }
 
     public QuestCounts QuestCounts => new(DaTau, LdtHave, LdtUsed, LdtBuy, DaTauMaxPerDay);
@@ -487,6 +487,12 @@ public sealed class AccountController
                     break;
                 case "teacherResult":
                     OnTeacherResult(m, now);
+                    break;
+                case "knbResult":
+                    OnKnbResult(m, now);
+                    break;
+                case "buffResult":
+                    OnBuffResult(m, now);
                     break;
                 case "unreadable":
                     OnUnreadable(Str(m, "what"), Str(m, "sample"), now);
@@ -854,6 +860,8 @@ public sealed class AccountController
         SuperviseAssassin(now);
         SuperviseEvents(now);
         SuperviseTeacher(now);
+        SuperviseKnbBuy(now);
+        SuperviseBuffs(now);
         SuperviseStuck(now);
         SuperviseRecovery(now);
     }
@@ -1265,7 +1273,7 @@ public sealed class AccountController
             || now - _teacherLastTry < TeacherRetryGap) return;
         _teacherLastTry = now;
         _teacherPending = true;
-        Post(new { t = "teacher", arg = new { keep = TeacherKeep, spendCap = cfg.EventTeacherSpendCap } });
+        Post(new { t = "teacher", arg = new { keep = TeacherKeep, spendCap = cfg.EventTeacherSpendCap, exchange = cfg.EventTeacherExchange } });
     }
 
     private void OnTeacherResult(JsonElement m, DateTime now)
@@ -1292,6 +1300,11 @@ public sealed class AccountController
             if (crafted > 0) text += $" · ghép {crafted} Bó Hoa{(spent > 0 ? $" (−{spent} vạn)" : "")}";
             Note(now, text + $" · còn {Int("bouquets")} Bó Hoa", StatusLevel.Ok);
         }
+        if (Str(m, "exchanged") is { Length: > 0 } ex)
+        {
+            var gifts = ex.Split('|').GroupBy(x => x).Select(g => $"{g.Count()} {g.Key}");
+            Note(now, $"🎁 Tri Ân Nhà Giáo: đổi nguyên liệu thừa lấy {string.Join(", ", gifts)}", StatusLevel.Ok);
+        }
         if (r == "ok")
         {
             _teacherDoneDay = day;
@@ -1302,8 +1315,120 @@ public sealed class AccountController
         {
             _teacherDoneDay = day;
             _teacherFails = 0;
-            Raise("event-teacher", $"Tri Ân Nhà Giáo: tặng / ghép Bó Hoa không được ({r}) – bỏ qua hôm nay");
+            Raise("event-teacher", $"Tri Ân Nhà Giáo: tặng / ghép / đổi quà không được ({r}) – bỏ qua hôm nay");
         }
+    }
+
+    // ---------- 💰 Đổi vạn lượng → KNB: mỗi ngày một lần tới giới hạn 1.000 KNB (trang làm, xem knbFlow trong agent.js) ----------
+    // Cùng nhịp với sự kiện: lúc rảnh, sau 0:10 giờ VN, ngoài lúc mua lệnh bài / đi thuyền / Boss tuần / Boss HK.
+
+    private DateOnly _knbDoneDay;
+    private DateTime _knbLastTry;
+    private bool _knbPending;
+    private int _knbFails;
+
+    private void SuperviseKnbBuy(DateTime now)
+    {
+        var cfg = SettingsProvider?.Invoke();
+        if (cfg is null || !cfg.DailyKnbBuy || Screen != "game" || Away) return;
+        var vn = now.ToUniversalTime().AddHours(7);
+        if (_knbDoneDay == DateOnly.FromDateTime(vn) || vn.TimeOfDay < TimeSpan.FromMinutes(10)) return;
+        if (_knbPending && now - _knbLastTry < TimeSpan.FromMinutes(3)) return;
+        _knbPending = false;
+        if (_ldtBuyingSince is not null || _teacherPending || EventRunning(now) || now - _screenSince < TimeSpan.FromSeconds(120)
+            || now - _knbLastTry < TeacherRetryGap) return;
+        _knbLastTry = now;
+        _knbPending = true;
+        Post(new { t = "knbBuy" });
+    }
+
+    private void OnKnbResult(JsonElement m, DateTime now)
+    {
+        _knbPending = false;
+        int Int(string name) => m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
+        var r = Str(m, "r");
+        int bought = Int("bought"), opened = Int("opened");
+        Log.Write($"[{Account.Id}] knb buy: {r} bought={bought} spent={Int("spent")} opened={opened} gained={Int("gained")} done={Int("done")} left={Int("left")}");
+        if (r is "busy" or "boss-hk") return;
+        if (opened > 0) Note(now, $"🧧 Thiếu vạn lượng: mở {opened} Hồng Bao (+{Int("gained")} vạn)", StatusLevel.Ok);
+        if (bought > 0) Note(now, $"💰 Đổi {Int("spent")} vạn → {bought} KNB (hôm nay {Int("done")}/{Int("done") + Int("left")})", StatusLevel.Ok);
+        var day = VnDate(now);
+        switch (r)
+        {
+            case "ok":
+                _knbDoneDay = day;
+                _knbFails = 0;
+                return;
+            case "no-silver":
+                _knbDoneDay = day;
+                Note(now, $"💰 Đổi KNB: hết vạn lượng và Hồng Bao, còn {Int("left")} KNB chưa đổi hôm nay", StatusLevel.Warn);
+                return;
+        }
+        if (++_knbFails >= 3)
+        {
+            _knbDoneDay = day;
+            _knbFails = 0;
+            Raise("knb-buy", $"Đổi vạn → KNB không được ({r}) – bỏ qua hôm nay");
+        }
+    }
+
+    // ---------- ✨ Giữ trạng thái có lợi (trang làm, xem buffFlow trong agent.js) ----------
+    // Mỗi 2 phút trang xem thanh trạng thái; món nào không có / còn dưới 5 phút thì dùng 1 cái, chừa BuffKeep cái.
+    // Món đã chạm mức chừa: thôi xét 60 phút (khỏi mở Hành trang liên tục), báo một lần mỗi ngày.
+
+    public const int BuffKeep = 10;
+    private static readonly TimeSpan BuffCheckGap = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan BuffLowPause = TimeSpan.FromMinutes(60);
+    private static readonly Dictionary<string, string> BuffNames = new()
+    {
+        ["tt"] = "Tiên Thảo Lộ", ["ttsp"] = "Tiên Thảo Lộ Đặc Biệt", ["qht"] = "Quế Hoa Tửu",
+    };
+    private DateTime _buffLastTry;
+    private bool _buffPending;
+    private readonly Dictionary<string, DateTime> _buffPausedUntil = new();
+    private readonly Dictionary<string, DateOnly> _buffLowNoted = new();
+
+    private void SuperviseBuffs(DateTime now)
+    {
+        var cfg = SettingsProvider?.Invoke();
+        if (cfg is null || Screen != "game" || Away) return;
+        if (_buffPending && now - _buffLastTry < TimeSpan.FromMinutes(1)) return;
+        _buffPending = false;
+        if (now - _buffLastTry < BuffCheckGap || now - _screenSince < TimeSpan.FromSeconds(60) || _ldtBuyingSince is not null) return;
+        var items = new List<string>();
+        if (cfg.BuffTtl) items.Add("tt");
+        if (cfg.BuffTtlSpecial) items.Add("ttsp");
+        if (cfg.BuffQht) items.Add("qht");
+        items.RemoveAll(k => _buffPausedUntil.TryGetValue(k, out var t) && t > now);
+        if (items.Count == 0) return;
+        _buffLastTry = now;
+        _buffPending = true;
+        Post(new { t = "buffs", arg = new { items, keep = BuffKeep, minLeft = 300 } });
+    }
+
+    private void OnBuffResult(JsonElement m, DateTime now)
+    {
+        _buffPending = false;
+        var r = Str(m, "r");
+        string used = Str(m, "used"), low = Str(m, "low"), failed = Str(m, "failed");
+        if (used.Length + low.Length + failed.Length > 0 || r is not ("ok" or "busy" or "boss-hk"))
+            Log.Write($"[{Account.Id}] buffs: {r} used={used} low={low} failed={failed}");
+        // "qht:66" = món : số còn lại
+        static IEnumerable<(string Key, string Count)> Items(string s) =>
+            s.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Split(':')).Select(p => (p[0], p.Length > 1 ? p[1] : "?"));
+        string Name(string k) => BuffNames.TryGetValue(k, out var n) ? n : k;
+        foreach (var (k, left) in Items(used))
+            Note(now, $"✨ Dùng 1 {Name(k)} (còn {left})", StatusLevel.Ok);
+        var day = VnDate(now);
+        foreach (var (k, left) in Items(low))
+        {
+            _buffPausedUntil[k] = now + BuffLowPause;
+            if (_buffLowNoted.TryGetValue(k, out var d) && d == day) continue;
+            _buffLowNoted[k] = day;
+            Note(now, $"✨ {Name(k)}: còn {left}, chừa {BuffKeep} – không dùng thêm");
+        }
+        foreach (var k in failed.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            _buffPausedUntil[k] = now + TimeSpan.FromMinutes(30);
     }
 
     // ---------- Lưới an toàn: một bước kéo dài mà số lượt không đổi → bỏ qua bước đó ----------
@@ -1636,7 +1761,7 @@ public sealed class AccountController
         {
             case "ok": break;
             case "short": Raise("ldt-short", $"Chỉ mua được {bought} lệnh bài, còn thiếu {left} – hết KNB và Đại Hồng Bao"); break;
-            case "busy": Note(now, "🛒 Chưa mua được lệnh bài: đang mở bảng trong game, sẽ thử lại lần bấm Nhiệm Vụ sau"); _ldtTriedDay = null; break;
+            case "busy": Note(now, "🛒 Chưa mua được lệnh bài: đang mở bảng trong game, sẽ thử lại lần bấm Nhiệm Vụ / Auto sau"); _ldtTriedDay = null; break;
             default: Raise("ldt-error", $"Mua lệnh bài bị lỗi ({r}), đã mua {bought}"); break;
         }
         InfoChanged?.Invoke();

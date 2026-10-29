@@ -17,10 +17,33 @@ test('sự kiện Tri Ân Nhà Giáo (mẫu thật)', () => {
   const ev = all.find(([f]) => f.startsWith('event-teacher-'))[1];
   assert.deepEqual(P.teacher(ev.text), {
     points: 198, today: 0, cap: 40, bouquets: 170, cards: 37, roses: 2222, wraps: 0, wrapPrice: 10, endsOn: '20/11',
+    paper: 1376, brush: 1420, ink: 1392, daysLeft: 24,
+    exchanges: [
+      { name: 'Tiên Thảo Lộ', cost: 5, done: 0, max: 20 },
+      { name: 'Quế Hoa Tửu', cost: 5, done: 0, max: 24 },
+      { name: 'Hồng Bao', cost: 20, done: 0, max: 3 },
+      { name: 'Tiên Thảo Lộ Đặc Biệt', cost: 50, done: 0, max: 3 },
+      { name: 'Đại Hồng Bao', cost: 100, done: 0, max: 1 },
+    ],
   });
+  assert.equal(P.teacher(ev.text.replace('còn 23 ngày 10 giờ', 'còn 0 ngày 3 giờ')).daysLeft, 1);
   // Giá Giấy Gói không ghi bằng lượng → không được mua
   assert.equal(P.teacher(ev.text.replace('Giấy Gói 10 vạn lượng', 'Giấy Gói 10 KNB')).wrapPrice, null);
   assert.equal(P.teacher('bảng khác'), null);
+});
+
+test('Kỳ Trân Các › Đổi KNB, ngân lượng, thời gian trạng thái (mẫu thật)', () => {
+  const fx = all.find(([f]) => f.startsWith('event-knbshop-'))[1];
+  // Thẻ Kim Nguyên Bảo đứng trước thẻ Đổi KNB → KNB khóa (cũng có "Hôm nay đã đổi 410") – phải lấy đúng thẻ đầu
+  assert.deepEqual(P.knbShop(fx.kbText), { done: 0, left: 1000, price: 1 });
+  assert.deepEqual(P.knbShop('Hôm nay đã đổi 1.000 · còn đổi được 0 · 1 vạn lượng = 1 KNB'), { done: 1000, left: 0, price: 1 });
+  assert.equal(P.knbShop('Hôm nay đã đổi 410'), null);
+  assert.deepEqual(fx.gold.map(P.silver), [12754, 6341]);
+  assert.equal(P.silver('6329 vạn 3023 lượng'), 6329);
+  assert.equal(P.silver('8521 lượng'), 0);
+  assert.equal(P.silver(''), null);
+  assert.deepEqual(fx.buffs.map(P.buffLeft), [Infinity, 36000, 727 * 3600, 151 * 3600, 22, 60]);
+  assert.equal(P.buffLeft('?'), null);
 });
 
 test('số viết gọn của game', () => {

@@ -54,6 +54,16 @@ public sealed class AppSettings
     // Giấy Gói mua bằng lượng, tối đa EventTeacherSpendCap vạn mỗi acc mỗi ngày; không bao giờ tiêu KNB.
     public bool EventTeacher { get; set; } = true;
     public int EventTeacherSpendCap { get; set; } = 400;
+    // Đổi nguyên liệu thừa lấy quà (Đại Hồng Bao → Tiên Thảo Lộ Đặc Biệt → Hồng Bao), chừa đủ để tặng Bó Hoa tới hết sự kiện
+    public bool EventTeacherExchange { get; set; } = true;
+
+    // Mỗi ngày đổi vạn lượng → KNB ở Kỳ Trân Các tới giới hạn của game (1.000 KNB); thiếu vạn thì mở Hồng Bao
+    public bool DailyKnbBuy { get; set; } = true;
+
+    // Giữ trạng thái có lợi: trạng thái không có / sắp hết → dùng 1 cái trong Hành trang, luôn chừa 10 cái mỗi loại
+    public bool BuffTtl { get; set; } = true;        // 🌿 Tiên Thảo Lộ (+50% kinh nghiệm)
+    public bool BuffTtlSpecial { get; set; } = true; // 🌺 Tiên Thảo Lộ Đặc Biệt (+100% kinh nghiệm)
+    public bool BuffQht { get; set; } = true;        // 🍶 Quế Hoa Tửu (+20 may mắn)
 
     // Chết trong tháp (game đẩy ra Luyện Công): vào lại tháp ngay. Chết nhanh (sống dưới TowerFastDeathMinutes phút)
     // TowerFastDeathCount lần trong TowerFastDeathWindowMinutes phút → nghỉ tháp TowerRestMinutes phút, Luyện Công và báo.

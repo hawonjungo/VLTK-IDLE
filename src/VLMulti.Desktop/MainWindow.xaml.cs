@@ -689,7 +689,8 @@ public partial class MainWindow : Window
 
     // ---------- Cài đặt ----------
 
-    private CheckBox _setRecover = null!, _setSound = null!, _setTray = null!, _setTeacher = null!;
+    private CheckBox _setRecover = null!, _setSound = null!, _setTray = null!, _setTeacher = null!, _setTeacherEx = null!,
+        _setKnb = null!, _setBuffTtl = null!, _setBuffTtlSp = null!, _setBuffQht = null!;
     private TextBox _setTeacherCap = null!;
     private CheckBox _setQuest = null!, _setDungeon = null!, _setBoat = null!, _setWeekBoss = null!, _setAssassin = null!;
     private ComboBox _setFallback = null!, _setKiteDir = null!;
@@ -741,7 +742,7 @@ public partial class MainWindow : Window
         body.Add(accounts);
 
         body.Add(Section("Vòng tự động"));
-        body.Add(Note("Bấm Nhiệm Vụ để bắt đầu vòng (hoặc bật \"Tự động\" trên khung). Mỗi 30 giây app chọn việc theo thứ tự dưới đây. Chết nhanh liền 3 lần trong 15 phút thì Luyện Công, nghỉ tháp theo số phút bên dưới."));
+        body.Add(Note("Bấm 🔁 Auto để bắt đầu vòng (hoặc bật \"Tự động\" trên khung). Mỗi 30 giây app chọn việc theo thứ tự dưới đây. Chết nhanh liền 3 lần trong 15 phút thì Luyện Công, nghỉ tháp theo số phút bên dưới."));
         body.Add(_setQuest = Box("1. Dã Tẩu còn làm được → Nhiệm Vụ (tự mua Lệnh Bài Dã Tẩu)"));
         body.Add(_setDungeon = Box("2. Còn lượt Phó bản → Phó Bản"));
         body.Add(_setBoat = Box("3. Còn chuyến thuyền → Đi thuyền"));
@@ -755,7 +756,16 @@ public partial class MainWindow : Window
         body.Add(Section("Sự kiện"));
         body.Add(Note("🌹 Tri Ân Nhà Giáo (tới hết 20/11): mỗi ngày tặng Thầy Đồ đủ 40 Bó Hoa (mức tối đa có điểm), tự ghép thêm khi sắp hết. Giấy Gói mua bằng lượng, không bao giờ tiêu KNB."));
         body.Add(_setTeacher = Box("Tặng Bó Hoa mỗi ngày"));
+        body.Add(_setTeacherEx = Box("Đổi nguyên liệu thừa: Đại Hồng Bao → Tiên Thảo Lộ Đặc Biệt → Hồng Bao (chừa đủ để tặng tới hết sự kiện)"));
         body.Add(FormRow("Chi Giấy Gói tối đa (vạn/acc/ngày)", _setTeacherCap = Number("0–5000 vạn")));
+
+        body.Add(Section("Việc mỗi ngày"));
+        body.Add(Note("Chạy lúc rảnh ở mọi acc, không phụ thuộc vòng tự động."));
+        body.Add(_setKnb = Box("💰 Đổi vạn → KNB tới giới hạn 1.000 KNB/ngày (thiếu vạn thì mở Hồng Bao)"));
+        body.Add(Note("✨ Giữ trạng thái có lợi: trạng thái tắt hoặc còn dưới 5 phút thì dùng 1 cái trong Hành trang, luôn chừa 10 cái mỗi loại."));
+        body.Add(_setBuffTtl = Box("🌿 Tiên Thảo Lộ (+50% kinh nghiệm)"));
+        body.Add(_setBuffTtlSp = Box("🌺 Tiên Thảo Lộ Đặc Biệt (+100% kinh nghiệm)"));
+        body.Add(_setBuffQht = Box("🍶 Quế Hoa Tửu (+20 may mắn)"));
 
         body.Add(Section("Kéo quái khi Leo Tháp"));
         body.Add(Note("Bật riêng từng acc bằng nút \"Kéo quái\" trên khung. Mỗi chu kỳ nhân vật chạy một đoạn cho quái dồn về một phía rồi đánh tiếp. Bạn tự tắt Auto (chơi tay) thì app không kéo."));
@@ -788,6 +798,11 @@ public partial class MainWindow : Window
         _setKiteDist.Text = _settings.KiteDistance.ToString();
         _setKiteInterval.Text = _settings.KiteIntervalSeconds.ToString();
         _setTeacher.IsChecked = _settings.EventTeacher;
+        _setTeacherEx.IsChecked = _settings.EventTeacherExchange;
+        _setKnb.IsChecked = _settings.DailyKnbBuy;
+        _setBuffTtl.IsChecked = _settings.BuffTtl;
+        _setBuffTtlSp.IsChecked = _settings.BuffTtlSpecial;
+        _setBuffQht.IsChecked = _settings.BuffQht;
         _setTeacherCap.Text = _settings.EventTeacherSpendCap.ToString();
         _loadingForm = false;
     }
@@ -814,6 +829,11 @@ public partial class MainWindow : Window
         if (int.TryParse(_setKiteDist.Text, out var dist)) _settings.KiteDistance = dist;
         if (int.TryParse(_setKiteInterval.Text, out var interval)) _settings.KiteIntervalSeconds = interval;
         _settings.EventTeacher = _setTeacher.IsChecked == true;
+        _settings.EventTeacherExchange = _setTeacherEx.IsChecked == true;
+        _settings.DailyKnbBuy = _setKnb.IsChecked == true;
+        _settings.BuffTtl = _setBuffTtl.IsChecked == true;
+        _settings.BuffTtlSpecial = _setBuffTtlSp.IsChecked == true;
+        _settings.BuffQht = _setBuffQht.IsChecked == true;
         if (int.TryParse(_setTeacherCap.Text, out var cap)) _settings.EventTeacherSpendCap = cap;
         SaveSettings(); // Normalize giới hạn các giá trị về khoảng hợp lệ
         LoadSettingsForm(); // hiện lại giá trị đã giới hạn
@@ -903,7 +923,7 @@ public partial class MainWindow : Window
             f.Controller.RequestMode(code, DateTime.Now);
         SaveSettings(); // nhớ vòng tự động / Leo Tháp đã chọn cho từng acc
         CommandFeedback.Foreground = Res("TextDim");
-        CommandFeedback.Text = code == "quest"
+        CommandFeedback.Text = code == "auto"
             ? $"Đã bắt đầu vòng tự động cho {targets.Count} acc"
             : $"Đã chuyển {targets.Count} acc sang {button.Content} (tắt vòng tự động)";
         RefreshAll();

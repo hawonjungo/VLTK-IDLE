@@ -91,10 +91,47 @@ var VLParse = (() => {
       bouquets: n(/💐\s*Bó Hoa Tri Ân:\s*(\d+)/), cards: n(/✉\s*Thiệp Tri Ân:\s*(\d+)/),
       roses: n(/🌹\s*Hoa Hồng:\s*(\d+)/), wraps: n(/🎀\s*Giấy Gói:\s*(\d+)/),
       wrapPrice: n(/Giấy Gói\s+(\d+)\s*vạn lượng/), endsOn: (t.match(/hết ngày\s*(\d{1,2}\/\d{1,2})/) || [])[1] || '',
+      paper: n(/Giấy Hồng Điều:\s*(\d+)/), brush: n(/Bút Lông:\s*(\d+)/), ink: n(/Mực Tàu:\s*(\d+)/),
+      daysLeft: null, exchanges: [],
     };
+    // "còn 22 ngày 7 giờ" → còn 23 ngày tặng được (tính cả hôm nay)
+    const left = t.match(/còn\s+(\d+)\s*ngày(?:\s*(\d+)\s*giờ)?/);
+    if (left) r.daysLeft = +left[1] + (left[2] && +left[2] > 0 ? 1 : 0);
+    // "Đổi nguyên liệu thừa": "1 Đại Hồng Bao 100 mỗi loại (400 món) · 0/1 hôm nay (cả tài khoản) Đổi" – theo thứ tự
+    // trên bảng, trùng thứ tự nút data-ng="doi:0".."doi:4"
+    const ex = t.split(/Đổi nguyên liệu thừa/)[1] || '';
+    for (const m of ex.matchAll(/1\s+(.+?)\s+(\d+)\s*mỗi loại[^·]*·\s*(\d+)\s*\/\s*(\d+)\s*hôm nay/g))
+      r.exchanges.push({ name: m[1], cost: +m[2], done: +m[3], max: +m[4] });
     return [r.today, r.cap, r.bouquets, r.cards, r.roses, r.wraps].some((v) => v == null) ? null : r;
   };
 
-  return { num, knb, daTau, dungeons, boat, weekBoss, assassin, ldtShop, teacher };
+  // Ngân lượng: ô #gold "12.754 vạn" / Kỳ Trân Các "6329 vạn 3023 lượng" → số vạn; chỉ có lượng ("8521 lượng") → 0
+  const silver = (text) => {
+    const t = clean(text);
+    const m = t.match(/([\d.,]+\s*[kKmM]?)\s*vạn/);
+    if (m) return num(m[1]);
+    return /^[\d.,]+\s*lượng$/.test(t) ? 0 : null;
+  };
+
+  // Kỳ Trân Các › Bảng Kim Nguyên Bảo › Đổi KNB, thẻ Kim Nguyên Bảo: "1 vạn lượng = 1 KNB · tối đa 1.000 / ngày …
+  // Hôm nay đã đổi 0 · còn đổi được 1.000" → { done, left, price } (price = vạn cho 1 KNB)
+  const knbShop = (text) => {
+    const t = clean(text);
+    const m = t.match(/Hôm nay đã đổi\s+([\d.,]+)\s*·\s*còn đổi được\s+([\d.,]+)/i);
+    const p = t.match(/(\d+)\s*vạn lượng\s*=\s*1\s*KNB/i);
+    if (!m || !p) return null;
+    const done = num(m[1]), left = num(m[2]);
+    return done == null || left == null ? null : { done, left, price: +p[1] };
+  };
+
+  // Thời gian còn lại của một trạng thái trên thanh #skBuffs: "40h" / "1m" / "22s" → giây; "N/A" (không hết hạn) → Infinity
+  const buffLeft = (text) => {
+    const t = clean(text);
+    if (/^N\/?A$/i.test(t)) return Infinity;
+    const m = t.match(/^(\d+)\s*([hms])$/i);
+    return m ? +m[1] * ({ h: 3600, m: 60, s: 1 })[m[2].toLowerCase()] : null;
+  };
+
+  return { num, knb, daTau, dungeons, boat, weekBoss, assassin, ldtShop, teacher, silver, knbShop, buffLeft };
 })();
 if (typeof module !== 'undefined') module.exports = VLParse;

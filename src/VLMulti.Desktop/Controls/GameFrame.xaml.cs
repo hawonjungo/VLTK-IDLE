@@ -88,7 +88,7 @@ public partial class GameFrame : UserControl, IGamePage
         {
             UpdateTitle();
             UpdateInfoText();
-            UpdateAutoModeButton(); // bấm Nhiệm Vụ bật vòng tự động, chế độ khác tắt
+            UpdateAutoModeButton(); // bấm 🔁 Auto bật vòng tự động, chế độ khác tắt
             InfoChanged?.Invoke(this);
         };
         Controller.StatusChanged += () => SetStatus(Controller.StatusText, Controller.StatusLevel);

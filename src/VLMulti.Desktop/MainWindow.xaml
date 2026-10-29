@@ -74,8 +74,10 @@
                 </StackPanel>
                 <StackPanel Orientation="Horizontal">
                     <TextBlock x:Name="GroupLabel" Margin="0,0,8,0" VerticalAlignment="Center" Foreground="{StaticResource TextDim}" />
-                    <Button Style="{StaticResource PrimaryButton}" Content="Nhiệm Vụ" Tag="quest" Click="Mode_Click"
+                    <Button Style="{StaticResource PrimaryButton}" Content="🔁 Auto" Tag="auto" Click="Mode_Click"
                             ToolTip="Bắt đầu vòng tự động: nhận quà, mua lệnh bài → Nhiệm Vụ → Phó Bản → Đi thuyền → Boss tuần → Sát Thủ → Leo Tháp → Luyện Công" />
+                    <Button Style="{StaticResource BarButton}" Content="Nhiệm Vụ" Tag="quest" Click="Mode_Click"
+                            ToolTip="Nhận quà, mua lệnh bài rồi làm Nhiệm Vụ (Dã Tẩu), chỉ Nhiệm Vụ (tắt vòng tự động)" />
                     <Button Style="{StaticResource BarButton}" Content="Leo Tháp" Tag="tower" Click="Mode_Click"
                             ToolTip="Vào Thông Thiên Tháp leo tiếp tầng đang dừng (tắt vòng tự động)" />
                     <Button Style="{StaticResource BarButton}" Content="Phó Bản" Tag="dg" Click="Mode_Click"

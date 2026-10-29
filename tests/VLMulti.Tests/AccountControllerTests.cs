@@ -375,15 +375,25 @@ public class AccountControllerTests
     }
 
     [Fact]
-    public void Quest_button_starts_auto_loop_and_other_modes_stop_it()
+    public void Auto_button_starts_auto_loop_and_other_modes_stop_it()
     {
-        var (ctl, _, _) = Make();
+        var (ctl, page, _) = Make();
         var t = Run(ctl, T0, 15, Status("game", mode: "farm", dt: "40/40", ldtHave: "60", ldtUsed: "100/160", ldtBuy: "40/100"));
-        ctl.RequestMode("quest", t);
+        ctl.RequestMode("auto", t);
         Assert.True(ctl.Account.AutoMode);
         Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("🔁 Bắt đầu vòng tự động"));
+        Assert.Single(BuyRequests(page)); // vòng bắt đầu bằng nhận quà + mua lệnh bài như trước
         ctl.RequestMode("farm", t.AddSeconds(5));
         Assert.False(ctl.Account.AutoMode);
+
+        // Nhiệm Vụ = chỉ Nhiệm Vụ: vẫn nhận quà / mua lệnh bài rồi vào Nhiệm Vụ, nhưng tắt vòng tự động
+        ctl.RequestMode("auto", t.AddSeconds(10));
+        ctl.RequestMode("quest", t.AddSeconds(15));
+        Assert.False(ctl.Account.AutoMode);
+        Assert.Equal(3, BuyRequests(page).Count);
+        ctl.OnPageMessage("""{"t":"ldtResult","r":"ok","bought":0,"spent":0,"left":0}""", t.AddSeconds(20));
+        Assert.Equal("quest", ModeCommands(page).Last());
+        Assert.Contains(ctl.Activity.Items, e => e.Text == "🔁 Dừng vòng tự động (bạn chọn Nhiệm Vụ)");
     }
 
     // Chạy tới khi app ra lệnh đổi sang `mode` (trang giả không tự đổi chế độ như game thật)
@@ -406,7 +416,7 @@ public class AccountControllerTests
         // Dã Tẩu xong, hết lệnh bài, đã mua đủ hôm nay → Phó Bản còn lượt → vào Phó Bản
         var done = Status("game", mode: "quest", dt: "200/200", pb: "2/4", ldtHave: "0", ldtUsed: "160/160", ldtBuy: "100/100");
         var t = Run(ctl, T0, 15, done);
-        ctl.RequestMode("quest", t);
+        ctl.RequestMode("auto", t);
         t = RunUntilMode(ctl, page, t, done, "dg");
         t = Run(ctl, t.AddSeconds(3), 6, Status("game", mode: "dg", dt: "200/200", pb: "2/4", ldtHave: "0", ldtUsed: "160/160", ldtBuy: "100/100"));
         var steps = ctl.AutoChain(t);
@@ -525,6 +535,85 @@ public class AccountControllerTests
         cfg2.EventTeacher = false;
         Run(ctl2, T0, 5 * 60, st);
         Assert.DoesNotContain(page2.Sent, m => m.GetProperty("t").GetString() == "teacher");
+    }
+
+    [Fact]
+    public void Teacher_event_exchange_option_is_passed_and_gifts_are_logged()
+    {
+        var (ctl, page, cfg) = Make();
+        var st = Status("game", mode: "tower", zone: "Thông Thiên Tháp · tầng 900");
+        var t = Run(ctl, T0, 120, st);
+        var req = Assert.Single(page.Sent, m => m.GetProperty("t").GetString() == "teacher");
+        Assert.True(req.GetProperty("arg").GetProperty("exchange").GetBoolean());
+        ctl.OnPageMessage("""{"t":"teacherResult","r":"ok","gifted":0,"crafted":0,"today":40,"cap":40,"points":277,"bouquets":81,"exchanged":"Đại Hồng Bao|Tiên Thảo Lộ Đặc Biệt|Tiên Thảo Lộ Đặc Biệt|Hồng Bao"}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text == "🎁 Tri Ân Nhà Giáo: đổi nguyên liệu thừa lấy 1 Đại Hồng Bao, 2 Tiên Thảo Lộ Đặc Biệt, 1 Hồng Bao");
+
+        var (ctl2, page2, cfg2) = Make();
+        cfg2.EventTeacherExchange = false;
+        Run(ctl2, T0, 120, st);
+        Assert.False(Assert.Single(page2.Sent, m => m.GetProperty("t").GetString() == "teacher").GetProperty("arg").GetProperty("exchange").GetBoolean());
+    }
+
+    private static List<JsonElement> Sent(FakePage page, string type) =>
+        page.Sent.Where(m => m.GetProperty("t").GetString() == type).ToList();
+
+    [Fact]
+    public void Knb_exchange_runs_once_a_day_and_logs()
+    {
+        var (ctl, page, cfg) = Make();
+        cfg.EventTeacher = false; // việc sự kiện đang chờ trang trả lời thì việc đổi KNB đợi (không chen hai việc một lúc)
+        var problems = new List<string>();
+        ctl.Problem += (key, _) => problems.Add(key);
+        var st = Status("game", mode: "tower", zone: "Thông Thiên Tháp · tầng 900");
+        var t = Run(ctl, T0, 100, st);
+        Assert.Empty(Sent(page, "knbBuy"));                   // chờ 2 phút sau khi vào game
+        t = Run(ctl, t, 40, st);
+        Assert.Single(Sent(page, "knbBuy"));
+
+        ctl.OnPageMessage("""{"t":"knbResult","r":"busy"}""", t);
+        t = Run(ctl, t, 6 * 60, st);
+        Assert.Equal(2, Sent(page, "knbBuy").Count);          // đang bận → thử lại sau 5 phút
+        ctl.OnPageMessage("""{"t":"knbResult","r":"ok","bought":1000,"spent":1000,"opened":10,"gained":4300,"done":1000,"left":0}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text == "💰 Đổi 1000 vạn → 1000 KNB (hôm nay 1000/1000)");
+        Assert.Contains(ctl.Activity.Items, e => e.Text == "🧧 Thiếu vạn lượng: mở 10 Hồng Bao (+4300 vạn)");
+        Run(ctl, t, 60 * 60, st);
+        Assert.Equal(2, Sent(page, "knbBuy").Count);          // xong hôm nay
+        Assert.DoesNotContain("knb-buy", problems);
+
+        var (ctl2, page2, cfg2) = Make();
+        cfg2.DailyKnbBuy = false;
+        Run(ctl2, T0, 10 * 60, st);
+        Assert.Empty(Sent(page2, "knbBuy"));
+    }
+
+    [Fact]
+    public void Buffs_are_kept_up_with_enabled_items_and_low_items_pause()
+    {
+        var (ctl, page, cfg) = Make();
+        cfg.BuffTtl = false;
+        var st = Status("game", mode: "tower", zone: "Thông Thiên Tháp · tầng 900");
+        var t = Run(ctl, T0, 70, st);
+        var req = Assert.Single(Sent(page, "buffs"));
+        var arg = req.GetProperty("arg");
+        Assert.Equal(new[] { "ttsp", "qht" }, arg.GetProperty("items").EnumerateArray().Select(x => x.GetString()));
+        Assert.Equal(10, arg.GetProperty("keep").GetInt32());
+
+        ctl.OnPageMessage("""{"t":"buffResult","r":"ok","used":"qht:66","low":"ttsp:3","failed":""}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text == "✨ Dùng 1 Quế Hoa Tửu (còn 66)");
+        Assert.Contains(ctl.Activity.Items, e => e.Text == "✨ Tiên Thảo Lộ Đặc Biệt: còn 3, chừa 10 – không dùng thêm");
+        t = Run(ctl, t, 3 * 60, st);
+        var next = Sent(page, "buffs").Last().GetProperty("arg").GetProperty("items").EnumerateArray().Select(x => x.GetString());
+        Assert.Equal(new[] { "qht" }, next);                 // món đã chạm mức chừa: thôi xét 60 phút
+
+        // Đủ cả, không làm gì: không ghi nhật ký
+        int notes = ctl.Activity.Items.Count;
+        ctl.OnPageMessage("""{"t":"buffResult","r":"ok","used":"","low":""}""", t);
+        Assert.Equal(notes, ctl.Activity.Items.Count);
+
+        var (ctl2, page2, cfg2) = Make();
+        cfg2.BuffTtl = cfg2.BuffTtlSpecial = cfg2.BuffQht = false;
+        Run(ctl2, T0, 10 * 60, st);
+        Assert.Empty(Sent(page2, "buffs"));
     }
 
     [Fact]
@@ -704,13 +793,13 @@ public class AccountControllerTests
         });
         int Cmds() => page.Sent.Count(m => m.GetProperty("t").GetString() == "cmd");
 
-        // Đang đi thuyền: bấm Nhiệm Vụ chỉ bật vòng, không đổi chế độ
+        // Đang đi thuyền: bấm Auto chỉ bật vòng, không đổi chế độ
         var t = Run(ctl, T0, 15, Ev("farm", "3/3"));
         ctl.SetAutoMode(true, t);
         t = Run(ctl, t, 60, Ev("farm", "3/3"));
         Assert.Contains("boat", page.Commands);
         int sent = Cmds();
-        ctl.RequestMode("quest", t);
+        ctl.RequestMode("auto", t);
         Assert.Equal(sent, Cmds());
         Assert.DoesNotContain(page.Sent, m => m.GetProperty("t").GetString() == "buyLdt");
 
