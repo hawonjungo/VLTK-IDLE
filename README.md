@@ -71,6 +71,7 @@ milestone rewards and golden-item drops, and keeps an inventory of held *Đồ p
 | Browser | 4 × WebView2 inside the window | Headless Chromium via Playwright |
 | You control it from | The app window | A mobile-first web page (installable as a PWA) |
 | Watch a character | It's on screen | *Live* view: CDP screencast over WebSocket, with tap/scroll forwarding |
+| Play a character yourself | Click into its frame | *Play*: the server releases the account and opens the game in a new tab; closing that tab hands the account back |
 | Saved passwords | Encrypted with Windows DPAPI | AES with a key file that stays on the server |
 
 Both share the same brain (`VLMulti.Core`), so the auto-loop, recovery and detection rules behave the same.

@@ -136,6 +136,9 @@ input, select { background: var(--card-2); color: var(--text); border: 1px solid
 .acc-actions .btn.primary { flex: 1; min-height: 48px; font-size: 16px; display: flex; align-items: center; justify-content: center; gap: 8px; }
 .acc-actions .icon-btn { width: 48px; height: 48px; background: var(--card-2); }
 .acc.off .acc-row { cursor: default; }
+.acc.playing { border-color: var(--warn, #c90); }
+.play-actions { padding: 0 12px 12px; }
+.play-actions .btn { flex: 1; min-height: 44px; }
 
 /* Thanh đổi chế độ khi đang chọn acc */
 .select-bar {

@@ -30,6 +30,10 @@ public sealed class ServerOptions
     // Tạm dừng: mọi acc thoát game để nhường cho máy khác (bản PC, điện thoại). Giữ nguyên khi khởi động lại.
     public bool Paused { get; set; }
 
+    // ▶ Chơi: acc bạn đang tự chơi trên trình duyệt của mình (id → lúc bắt đầu). Server không mở acc này cho tới khi
+    // bạn trả lại (đóng tab game hoặc bấm "Trả lại server"); giữ nguyên khi khởi động lại để không đẩy bạn ra.
+    public Dictionary<string, DateTime> PlayingElsewhere { get; set; } = new();
+
     // Mật khẩu trang web (PBKDF2), đặt bằng --set-password
     public string? PasswordHash { get; set; }
     public string? PasswordSalt { get; set; }

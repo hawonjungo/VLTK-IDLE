@@ -131,6 +131,10 @@ app.MapPost("/api/acc/{id}/automode", (string id) => manager.ToggleAutoMode(id) 
 app.MapPost("/api/acc/{id}/select", (string id, ToggleRequest req) => manager.SetSelected(id, req.On) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/enabled", async (string id, ToggleRequest req) =>
     await manager.SetEnabledAsync(id, req.On) is { } error ? Results.Json(new { error }, statusCode: 400) : Results.Ok());
+app.MapPost("/api/acc/{id}/play", async (string id) =>
+    await manager.PlayAsync(id) is { } error ? Results.Json(new { error }, statusCode: 400) : Results.Ok());
+app.MapPost("/api/acc/{id}/return", async (string id) =>
+    await manager.ReturnAsync(id) is { } error ? Results.Json(new { error }, statusCode: 400) : Results.Ok());
 app.MapPost("/api/acc/{id}/credentials", (string id, CredentialRequest req) =>
     manager.SetCredentials(id, req.User, req.Password) ? Results.Ok() : Results.Json(new { error = "Thiếu tài khoản hoặc mật khẩu" }, statusCode: 400));
 

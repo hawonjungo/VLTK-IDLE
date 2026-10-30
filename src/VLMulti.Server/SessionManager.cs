@@ -59,7 +59,7 @@ public sealed class SessionManager : IAsyncDisposable
 
         if (_options.Paused) Log.Write("server paused: game sessions not started");
         else
-            foreach (var acc in _settings.Accounts.Where(a => a.Enabled))
+            foreach (var acc in _settings.Accounts.Where(a => a.Enabled && !IsPlaying(a.Id)))
                 await StartSessionAsync(acc, TimeSpan.FromSeconds(Sessions.Count * 6));
 
         _loopCts = new CancellationTokenSource();
@@ -165,7 +165,11 @@ public sealed class SessionManager : IAsyncDisposable
         var rows = _settings.Accounts.Select(acc =>
         {
             if (!sessions.TryGetValue(acc.Id, out var s))
-                return (object)new { id = acc.Id, name = acc.DisplayName, sect = acc.Sect, enabled = false, lastDoPho = acc.LastDoPho, lastDoPhoAt = acc.LastDoPhoAt };
+                return (object)new
+                {
+                    id = acc.Id, name = acc.DisplayName, sect = acc.Sect, enabled = false, lastDoPho = acc.LastDoPho, lastDoPhoAt = acc.LastDoPhoAt,
+                    playingSince = PlayingSince(acc.Id),
+                };
 
             lock (s.Gate)
             {
@@ -241,6 +245,7 @@ public sealed class SessionManager : IAsyncDisposable
                 paused = _options.Paused,
                 alerts = _alerts.Items.Take(50).Select(a => new { at = a.At, account = a.AccountName, message = a.Message }),
                 live = liveId,
+                gameUrl = _settings.GameUrl,
                 settings = new
                 {
                     kiteDirection = _settings.KiteDirection,
@@ -483,10 +488,77 @@ public sealed class SessionManager : IAsyncDisposable
             }
             else
             {
-                foreach (var acc in _settings.Accounts.Where(a => a.Enabled))
+                foreach (var acc in _settings.Accounts.Where(a => a.Enabled && !IsPlaying(a.Id)))
                     await StartSessionAsync(acc, TimeSpan.FromSeconds(Sessions.Count * 6));
                 Log.Write("server resumed");
             }
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    // ---------- ▶ Chơi trên trình duyệt của bạn ----------
+
+    private bool IsPlaying(string id)
+    {
+        lock (_gate) return _options.PlayingElsewhere.ContainsKey(id);
+    }
+
+    private DateTime? PlayingSince(string id)
+    {
+        lock (_gate) return _options.PlayingElsewhere.TryGetValue(id, out var t) ? t : null;
+    }
+
+    // Nhả acc cho bạn chơi: đóng game của acc trên server (lưu dữ liệu trình duyệt trước) để bạn đăng nhập ở trình duyệt
+    // của mình mà không bị giành lại. Các acc khác chạy bình thường.
+    public async Task<string?> PlayAsync(string id)
+    {
+        if (AccountOf(id) is not { } acc) return "Không có acc này";
+        await _lifecycle.WaitAsync();
+        try
+        {
+            if (_options.Paused) return "Server đang tạm dừng – các acc đã thoát game, cứ mở game mà chơi";
+            if (!acc.Enabled) return "Acc này đang tắt";
+            GameSession? session;
+            lock (_gate)
+            {
+                _options.PlayingElsewhere[id] = DateTime.Now;
+                _options.Save();
+                _sessions.Remove(id, out session);
+                if (_liveId == id) _liveCts?.Cancel();
+            }
+            if (session is not null) await session.DisposeAsync();
+            Log.Write($"[{id}] handed to the user (play in own browser)");
+            return null;
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    // Bạn chơi xong (đóng tab game / bấm Trả lại server): mở lại acc, tự đăng nhập và chạy tiếp việc cũ
+    // (vòng tự động, Leo Tháp… lưu trong cài đặt acc nên không mất)
+    public async Task<string?> ReturnAsync(string id)
+    {
+        if (AccountOf(id) is not { } acc) return "Không có acc này";
+        await _lifecycle.WaitAsync();
+        try
+        {
+            DateTime since;
+            lock (_gate)
+            {
+                if (!_options.PlayingElsewhere.Remove(id, out since)) return null; // đã trả rồi (hai tab cùng báo)
+                _options.Save();
+            }
+            var played = DateTime.Now - since;
+            Log.Write($"[{id}] returned by the user after {played.TotalMinutes:0} min");
+            if (_options.Paused || !acc.Enabled || Find(id) is not null) return null;
+            await StartSessionAsync(acc, TimeSpan.Zero);
+            Find(id)?.Locked(c => c.Note(DateTime.Now, $"🎮 Bạn chơi xong ({Math.Max(1, (int)played.TotalMinutes)} phút) – server đăng nhập lại và chạy tiếp", StatusLevel.Ok));
+            return null;
         }
         finally
         {
@@ -503,6 +575,7 @@ public sealed class SessionManager : IAsyncDisposable
             if (_options.Paused) return "Server đang tạm dừng – bấm Chạy lại trước";
             if (enabled)
             {
+                lock (_gate) if (_options.PlayingElsewhere.Remove(id)) _options.Save();
                 if (Find(id) is not null) return null;
                 acc.Enabled = true;
                 SaveSettings();

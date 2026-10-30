@@ -32,6 +32,7 @@ function icon(path, size = 20) {
   return svg;
 }
 const ICON_LIVE = 'M2 5h20v14H2zM10 9l5 3-5 3z';
+const ICON_PLAY = 'M7 4l13 8-13 8z';
 const ICON_MORE = 'M5 12h.01M12 12h.01M19 12h.01';
 
 async function api(path, body) {
@@ -186,7 +187,7 @@ function renderHome() {
   for (const a of state.accounts) {
     seen.add(a.id);
     let el = list.querySelector(`[data-id="${a.id}"]`);
-    const card = a.enabled ? accCard(a) : offCard(a);
+    const card = a.playingSince ? playCard(a) : a.enabled ? accCard(a) : offCard(a);
     if (el) el.replaceWith(card); else list.append(card);
   }
   for (const el of [...list.children]) if (!seen.has(el.dataset.id)) el.remove();
@@ -295,7 +296,10 @@ function accDetail(a) {
   ]);
 
   const actions = h('div', { class: 'acc-actions' }, [
-    h('button', { class: 'btn primary', onclick: () => openLive(a.id, a.name) }, [icon(ICON_LIVE), a.live ? 'Live •' : 'Live']),
+    h('button', { class: 'btn primary', title: 'Mở game trên trình duyệt này để tự chơi; đóng tab game thì acc tự về server',
+      onclick: () => startPlay(a) }, [icon(ICON_PLAY), 'Chơi']),
+    h('button', { class: 'btn', title: 'Xem nhanh màn hình acc trên server (acc vẫn chạy tự động)',
+      onclick: () => openLive(a.id, a.name) }, [icon(ICON_LIVE), a.live ? 'Xem •' : 'Xem']),
     h('button', { class: 'icon-btn', 'aria-label': 'Thêm thao tác', onclick: () => openAccMenu(a.id) }, [icon(ICON_MORE)]),
   ]);
   return h('div', { class: 'acc-detail' }, [stats, chain, dopho, more, actions]);
@@ -308,6 +312,69 @@ function offCard(a) {
       h('span', { class: 'acc-main' }, [h('span', { class: 'acc-name' }, [h('b', { text: a.name })]),
         h('span', { class: 'acc-sub', text: state.paused ? 'Đang tạm dừng' : 'Đã tắt' })]),
       state.paused ? null : h('button', { class: 'btn small', text: 'Bật lại', onclick: () => act(`acc/${a.id}/enabled`, { on: true }, 'Đang mở lại acc…') }),
+    ]),
+  ]);
+}
+
+// ---------- ▶ Chơi: tự chơi acc trên trình duyệt này ----------
+// Server nhả acc (thoát game của acc) rồi mở game ở tab mới. Trang này để ý tab đó: đóng tab → báo server nhận lại acc,
+// đăng nhập và chạy tiếp. Trang game là trang khác nên chỉ biết được tab đã đóng hay chưa, không đọc được gì bên trong.
+const playTabs = new Map(); // id → tab game đang mở từ trang này
+
+async function startPlay(a) {
+  // Mở tab ngay trong lúc bấm (mở sau khi chờ server thì trình duyệt chặn cửa sổ bật lên), rồi mới chuyển tới game
+  const w = window.open('', `vlplay-${a.id}`);
+  if (!w) { toast('Trình duyệt chặn mở tab mới – cho phép cửa sổ bật lên của trang này rồi bấm lại'); return; }
+  try { w.document.title = `${a.name} – đang mở…`; w.document.body.textContent = 'Đang nhả acc trên server, chờ chút…'; } catch (_) {}
+  try {
+    await api(`acc/${a.id}/play`, {});
+  } catch (e) {
+    w.close();
+    if (e.message !== 'unauthorized') toast(e.message);
+    return;
+  }
+  w.location.href = state.gameUrl || 'https://volamidle.pages.dev/';
+  playTabs.set(a.id, w);
+  toast(`${a.name}: server đã nhả acc – đăng nhập ở tab mới. Đóng tab game là acc tự về server.`);
+  refresh();
+}
+
+// Mở lại tab game (ví dụ trang này đã tải lại nên không còn theo dõi được tab cũ). Cùng tên tab → tab cũ còn mở thì dùng lại.
+function reopenPlay(a) {
+  const w = window.open(state.gameUrl || 'https://volamidle.pages.dev/', `vlplay-${a.id}`);
+  if (!w) { toast('Trình duyệt chặn mở tab mới – cho phép cửa sổ bật lên của trang này rồi bấm lại'); return; }
+  playTabs.set(a.id, w);
+}
+
+async function returnPlay(id) {
+  playTabs.delete(id);
+  const a = state?.accounts.find((x) => x.id === id);
+  await act(`acc/${id}/return`, {}, `${a ? a.name : id}: đã trả acc cho server – đang đăng nhập lại`);
+}
+
+function checkPlayTabs() {
+  for (const [id, w] of playTabs) if (w.closed) returnPlay(id);
+}
+setInterval(checkPlayTabs, 2000);
+// Điện thoại cho trang này "ngủ" khi ở nền: quay lại là xét ngay
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkPlayTabs(); });
+
+function playCard(a) {
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(a.playingSince)) / 60000));
+  const watching = playTabs.has(a.id);
+  return h('article', { class: 'acc off playing', 'data-id': a.id }, [
+    h('div', { class: 'acc-row' }, [
+      h('span', { class: 'dot warn', 'aria-hidden': 'true' }),
+      h('span', { class: 'acc-main' }, [h('span', { class: 'acc-name' }, [h('b', { text: a.name })]),
+        h('span', { class: 'acc-sub', text: `🎮 Bạn đang chơi · ${mins < 1 ? 'vừa bắt đầu' : `${mins} phút`}${watching ? ' · đóng tab game là tự về server' : ''}` })]),
+    ]),
+    h('div', { class: 'acc-actions play-actions' }, [
+      watching ? null : h('button', { class: 'btn', text: 'Mở lại game', title: 'Mở tab game (trang này đã tải lại nên không còn theo dõi tab cũ)', onclick: () => reopenPlay(a) }),
+      h('button', { class: 'btn primary', text: 'Trả lại server', onclick: () => {
+        const w = playTabs.get(a.id);
+        if (w && !w.closed && !confirm(`Trả ${a.name} cho server? Tab game đang mở sẽ bị đẩy ra khi server đăng nhập lại.`)) return;
+        returnPlay(a.id);
+      } }),
     ]),
   ]);
 }
