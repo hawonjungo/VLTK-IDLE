@@ -49,6 +49,20 @@ test('Kỳ Trân Các › Đổi KNB, ngân lượng, thời gian trạng thái 
   assert.equal(P.buffLeft('?'), null);
 });
 
+test('Bang hội: cửa hàng, điểm cống hiến, góp lượng (mẫu thật)', () => {
+  const g = all.find(([f]) => f.startsWith('event-guild-'))[1];
+  assert.deepEqual(P.guildItem(g.ldt), { price: 20, done: 0, max: 10, weekly: false, locked: false });
+  assert.deepEqual(P.guildItem(g.ttsp), { price: 300, done: 5, max: 5, weekly: true, locked: false });
+  assert.deepEqual(P.guildItem(g.fdl1), { price: 100, done: 0, max: 10, weekly: false, locked: false });
+  assert.deepEqual(P.guildItem(g.ttk), { price: 600, done: 0, max: 0, weekly: false, locked: true });
+  assert.equal(P.guildItem('Đổi'), null);
+  assert.equal(P.guildPoints(g.shopHead), 3613);
+  assert.equal(P.guildPoints(g.gopHead), 3613);
+  assert.equal(P.guildPoints('Báo | 🏯 Bang'), null);
+  assert.deepEqual(P.guildDonate(g.gop), { done: 0, cap: 20000, can: 21400 });
+  assert.deepEqual(P.guildDonate(g.gop.replace('Hôm nay 0', 'Hôm nay 1.500')), { done: 1500, cap: 20000, can: 21400 });
+});
+
 test('số viết gọn của game', () => {
   assert.equal(P.num('17.2k'), 17200);
   assert.equal(P.num('11.2k'), 11200);

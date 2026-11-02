@@ -750,6 +750,150 @@
     return { r: failed.length ? 'failed' : 'ok', used: used.join(','), low: low.join(','), failed: failed.join(',') };
   };
 
+  // ---------- 🏯 Cửa hàng bang: mua món giới hạn ngày / tuần bằng điểm cống hiến ----------
+  // Bang hội (menu data-u="bang") › 🛒 Cửa hàng (data-bht="shop") › mục (data-bhsc) › nút data-bhmua="<món>" data-sl="1|10|…"
+  // → game hỏi lại ở #askBox ("Đổi 1 … với 20 điểm cống hiến?") → "Đồng ý" (data-a="1"). Thiếu điểm → góp vạn ở
+  // 💰 Cống hiến (#bhGopV + #bhGopVb, 1 vạn = 1 điểm), không quá arg.donateCap vạn mỗi ngày (tính cả phần đã góp hôm nay).
+  // Món mua xong gửi vào 📨 Hộp thư ("Cửa hàng bang: 1 Lệnh Bài Dã Tẩu") → chỉ nhận đúng các thư đó, không bấm "Nhận tất cả"
+  // (thư Chợ trả đồ phổ hết hạn bày bán… để bạn tự xử lý). Chưa vào bang (không có thẻ Cửa hàng) → 'no-guild'.
+  const GUILD_CAT = { ldt: 'vp', fdl1: 'vp', ttsp: 'vp', thbt: 'vp', tn: 'vp', tdt: 'vp' };
+  const guildBtn = (id, sl) => $(`#mBody [data-bhmua="${id}"][data-sl="${sl}"]`);
+  const guildState = (id) => { const c = guildBtn(id, 1)?.closest('.u2card'); return c ? VLParse.guildItem(c.innerText) : null; };
+  const guildPts = () => VLParse.guildPoints(($('#mBody') || {}).innerText);
+  // Bấm nút rồi đồng ý câu hỏi của game (chỉ khi câu hỏi đúng là về điểm cống hiến / góp)
+  const pressAndAgree = async (btn, re) => {
+    btn.click();
+    const ok = await waitFor(() => {
+      const box = $('#askBox');
+      if (!box || !isVisible(box) || !re.test(box.innerText)) return null;
+      return [...box.querySelectorAll('button')].find((b) => b.dataset.a === '1' || /^Đồng ý$/.test(b.textContent.trim()));
+    }, 2500);
+    if (!ok) {
+      const box = $('#askBox');
+      if (box && isVisible(box)) {
+        post({ t: 'log', msg: 'guild: unexpected dialog ' + box.innerText.replace(/\s+/g, ' ').slice(0, 120) });
+        [...box.querySelectorAll('button')].find((b) => /^Hủy$/.test(b.textContent.trim()))?.click();
+      }
+      return false;
+    }
+    ok.click();
+    return true;
+  };
+  const guildFlow = async (arg) => {
+    if (flowBusy || anyWindowOpen()) return { r: 'busy' };
+    if (inBossHk()) return { r: 'boss-hk' };
+    const menu = $('#u20menu > button[data-u="bang"]');
+    if (!menu) return { r: 'no-guild' };
+    flowBusy = true;
+    const res = { r: 'ok', bought: [], spent: 0, donated: 0, mails: 0, points: null };
+    try {
+      await guildShop(arg, menu, res);
+      if (res.r !== 'no-guild') await guildMail(res);
+    } finally {
+      flowBusy = false;
+    }
+    res.bought = res.bought.join(',');
+    return res;
+  };
+  const guildShop = async (arg, menu, res) => {
+    try {
+      menu.click();
+      if (!(await waitFor(() => $('#mBody [data-bht]'), 3000))) { res.r = 'no-window'; return; }
+      if (!$('#mBody [data-bht="shop"]')) { res.r = 'no-guild'; return; }
+      const showCat = async (cat) => {
+        $('#mBody [data-bht="shop"]').click();
+        if (!(await waitFor(() => $(`#mBody [data-bhsc="${cat}"]`), 2000))) return false;
+        $(`#mBody [data-bhsc="${cat}"]`).click();
+        return !!(await waitFor(() => $(`#mBody [data-bhmua][data-sl="1"]`) && guildPts() != null, 2000));
+      };
+      // Góp `amount` vạn; trả về số điểm sau khi góp (null nếu không được)
+      const donate = async (amount) => {
+        $('#mBody [data-bht="gop"]')?.click();
+        const input = await waitFor(() => $('#bhGopV'), 2000), btn = $('#bhGopVb');
+        if (!input || !btn) return null;
+        const before = guildPts();
+        setValue(input, String(amount));
+        if (!(await pressAndAgree(btn, /góp|cống hiến/i)) && !(await waitFor(() => (guildPts() ?? 0) > (before ?? 0), 1500))) return null;
+        return await waitFor(() => { const p = guildPts(); return p != null && p > (before ?? 0) ? p : null; }, 4000);
+      };
+      const donateInfo = async () => {
+        $('#mBody [data-bht="gop"]')?.click();
+        await waitFor(() => $('#bhGopV'), 2000);
+        const card = $('#bhGopV')?.closest('.u2card');
+        return card ? VLParse.guildDonate(card.innerText) : null;
+      };
+
+      for (const id of arg.items || []) {
+        const cat = GUILD_CAT[id] || 'vp';
+        if (!(await showCat(cat))) { res.r = 'no-shop'; break; }
+        let s = guildState(id);
+        if (!s) { reportUnreadable('guild-' + id, (guildBtn(id, 1)?.closest('.u2card') || $('#mBody') || {}).innerText || ''); continue; }
+        if (s.locked || s.done >= s.max) continue;
+        let points = guildPts() ?? 0;
+        let want = s.max - s.done;
+        // Thiếu điểm → góp vạn trong trần chi hôm nay
+        if (points < want * s.price && (arg.donateCap || 0) > 0) {
+          const info = await donateInfo();
+          const room = info ? Math.min(arg.donateCap - info.done, info.cap - info.done, info.can ?? Infinity) : 0;
+          const amount = Math.max(0, Math.min(want * s.price - points, room));
+          if (amount > 0) {
+            const after = await donate(amount);
+            if (after != null) { res.donated += after - points; points = after; }
+          }
+          if (!(await showCat(cat))) { res.r = 'no-shop'; break; }
+          s = guildState(id) || s;
+        }
+        want = Math.min(s.max - s.done, Math.floor(points / s.price));
+        let misses = 0;
+        while (want > 0 && misses < 3) {
+          // Nút nhiều nhất không quá số cần (×10, ×5, ×6…), không có thì từng cái
+          const sizes = [...document.querySelectorAll(`#mBody [data-bhmua="${id}"]`)].map((b) => +b.dataset.sl).filter((n) => n > 0 && n <= want);
+          const sl = Math.max(1, ...sizes);
+          const btn = guildBtn(id, sl);
+          if (!btn || btn.disabled) break;
+          const before = s.done;
+          if (!(await pressAndAgree(btn, /điểm cống hiến/i))) { misses++; continue; }
+          const now = await waitFor(() => { const x = guildState(id); return x && x.done > before ? x : null; }, 4000);
+          if (!now) { misses++; continue; }
+          const got = now.done - before;
+          res.bought.push(`${id}:${got}`); res.spent += got * s.price;
+          s = now; want -= got;
+        }
+      }
+      res.points = guildPts();
+      $('#mBody [data-bht="bang"]')?.click(); // để bảng về mục mặc định như lúc bạn mở
+    } catch (err) {
+      res.r = 'error: ' + err.message;
+    } finally {
+      try { await closeModalSure(); } catch (_) {}
+    }
+  };
+  // Nhận thư "Cửa hàng bang: …" (cả thư còn lại từ hôm trước)
+  const guildMail = async (res) => {
+    try {
+      const mail = $('#u20mail');
+      if (mail) {
+        mail.click();
+        if (await waitFor(() => $('#mBody .nmrow') || $('#mBody #nmAll'), 3000)) {
+          // Nhận xong một thư game vẽ lại cả danh sách: chờ một nhịp rồi tìm lại từ đầu (nút cũ đã bị thay)
+          for (let i = 0, misses = 0; i < 40 && misses < 3; i++) {
+            await sleep(600);
+            const row = [...document.querySelectorAll('#mBody .nmrow')].find((r) => /Cửa hàng bang:/.test(r.innerText) && r.querySelector('[data-take]'));
+            if (!row) break;
+            const id = row.querySelector('[data-take]').dataset.take;
+            row.querySelector('[data-take]').click();
+            if (isVisible($('#askBox'))) [...$('#askBox').querySelectorAll('button')].find((b) => b.dataset.a === '1')?.click();
+            if (await waitFor(() => !$(`#mBody [data-take="${id}"]`), 4000)) res.mails++; else misses++;
+          }
+        }
+        await closeModalSure();
+      }
+    } catch (err) {
+      post({ t: 'log', msg: 'guild mail: ' + err.message });
+      try { await closeModalSure(); } catch (_) {}
+    }
+  };
+
   // ---------- Tự nhận quà: 🎁 Phần thưởng › Điểm danh (mỗi ngày) và Mốc cấp ----------
   // Chạy đầu lượt bấm 📜 Nhiệm Vụ (trong buyLdtFlow). Nút còn nhận được thì không bị khoá (disabled);
   // đã nhận thì game đổi chữ thành "Đã nhận" và khoá lại.
@@ -968,6 +1112,8 @@
       teacherFlow(m.arg || {}).then((res) => post({ t: 'teacherResult', ...res }), (err) => post({ t: 'teacherResult', r: 'error: ' + err.message }));
     } else if (m.t === 'knbBuy') {
       knbFlow().then((res) => post({ t: 'knbResult', ...res }), (err) => post({ t: 'knbResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'guild') {
+      guildFlow(m.arg || {}).then((res) => post({ t: 'guildResult', ...res }), (err) => post({ t: 'guildResult', r: 'error: ' + err.message }));
     } else if (m.t === 'buffs') {
       buffFlow(m.arg || {}).then((res) => post({ t: 'buffResult', ...res }), (err) => post({ t: 'buffResult', r: 'error: ' + err.message }));
     } else if (m.t === 'buyLdt') {

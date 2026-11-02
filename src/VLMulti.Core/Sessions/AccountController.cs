@@ -494,6 +494,9 @@ public sealed class AccountController
                 case "buffResult":
                     OnBuffResult(m, now);
                     break;
+                case "guildResult":
+                    OnGuildResult(m, now);
+                    break;
                 case "unreadable":
                     OnUnreadable(Str(m, "what"), Str(m, "sample"), now);
                     break;
@@ -862,6 +865,7 @@ public sealed class AccountController
         SuperviseTeacher(now);
         SuperviseKnbBuy(now);
         SuperviseBuffs(now);
+        SuperviseGuild(now);
         SuperviseStuck(now);
         SuperviseRecovery(now);
     }
@@ -1404,6 +1408,76 @@ public sealed class AccountController
         _buffLastTry = now;
         _buffPending = true;
         Post(new { t = "buffs", arg = new { items, keep = BuffKeep, minLeft = 300 } });
+    }
+
+    // ---------- 🏯 Cửa hàng bang: mỗi ngày một lần (trang làm, xem guildFlow trong agent.js) ----------
+
+    private static readonly Dictionary<string, string> GuildItemNames = new()
+    {
+        ["ldt"] = "Lệnh Bài Dã Tẩu", ["fdl1"] = "Bình Phúc Duyên Lộ", ["ttsp"] = "Tiên Thảo Lộ Đặc Biệt", ["thbt"] = "Tinh Hồng Bảo Thạch",
+    };
+    private DateOnly _guildDoneDay;
+    private DateTime _guildLastTry;
+    private bool _guildPending;
+    private int _guildFails;
+
+    private void SuperviseGuild(DateTime now)
+    {
+        var cfg = SettingsProvider?.Invoke();
+        if (cfg is null || !cfg.GuildShop || Screen != "game" || Away) return;
+        var items = new List<string>();
+        if (cfg.GuildLdt) items.Add("ldt");
+        if (cfg.GuildPhucDuyen) items.Add("fdl1");
+        if (cfg.GuildTtsp) items.Add("ttsp");
+        if (cfg.GuildThbt) items.Add("thbt");
+        if (items.Count == 0) return;
+        var vn = now.ToUniversalTime().AddHours(7);
+        if (_guildDoneDay == DateOnly.FromDateTime(vn) || vn.TimeOfDay < TimeSpan.FromMinutes(10)) return;
+        if (_guildPending && now - _guildLastTry < TimeSpan.FromMinutes(3)) return;
+        _guildPending = false;
+        if (_ldtBuyingSince is not null || _teacherPending || _knbPending || EventRunning(now)
+            || now - _screenSince < TimeSpan.FromSeconds(150) || now - _guildLastTry < TeacherRetryGap) return;
+        _guildLastTry = now;
+        _guildPending = true;
+        Post(new { t = "guild", arg = new { items, donateCap = cfg.GuildDonateCap } });
+    }
+
+    private void OnGuildResult(JsonElement m, DateTime now)
+    {
+        _guildPending = false;
+        int Int(string name) => m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
+        var r = Str(m, "r");
+        var bought = Str(m, "bought");
+        Log.Write($"[{Account.Id}] guild shop: {r} bought={bought} spent={Int("spent")} donated={Int("donated")} mails={Int("mails")} points={Int("points")}");
+        if (r is "busy" or "boss-hk") return;
+        var day = VnDate(now);
+        if (r == "no-guild")
+        {
+            _guildDoneDay = day;
+            Note(now, "🏯 Cửa hàng bang: acc chưa vào bang – bỏ qua hôm nay");
+            return;
+        }
+        var parts = bought.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Split(':'))
+            .Select(p => $"{(p.Length > 1 ? p[1] : "?")} {(GuildItemNames.TryGetValue(p[0], out var n) ? n : p[0])}").ToList();
+        if (parts.Count > 0 || Int("donated") > 0)
+        {
+            var text = parts.Count > 0 ? $"🏯 Cửa hàng bang: mua {string.Join(", ", parts)} (−{Int("spent")} điểm, còn {Int("points")})" : "🏯 Cửa hàng bang:";
+            if (Int("donated") > 0) text += $" · góp {Int("donated")} vạn";
+            if (Int("mails") > 0) text += $" · nhận {Int("mails")} thư";
+            Note(now, text, StatusLevel.Ok);
+        }
+        if (r == "ok")
+        {
+            _guildDoneDay = day;
+            _guildFails = 0;
+            return;
+        }
+        if (++_guildFails >= 3)
+        {
+            _guildDoneDay = day;
+            _guildFails = 0;
+            Raise("guild-shop", $"Cửa hàng bang: mua không được ({r}) – bỏ qua hôm nay");
+        }
     }
 
     private void OnBuffResult(JsonElement m, DateTime now)

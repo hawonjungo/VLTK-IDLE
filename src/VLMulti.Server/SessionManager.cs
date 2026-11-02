@@ -264,6 +264,12 @@ public sealed class SessionManager : IAsyncDisposable
                     buffTtl = _settings.BuffTtl,
                     buffTtlSpecial = _settings.BuffTtlSpecial,
                     buffQht = _settings.BuffQht,
+                    guildShop = _settings.GuildShop,
+                    guildLdt = _settings.GuildLdt,
+                    guildPhucDuyen = _settings.GuildPhucDuyen,
+                    guildTtsp = _settings.GuildTtsp,
+                    guildThbt = _settings.GuildThbt,
+                    guildDonateCap = _settings.GuildDonateCap,
                     autoFallback = _settings.AutoModeFallback,
                     towerRest = _settings.TowerRestMinutes,
                 },
@@ -635,6 +641,12 @@ public sealed class SessionManager : IAsyncDisposable
             if (u.BuffTtl is { } b1) _settings.BuffTtl = b1;
             if (u.BuffTtlSpecial is { } b2) _settings.BuffTtlSpecial = b2;
             if (u.BuffQht is { } b3) _settings.BuffQht = b3;
+            if (u.GuildShop is { } g0) _settings.GuildShop = g0;
+            if (u.GuildLdt is { } g1) _settings.GuildLdt = g1;
+            if (u.GuildPhucDuyen is { } g2) _settings.GuildPhucDuyen = g2;
+            if (u.GuildTtsp is { } g3) _settings.GuildTtsp = g3;
+            if (u.GuildThbt is { } g4) _settings.GuildThbt = g4;
+            if (u.GuildDonateCap is { } gd) _settings.GuildDonateCap = gd;
             if (u.AutoFallback is { } af) _settings.AutoModeFallback = af;
             if (u.TowerRest is { } tr) _settings.TowerRestMinutes = tr;
         }
@@ -679,4 +691,5 @@ public sealed record SettingsUpdate(
     string? KiteDirection, int? KiteDistance, int? KiteInterval,
     bool? AutoDungeon, bool? AutoQuest, string? AutoFallback, int? TowerRest, bool? AutoAssassin = null,
     bool? AutoBoat = null, bool? AutoWeekBoss = null, bool? EventTeacher = null, int? EventTeacherCap = null,
-    bool? EventTeacherExchange = null, bool? DailyKnb = null, bool? BuffTtl = null, bool? BuffTtlSpecial = null, bool? BuffQht = null);
+    bool? EventTeacherExchange = null, bool? DailyKnb = null, bool? BuffTtl = null, bool? BuffTtlSpecial = null, bool? BuffQht = null,
+    bool? GuildShop = null, bool? GuildLdt = null, bool? GuildPhucDuyen = null, bool? GuildTtsp = null, bool? GuildThbt = null, int? GuildDonateCap = null);

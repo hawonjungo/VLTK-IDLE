@@ -127,6 +127,32 @@ var VLParse = (() => {
     return done == null || left == null ? null : { done, left, price: +p[1] };
   };
 
+  // Bang hội › Cửa hàng, một thẻ món: "Lệnh Bài Dã Tẩu | 20 điểm | … | Hôm nay 0/10 | Đổi | ×10",
+  // "Tuần này 5/5 · hết lượt", "🔒 Cần bang cấp 4" → { price, done, max, weekly, locked }
+  const guildItem = (text) => {
+    const t = clean(text);
+    const p = t.match(/([\d.,]+)\s*điểm/);
+    if (!p) return null;
+    const locked = /🔒\s*Cần bang cấp/i.test(t);
+    const c = t.match(/(Hôm nay|Tuần này)\s+(\d+)\s*\/\s*(\d+)/i);
+    if (!c && !locked) return null;
+    return { price: num(p[1]), done: c ? +c[2] : 0, max: c ? +c[3] : 0, weekly: !!c && /Tuần/i.test(c[1]), locked };
+  };
+
+  // Điểm cống hiến của bạn: "⭐ 3613 điểm cống hiến" (Cửa hàng) / "⭐ 3613 cống hiến của bạn" (Cống hiến)
+  const guildPoints = (text) => {
+    const m = clean(text).match(/⭐\s*([\d.,]+\s*[kKmM]?)\s*(?:điểm cống hiến|cống hiến của bạn)/);
+    return m ? num(m[1]) : null;
+  };
+
+  // Bang hội › Cống hiến › Góp lượng: "Hôm nay 0 / 20.0k vạn · có thể góp / đổi 21.4k vạn" → { done, cap, can } (vạn)
+  const guildDonate = (text) => {
+    const m = clean(text).match(/Hôm nay\s+([\d.,]+\s*[kKmM]?)\s*\/\s*([\d.,]+\s*[kKmM]?)\s*vạn(?:\s*·\s*có thể góp[^\d]*([\d.,]+\s*[kKmM]?)\s*vạn)?/i);
+    if (!m) return null;
+    const done = num(m[1]), cap = num(m[2]), can = m[3] != null ? num(m[3]) : null;
+    return done == null || cap == null ? null : { done, cap, can };
+  };
+
   // Thời gian còn lại của một trạng thái trên thanh #skBuffs: "40h" / "1m" / "22s" → giây; "N/A" (không hết hạn) → Infinity
   const buffLeft = (text) => {
     const t = clean(text);
@@ -135,6 +161,6 @@ var VLParse = (() => {
     return m ? +m[1] * ({ h: 3600, m: 60, s: 1 })[m[2].toLowerCase()] : null;
   };
 
-  return { num, knb, daTau, dungeons, boat, weekBoss, assassin, ldtShop, teacher, silver, knbShop, buffLeft };
+  return { num, knb, daTau, dungeons, boat, weekBoss, assassin, ldtShop, teacher, silver, knbShop, buffLeft, guildItem, guildPoints, guildDonate };
 })();
 if (typeof module !== 'undefined') module.exports = VLParse;

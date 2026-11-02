@@ -547,6 +547,9 @@ function renderSettings() {
   const teacherEx = box(s.eventTeacherExchange !== false);
   const dailyKnb = box(s.dailyKnb !== false);
   const buffTtl = box(s.buffTtl !== false), buffTtlSp = box(s.buffTtlSpecial !== false), buffQht = box(s.buffQht !== false);
+  const guild = box(s.guildShop !== false), gLdt = box(s.guildLdt !== false), gFdl = box(s.guildPhucDuyen !== false);
+  const gTtsp = box(s.guildTtsp !== false), gThbt = box(s.guildThbt !== false);
+  const gDonate = h('input', { type: 'number', min: 0, max: 20000, value: s.guildDonateCap ?? 1500 });
   const fallback = h('select', {}, [['tower', 'Leo Tháp'], ['farm', 'Luyện Công']].map(([v, t]) => { const o = h('option', { value: v, text: t }); o.selected = v === s.autoFallback; return o; }));
   const rest = h('input', { type: 'number', min: 5, max: 720, value: s.towerRest });
 
@@ -622,6 +625,19 @@ function renderSettings() {
       h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', {
         dailyKnb: dailyKnb.checked, buffTtl: buffTtl.checked, buffTtlSpecial: buffTtlSp.checked, buffQht: buffQht.checked,
       }, 'Đã lưu việc mỗi ngày') }),
+    ]),
+    section('Cửa hàng bang', [
+      h('p', { class: 'note', text: 'Mỗi ngày mua bằng điểm cống hiến; món tuần mua khi tuần còn lượt. Thiếu điểm thì góp vạn (1 vạn = 1 điểm). Đồ gửi về Hộp thư được tự nhận (chỉ thư "Cửa hàng bang"). Acc chưa vào bang thì bỏ qua.' }),
+      h('label', { class: 'check-row' }, [guild, '🏯 Mua ở cửa hàng bang mỗi ngày']),
+      h('label', { class: 'check-row' }, [gLdt, 'Lệnh Bài Dã Tẩu (20 điểm · 10/ngày)']),
+      h('label', { class: 'check-row' }, [gFdl, 'Bình Phúc Duyên Lộ (Tiểu) (100 điểm · 10/ngày)']),
+      h('label', { class: 'check-row' }, [gTtsp, 'Tiên Thảo Lộ Đặc Biệt (300 điểm · 5/tuần)']),
+      h('label', { class: 'check-row' }, [gThbt, 'Tinh Hồng Bảo Thạch (60 điểm · 6/tuần)']),
+      h('div', { class: 'form-grid' }, [h('label', { text: 'Góp vạn tối đa (vạn/acc/ngày, 0 = không góp)' }), gDonate]),
+      h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', {
+        guildShop: guild.checked, guildLdt: gLdt.checked, guildPhucDuyen: gFdl.checked, guildTtsp: gTtsp.checked, guildThbt: gThbt.checked,
+        guildDonateCap: +gDonate.value,
+      }, 'Đã lưu cửa hàng bang') }),
     ]),
     section('Mật khẩu acc game', [
       h('p', { class: 'note', text: 'Mật khẩu được mã hoá và chỉ lưu trên máy chủ này, dùng để tự đăng nhập lại.' }),

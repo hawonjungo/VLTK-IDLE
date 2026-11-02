@@ -690,7 +690,9 @@ public partial class MainWindow : Window
     // ---------- Cài đặt ----------
 
     private CheckBox _setRecover = null!, _setSound = null!, _setTray = null!, _setTeacher = null!, _setTeacherEx = null!,
-        _setKnb = null!, _setBuffTtl = null!, _setBuffTtlSp = null!, _setBuffQht = null!;
+        _setKnb = null!, _setBuffTtl = null!, _setBuffTtlSp = null!, _setBuffQht = null!,
+        _setGuild = null!, _setGuildLdt = null!, _setGuildFdl = null!, _setGuildTtsp = null!, _setGuildThbt = null!;
+    private TextBox _setGuildDonate = null!;
     private TextBox _setTeacherCap = null!;
     private CheckBox _setQuest = null!, _setDungeon = null!, _setBoat = null!, _setWeekBoss = null!, _setAssassin = null!;
     private ComboBox _setFallback = null!, _setKiteDir = null!;
@@ -767,6 +769,15 @@ public partial class MainWindow : Window
         body.Add(_setBuffTtlSp = Box("🌺 Tiên Thảo Lộ Đặc Biệt (+100% kinh nghiệm)"));
         body.Add(_setBuffQht = Box("🍶 Quế Hoa Tửu (+20 may mắn)"));
 
+        body.Add(Section("Cửa hàng bang"));
+        body.Add(Note("Mỗi ngày mua bằng điểm cống hiến; món tuần mua khi tuần còn lượt. Thiếu điểm thì góp vạn (1 vạn = 1 điểm). Đồ gửi về Hộp thư được tự nhận (chỉ thư \"Cửa hàng bang\"). Acc chưa vào bang thì bỏ qua."));
+        body.Add(_setGuild = Box("🏯 Mua ở cửa hàng bang mỗi ngày"));
+        body.Add(_setGuildLdt = Box("Lệnh Bài Dã Tẩu (20 điểm · 10/ngày)"));
+        body.Add(_setGuildFdl = Box("Bình Phúc Duyên Lộ (Tiểu) (100 điểm · 10/ngày)"));
+        body.Add(_setGuildTtsp = Box("Tiên Thảo Lộ Đặc Biệt (300 điểm · 5/tuần)"));
+        body.Add(_setGuildThbt = Box("Tinh Hồng Bảo Thạch (60 điểm · 6/tuần)"));
+        body.Add(FormRow("Góp vạn tối đa (vạn/acc/ngày, 0 = không góp)", _setGuildDonate = Number("0–20000 vạn")));
+
         body.Add(Section("Kéo quái khi Leo Tháp"));
         body.Add(Note("Bật riêng từng acc bằng nút \"Kéo quái\" trên khung. Mỗi chu kỳ nhân vật chạy một đoạn cho quái dồn về một phía rồi đánh tiếp. Bạn tự tắt Auto (chơi tay) thì app không kéo."));
         _setKiteDir = new ComboBox();
@@ -803,6 +814,12 @@ public partial class MainWindow : Window
         _setBuffTtl.IsChecked = _settings.BuffTtl;
         _setBuffTtlSp.IsChecked = _settings.BuffTtlSpecial;
         _setBuffQht.IsChecked = _settings.BuffQht;
+        _setGuild.IsChecked = _settings.GuildShop;
+        _setGuildLdt.IsChecked = _settings.GuildLdt;
+        _setGuildFdl.IsChecked = _settings.GuildPhucDuyen;
+        _setGuildTtsp.IsChecked = _settings.GuildTtsp;
+        _setGuildThbt.IsChecked = _settings.GuildThbt;
+        _setGuildDonate.Text = _settings.GuildDonateCap.ToString();
         _setTeacherCap.Text = _settings.EventTeacherSpendCap.ToString();
         _loadingForm = false;
     }
@@ -834,6 +851,12 @@ public partial class MainWindow : Window
         _settings.BuffTtl = _setBuffTtl.IsChecked == true;
         _settings.BuffTtlSpecial = _setBuffTtlSp.IsChecked == true;
         _settings.BuffQht = _setBuffQht.IsChecked == true;
+        _settings.GuildShop = _setGuild.IsChecked == true;
+        _settings.GuildLdt = _setGuildLdt.IsChecked == true;
+        _settings.GuildPhucDuyen = _setGuildFdl.IsChecked == true;
+        _settings.GuildTtsp = _setGuildTtsp.IsChecked == true;
+        _settings.GuildThbt = _setGuildThbt.IsChecked == true;
+        if (int.TryParse(_setGuildDonate.Text, out var donate)) _settings.GuildDonateCap = donate;
         if (int.TryParse(_setTeacherCap.Text, out var cap)) _settings.EventTeacherSpendCap = cap;
         SaveSettings(); // Normalize giới hạn các giá trị về khoảng hợp lệ
         LoadSettingsForm(); // hiện lại giá trị đã giới hạn

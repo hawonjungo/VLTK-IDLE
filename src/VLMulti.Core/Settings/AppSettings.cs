@@ -65,6 +65,15 @@ public sealed class AppSettings
     public bool BuffTtlSpecial { get; set; } = true; // 🌺 Tiên Thảo Lộ Đặc Biệt (+100% kinh nghiệm)
     public bool BuffQht { get; set; } = true;        // 🍶 Quế Hoa Tửu (+20 may mắn)
 
+    // 🏯 Cửa hàng bang: mỗi ngày mua các món đã chọn bằng điểm cống hiến (món tuần thì mua khi tuần còn lượt),
+    // thiếu điểm thì góp vạn (1 vạn = 1 điểm) tối đa GuildDonateCap vạn mỗi ngày; acc chưa vào bang thì bỏ qua
+    public bool GuildShop { get; set; } = true;
+    public bool GuildLdt { get; set; } = true;        // Lệnh Bài Dã Tẩu (10/ngày)
+    public bool GuildPhucDuyen { get; set; } = true;  // Bình Phúc Duyên Lộ (Tiểu) (10/ngày)
+    public bool GuildTtsp { get; set; } = true;       // Tiên Thảo Lộ Đặc Biệt (5/tuần)
+    public bool GuildThbt { get; set; } = true;       // Tinh Hồng Bảo Thạch (6/tuần)
+    public int GuildDonateCap { get; set; } = 1500;
+
     // Chết trong tháp (game đẩy ra Luyện Công): vào lại tháp ngay. Chết nhanh (sống dưới TowerFastDeathMinutes phút)
     // TowerFastDeathCount lần trong TowerFastDeathWindowMinutes phút → nghỉ tháp TowerRestMinutes phút, Luyện Công và báo.
     public int TowerFastDeathMinutes { get; set; } = 3;
@@ -104,6 +113,7 @@ public sealed class AppSettings
         TowerFastDeathWindowMinutes = Math.Clamp(TowerFastDeathWindowMinutes, TowerFastDeathMinutes, 240);
         TowerRestMinutes = Math.Clamp(TowerRestMinutes, 5, 720);
         EventTeacherSpendCap = Math.Clamp(EventTeacherSpendCap, 0, 5000);
+        GuildDonateCap = Math.Clamp(GuildDonateCap, 0, 20000);
     }
 
     // Mặc định 3 acc ở khung nhỏ nằm trong nhóm điều khiển, acc ở khung lớn thì không

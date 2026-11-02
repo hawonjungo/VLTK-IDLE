@@ -587,6 +587,44 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Guild_shop_runs_once_a_day_with_chosen_items_and_logs()
+    {
+        var (ctl, page, cfg) = Make();
+        cfg.EventTeacher = false;
+        cfg.DailyKnbBuy = false;
+        cfg.GuildTtsp = false;
+        cfg.GuildDonateCap = 800;
+        var st = Status("game", mode: "tower", zone: "Thông Thiên Tháp · tầng 900");
+        var t = Run(ctl, T0, 140, st);
+        Assert.Empty(Sent(page, "guild"));                     // chờ 150 giây sau khi vào game
+        t = Run(ctl, t, 20, st);
+        var arg = Assert.Single(Sent(page, "guild")).GetProperty("arg");
+        Assert.Equal(new[] { "ldt", "fdl1", "thbt" }, arg.GetProperty("items").EnumerateArray().Select(x => x.GetString()));
+        Assert.Equal(800, arg.GetProperty("donateCap").GetInt32());
+
+        ctl.OnPageMessage("""{"t":"guildResult","r":"ok","bought":"ldt:10,fdl1:10","spent":1200,"donated":500,"mails":1,"points":2053}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text ==
+            "🏯 Cửa hàng bang: mua 10 Lệnh Bài Dã Tẩu, 10 Bình Phúc Duyên Lộ (−1200 điểm, còn 2053) · góp 500 vạn · nhận 1 thư");
+        Run(ctl, t, 60 * 60, st);
+        Assert.Single(Sent(page, "guild"));                    // xong hôm nay
+
+        // Chưa vào bang: ghi một dòng, thôi hôm đó
+        var (ctl2, page2, cfg2) = Make();
+        cfg2.EventTeacher = false;
+        cfg2.DailyKnbBuy = false;
+        t = Run(ctl2, T0, 160, st);
+        ctl2.OnPageMessage("""{"t":"guildResult","r":"no-guild","bought":""}""", t);
+        Run(ctl2, t, 60 * 60, st);
+        Assert.Single(Sent(page2, "guild"));
+        Assert.Single(ctl2.Activity.Items, e => e.Text.StartsWith("🏯 Cửa hàng bang: acc chưa vào bang"));
+
+        var (ctl3, page3, cfg3) = Make();
+        cfg3.GuildShop = false;
+        Run(ctl3, T0, 10 * 60, st);
+        Assert.Empty(Sent(page3, "guild"));
+    }
+
+    [Fact]
     public void Buffs_are_kept_up_with_enabled_items_and_low_items_pause()
     {
         var (ctl, page, cfg) = Make();
