@@ -114,13 +114,16 @@ var VLParse = (() => {
   };
 
   // Kỳ Trân Các › Bảng Kim Nguyên Bảo › Đổi KNB, thẻ Kim Nguyên Bảo: "1 vạn lượng = 1 KNB · tối đa 1.000 / ngày …
-  // Hôm nay đã đổi 0 · còn đổi được 1.000" → { done, left, price } (price = vạn cho 1 KNB)
+  // Hôm nay đã đổi 0 · còn đổi được 1.000" → { done, left, price } (price = vạn cho 1 KNB).
+  // Bản 1035 bỏ phần "còn đổi được": chỉ "Hôm nay đã đổi 0" → còn = tối đa / ngày − đã đổi.
   const knbShop = (text) => {
     const t = clean(text);
-    const m = t.match(/Hôm nay đã đổi\s+([\d.,]+)\s*·\s*còn đổi được\s+([\d.,]+)/i);
+    const m = t.match(/Hôm nay đã đổi\s+([\d.,]+)(?:\s*·\s*còn đổi được\s+([\d.,]+))?/i);
     const p = t.match(/(\d+)\s*vạn lượng\s*=\s*1\s*KNB/i);
+    const cap = t.match(/tối đa\s+([\d.,]+)\s*\/\s*ngày/i);
     if (!m || !p) return null;
-    const done = num(m[1]), left = num(m[2]);
+    const done = num(m[1]);
+    const left = m[2] != null ? num(m[2]) : cap && num(cap[1]) != null && done != null ? Math.max(0, num(cap[1]) - done) : null;
     return done == null || left == null ? null : { done, left, price: +p[1] };
   };
 

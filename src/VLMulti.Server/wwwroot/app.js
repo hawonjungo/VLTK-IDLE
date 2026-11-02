@@ -319,7 +319,10 @@ function offCard(a) {
 // ---------- ▶ Chơi: tự chơi acc trên trình duyệt này ----------
 // Server nhả acc (thoát game của acc) rồi mở game ở tab mới. Trang này để ý tab đó: đóng tab → báo server nhận lại acc,
 // đăng nhập và chạy tiếp. Trang game là trang khác nên chỉ biết được tab đã đóng hay chưa, không đọc được gì bên trong.
-const playTabs = new Map(); // id → tab game đang mở từ trang này
+const playTabs = new Map(); // id → { w: tab game đang mở từ trang này, at: lúc mở }
+// Trang này mở dạng ứng dụng (thêm vào màn hình chính): tab game mở ra trình duyệt khác và trình duyệt báo "đã đóng" ngay
+// → không theo dõi được. Tab "đóng" trong vài giây đầu = không theo dõi được, KHÔNG tự trả acc (bạn bấm Trả lại server).
+const PLAY_TRUST_AFTER_MS = 15000;
 
 async function startPlay(a) {
   // Mở tab ngay trong lúc bấm (mở sau khi chờ server thì trình duyệt chặn cửa sổ bật lên), rồi mới chuyển tới game
@@ -334,7 +337,7 @@ async function startPlay(a) {
     return;
   }
   w.location.href = state.gameUrl || 'https://volamidle.pages.dev/';
-  playTabs.set(a.id, w);
+  playTabs.set(a.id, { w, at: Date.now() });
   toast(`${a.name}: server đã nhả acc – đăng nhập ở tab mới. Đóng tab game là acc tự về server.`);
   refresh();
 }
@@ -343,7 +346,7 @@ async function startPlay(a) {
 function reopenPlay(a) {
   const w = window.open(state.gameUrl || 'https://volamidle.pages.dev/', `vlplay-${a.id}`);
   if (!w) { toast('Trình duyệt chặn mở tab mới – cho phép cửa sổ bật lên của trang này rồi bấm lại'); return; }
-  playTabs.set(a.id, w);
+  playTabs.set(a.id, { w, at: Date.now() });
 }
 
 async function returnPlay(id) {
@@ -353,7 +356,17 @@ async function returnPlay(id) {
 }
 
 function checkPlayTabs() {
-  for (const [id, w] of playTabs) if (w.closed) returnPlay(id);
+  for (const [id, t] of playTabs) {
+    if (!t.w.closed) continue;
+    if (Date.now() - t.at < PLAY_TRUST_AFTER_MS) {
+      playTabs.delete(id);
+      const a = state?.accounts.find((x) => x.id === id);
+      toast(`${a ? a.name : id}: không theo dõi được tab game (trang này đang mở dạng ứng dụng?) – chơi xong bấm "Trả lại server"`);
+      renderHome();
+      continue;
+    }
+    returnPlay(id);
+  }
 }
 setInterval(checkPlayTabs, 2000);
 // Điện thoại cho trang này "ngủ" khi ở nền: quay lại là xét ngay
@@ -371,7 +384,7 @@ function playCard(a) {
     h('div', { class: 'acc-actions play-actions' }, [
       watching ? null : h('button', { class: 'btn', text: 'Mở lại game', title: 'Mở tab game (trang này đã tải lại nên không còn theo dõi tab cũ)', onclick: () => reopenPlay(a) }),
       h('button', { class: 'btn primary', text: 'Trả lại server', onclick: () => {
-        const w = playTabs.get(a.id);
+        const w = playTabs.get(a.id)?.w;
         if (w && !w.closed && !confirm(`Trả ${a.name} cho server? Tab game đang mở sẽ bị đẩy ra khi server đăng nhập lại.`)) return;
         returnPlay(a.id);
       } }),

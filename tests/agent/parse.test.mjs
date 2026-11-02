@@ -38,6 +38,9 @@ test('Kỳ Trân Các › Đổi KNB, ngân lượng, thời gian trạng thái 
   assert.deepEqual(P.knbShop(fx.kbText), { done: 0, left: 1000, price: 1 });
   assert.deepEqual(P.knbShop('Hôm nay đã đổi 1.000 · còn đổi được 0 · 1 vạn lượng = 1 KNB'), { done: 1000, left: 0, price: 1 });
   assert.equal(P.knbShop('Hôm nay đã đổi 410'), null);
+  // Bản 1035 (02/11): bỏ "còn đổi được", chỉ còn "Hôm nay đã đổi N" → tính từ "tối đa 1.000 / ngày"
+  assert.deepEqual(P.knbShop(fx.kbText1035), { done: 0, left: 1000, price: 1 });
+  assert.deepEqual(P.knbShop(fx.kbText1035.replace('đã đổi 0', 'đã đổi 600')), { done: 600, left: 400, price: 1 });
   assert.deepEqual(fx.gold.map(P.silver), [12754, 6341]);
   assert.equal(P.silver('6329 vạn 3023 lượng'), 6329);
   assert.equal(P.silver('8521 lượng'), 0);

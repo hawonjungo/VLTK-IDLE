@@ -211,9 +211,11 @@
 
   // ---------- Màn hình hiện tại ----------
   const passwordField = () => [...document.querySelectorAll('input[type="password"]')].find(isVisible) || null;
+  // Màn chào mới (bản 1035): chỉ có "Bắt Đầu Trò Chơi" / "Đăng Ký Tài Khoản" / "Quên Mật Mã"; bấm nút đầu mới hiện form
+  const gateStart = () => { const b = $('#ngStart'); return b && isVisible(b) ? b : null; };
 
   const screenOf = () => {
-    if (passwordField()) return 'login';
+    if (passwordField() || gateStart()) return 'login';
     const go = $('#csGo');
     if (go && isVisible(go)) return 'charselect';
     if ($('#mswBtn')) return 'game';
@@ -235,13 +237,16 @@
     const inputs = [...document.querySelectorAll('input[type="text"], input[type="email"], input:not([type])')].filter(isVisible);
     // Ô tài khoản: ô chữ đang hiện, nằm ngay trước ô mật khẩu
     const user = inputs.filter((i) => i.compareDocumentPosition(pw) & Node.DOCUMENT_POSITION_FOLLOWING).pop() || null;
-    const submit = [...document.querySelectorAll('button, input[type="submit"], [role="button"]')]
+    // Nút gửi: form mới "Xác Định" (#ngIn), form cũ "Đăng nhập"
+    const ngIn = $('#ngIn');
+    const submit = (ngIn && isVisible(ngIn) ? ngIn : null) || [...document.querySelectorAll('button, input[type="submit"], [role="button"]')]
       .find((b) => isVisible(b) && /^đăng nhập$/i.test(textOf(b))) || null;
     return { pw, user, submit };
   };
 
   // Thông báo đang hiện trên hộp đăng nhập (lỗi mạng, sai mật khẩu…) – mọi dòng chữ trừ nhãn cố định
-  const LOGIN_LABELS = /^(Xác nhận tên tài khoản|Tài khoản:|Mật mã:|Hiện mật mã|Nhớ tài khoản|Đăng nhập|Đăng ký|Quên mật mã\?|✕)$/i;
+  // (cả nhãn của form mới: "VÕ LÂM | Idle | Máy chủ: | Võ Lâm Idle | Xác Định | Hủy | … phiên bản 1035")
+  const LOGIN_LABELS = /^(Xác nhận tên tài khoản|Tài khoản:|Mật mã:|Hiện mật mã|Nhớ tài khoản|Đăng nhập|Đăng ký|Quên mật mã\?|✕|VÕ LÂM|Idle|Máy chủ:|Võ Lâm Idle|Xác Định|Hủy|Đăng Ký Tài Khoản|Quên Mật Mã|Bắt Đầu Trò Chơi|Chưa có tài khoản\?.*|Võ Lâm Idle · phiên bản.*)$/i;
   // Lỗi đăng nhập thường hiện ở khung thông báo nổi #toast của game, ví dụ "Failed to fetch"
   const loginMessage = () => {
     const pw = passwordField();
@@ -269,7 +274,7 @@
   };
   const isLoginButton = (target) => {
     const b = target && target.closest && target.closest('button, input[type="submit"], [role="button"]');
-    return !!b && /^đăng nhập$/i.test(textOf(b));
+    return !!b && (b.id === 'ngIn' || /^đăng nhập$/i.test(textOf(b)));
   };
   document.addEventListener('pointerdown', (e) => { if (isLoginButton(e.target)) reportManualLogin(); }, true);
   document.addEventListener('keydown', (e) => {
@@ -359,7 +364,14 @@
       go.click();
       return 'ok';
     },
-    login: (arg) => {
+    login: async (arg) => {
+      // Màn chào mới: bấm "Bắt Đầu Trò Chơi" rồi chờ form hiện
+      const start = gateStart();
+      if (!passwordField() && start) {
+        start.click();
+        const end = Date.now() + 4000;
+        while (!passwordField() && Date.now() < end) await sleep(100);
+      }
       const f = loginForm();
       if (!f) return 'no-form';
       if (!f.submit) return 'no-button';
