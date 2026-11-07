@@ -1104,7 +1104,7 @@
     if (arg.op === 'send' && !(arg.to && (arg.allowed || []).includes(arg.to))) return { r: 'not-allowed' };
     flowBusy = true;
     const stop = watchMsgs();
-    const res = { r: 'ok', op: arg.op, opened: 0, stored: [], mails: 0, sent: [], failed: [] };
+    const res = { r: 'ok', op: arg.op, opened: 0, stored: [], mails: 0, sent: [], failed: [], sold: [] };
     try {
       const from = arg.from || [];
       if (arg.op === 'scan' || arg.op === 'take') {
@@ -1112,6 +1112,30 @@
         if (arg.op === 'scan' && arg.openChests) await openHorseChests(res);
         await storeNewHorses(res);
         if (await openStable()) Object.assign(res, horseScan());
+      } else if (arg.op === 'sell') {
+        // Bán từng con thừa đã được app chọn (không acc nào khác cần). Kiểm tra lại ngay trước khi bấm:
+        // vẫn là con trùng game không giữ lại, không khoá. Game bán ngay, không hỏi lại (thấy hộp hỏi về KNB thì huỷ).
+        for (const uid of arg.uids || []) {
+          if (!(await openStable())) { res.failed.push(uid + ':no-stable'); continue; }
+          const h = horseRows().find((x) => x.uid === uid);
+          if (!h || !h.spare || h.locked) { res.failed.push(uid + ':not-spare'); continue; }
+          const b = $(`#mBody [data-hsell="${uid}"]`);
+          if (!b) { res.failed.push(uid + ':no-button'); continue; }
+          b.click();
+          const done = await waitFor(() => {
+            if (!$(`#mBody [data-hsell="${uid}"]`)) return 'gone';
+            const box = $('#askBox');
+            return box && isVisible(box) ? 'ask' : null;
+          }, 3000);
+          if (done === 'ask') {
+            const box = $('#askBox'), t = box.innerText.replace(/\s+/g, ' ');
+            const yes = [...box.querySelectorAll('button')].find((x) => x.dataset.a === '1');
+            if (/^Bán /.test(t) && !/KNB/.test(t) && yes) yes.click();
+            else { post({ t: 'log', msg: 'horse sell: unexpected dialog ' + t.slice(0, 120) }); [...box.querySelectorAll('button')].find((x) => /^Hủy$/.test(x.textContent.trim()))?.click(); }
+          }
+          if (done === 'gone' || (await waitFor(() => !$(`#mBody [data-hsell="${uid}"]`), 2000))) res.sold.push(h.name);
+          else res.failed.push(uid + ':not-sold');
+        }
       } else if (arg.op === 'send') {
         const to = arg.to;
         // Con đang ở Hành trang gửi trước: mỗi con gửi đi trả lại một ô trống để lấy con trong Mã Trường ra
@@ -1160,6 +1184,7 @@
     res.stored = res.stored.join(',');
     res.sent = res.sent.join(',');
     res.failed = res.failed.join(',');
+    res.sold = res.sold.join(',');
     return res;
   };
 

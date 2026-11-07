@@ -54,6 +54,30 @@ public class HorseTransferTests
     }
 
     [Fact]
+    public void Sales_only_unlocked_spares_nobody_needs_and_not_being_moved()
+    {
+        var a = Acc("acc1", "A", new[] { "sư tử" },
+            Spare("1", "hoàng mã"),                 // không ai thiếu → bán
+            Spare("2", "tuyệt ảnh"),                // B thiếu → không bán (đang chuyển)
+            Spare("3", "tuyệt ảnh"),                // B thiếu → không bán (con thứ hai vẫn có người cần)
+            Spare("4", "bạch mã", locked: true));   // khoá → không bán
+        var b = Acc("acc2", "B", new[] { "tuyệt ảnh" }, Spare("5", "sư tử"), Spare("6", "hắc mã"));
+        var plan = HorsePlanner.Plan(new[] { a, b });
+        var sales = HorsePlanner.Sales(new[] { a, b }, plan, new[] { "A", "B" });
+        Assert.Equal(new[] { "1", "6" }, sales.Select(s => s.Horse.Uid).OrderBy(x => x));
+    }
+
+    [Fact]
+    public void No_sales_unless_every_own_character_was_scanned()
+    {
+        var a = Acc("acc1", "A", Array.Empty<string>(), Spare("1", "hoàng mã"));
+        var b = Acc("acc2", "B", Array.Empty<string>()) with { Result = "timeout" };
+        Assert.Empty(HorsePlanner.Sales(new[] { a, b }, new List<HorseMove>(), new[] { "A", "B" }));
+        Assert.Empty(HorsePlanner.Sales(new[] { a }, new List<HorseMove>(), new[] { "A", "C" }));
+        Assert.Single(HorsePlanner.Sales(new[] { a }, new List<HorseMove>(), new[] { "A" }));
+    }
+
+    [Fact]
     public void Scan_result_is_read_from_page_json()
     {
         var json = JsonDocument.Parse("""

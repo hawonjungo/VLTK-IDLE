@@ -14,7 +14,8 @@ public sealed record HorseAccount(
     string Id, string CharName, string Result,
     int Have, int Total, int ThanHave, int ThanTotal,
     IReadOnlyList<string> Missing, IReadOnlyList<HorseSpare> Spares,
-    int Opened, IReadOnlyList<string> Stored, int Mails, bool StableFull, bool BagFull)
+    int Opened, IReadOnlyList<string> Stored, int Mails, bool StableFull, bool BagFull,
+    IReadOnlyList<string>? Sold = null)
 {
     public static HorseAccount From(string id, string charName, JsonElement m)
     {
@@ -39,14 +40,17 @@ public sealed record HorseAccount(
                 spares.Add(new HorseSpare(uid, Str(s, "key"), Str(s, "name"), Str(s, "where"), Bool(s, "locked")));
             }
         var stored = Str(m, "stored").Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+        var sold = Str(m, "sold").Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
         return new HorseAccount(id, charName, Str(m, "r"),
             Int(coll, "have"), Int(coll, "total"), Int(coll, "thanHave"), Int(coll, "thanTotal"),
             Strings(coll, "missing"), spares,
-            Int(m, "opened"), stored, Int(m, "mails"), Bool(m, "stableFull"), Bool(m, "bagFull"));
+            Int(m, "opened"), stored, Int(m, "mails"), Bool(m, "stableFull"), Bool(m, "bagFull"), sold);
     }
 }
 
 public sealed record HorseMove(string FromId, string FromName, string ToId, string ToName, HorseSpare Horse);
+
+public sealed record HorseSale(string Id, string CharName, HorseSpare Horse);
 
 public static class HorsePlanner
 {
@@ -74,6 +78,20 @@ public static class HorsePlanner
         }
         return moves;
     }
+
+    // Ngựa thừa không acc nào của bạn còn thiếu loài đó, không nằm trong danh sách chuyển và không khoá → bán.
+    // Chỉ khi đã quét được đủ mọi nhân vật của bạn (thiếu một acc thì không biết acc đó cần gì → không bán con nào).
+    public static List<HorseSale> Sales(IReadOnlyList<HorseAccount> accounts, IReadOnlyList<HorseMove> moves, IReadOnlyList<string> ownNames)
+    {
+        var ok = accounts.Where(a => a.Result == "ok" && a.Total > 0).ToList();
+        if (ownNames.Count == 0 || ownNames.Any(n => !ok.Any(a => a.CharName == n))) return new List<HorseSale>();
+        var moving = moves.Select(m => (m.FromId, m.Horse.Uid)).ToHashSet();
+        return ok.SelectMany(a => a.Spares
+                .Where(s => !s.Locked && !moving.Contains((a.Id, s.Uid))
+                    && !ok.Any(o => o.Id != a.Id && o.Missing.Contains(s.Key)))
+                .Select(s => new HorseSale(a.Id, a.CharName, s)))
+            .ToList();
+    }
 }
 
 // Một acc tham gia: gửi tin vào trang của acc đó (bên gọi lo khoá), ghi nhật ký của acc
@@ -89,6 +107,7 @@ public sealed class HorseCoordinator
     private readonly Dictionary<string, TaskCompletionSource<JsonElement>> _waits = new();
     private List<HorseAccount> _accounts = new();
     private List<HorseMove> _plan = new();
+    private List<HorseSale> _sales = new();
     private readonly List<string> _log = new();
 
     // idle · scanning · ready (có kế hoạch, chờ bạn xác nhận) · sending · done
@@ -97,6 +116,7 @@ public sealed class HorseCoordinator
 
     public IReadOnlyList<HorseAccount> Accounts { get { lock (_gate) return _accounts.ToList(); } }
     public IReadOnlyList<HorseMove> Plan { get { lock (_gate) return _plan.ToList(); } }
+    public IReadOnlyList<HorseSale> Sales { get { lock (_gate) return _sales.ToList(); } }
     public IReadOnlyList<string> Lines { get { lock (_gate) return _log.ToList(); } }
     public bool Busy => Phase is "scanning" or "sending";
 
@@ -126,9 +146,15 @@ public sealed class HorseCoordinator
                 return acc;
             }));
             var plan = HorsePlanner.Plan(results);
-            lock (_gate) { _accounts = results.ToList(); _plan = plan; }
-            AddLine(plan.Count == 0 ? "Không có ngựa nào để chuyển." : $"Có thể chuyển {plan.Count} con – xem danh sách rồi bấm Chuyển.");
-            End(plan.Count > 0 ? "ready" : "done");
+            var sales = HorsePlanner.Sales(results, plan, ownNames);
+            lock (_gate) { _accounts = results.ToList(); _plan = plan; _sales = sales; }
+            var missingNames = ownNames.Where(n => !results.Any(a => a.CharName == n && a.Result == "ok")).ToList();
+            if (missingNames.Count > 0)
+                AddLine($"Không bán con nào: chưa quét được {string.Join(", ", missingNames)} (không biết acc đó còn thiếu loài nào).");
+            AddLine(plan.Count == 0 ? "Không có ngựa nào để chuyển." : $"Có thể chuyển {plan.Count} con.");
+            if (sales.Count > 0) AddLine($"Có thể bán {sales.Count} con thừa mà không acc nào cần.");
+            if (plan.Count + sales.Count > 0) AddLine("Xem danh sách rồi bấm xác nhận.");
+            End(plan.Count + sales.Count > 0 ? "ready" : "done");
         }
         catch (Exception ex)
         {
@@ -142,10 +168,12 @@ public sealed class HorseCoordinator
     public async Task<bool> SendAsync(IReadOnlyList<HorseMember> members, IReadOnlyList<string> ownNames)
     {
         List<HorseMove> plan;
+        List<HorseSale> sales;
         lock (_gate)
         {
-            if (Phase != "ready" || _plan.Count == 0) return false;
+            if (Phase != "ready" || _plan.Count + _sales.Count == 0) return false;
             plan = _plan.ToList();
+            sales = _sales.ToList();
         }
         if (!Begin("sending")) return false;
         try
@@ -200,7 +228,27 @@ public sealed class HorseCoordinator
                     if (i >= 0 && acc.Total > 0) _accounts[i] = _accounts[i] with { Have = acc.Have, Total = acc.Total, ThanHave = acc.ThanHave };
                 }
             }));
-            lock (_gate) _plan = new();
+
+            // Bán ngựa thừa không ai cần (sau khi chuyển xong)
+            await Task.WhenAll(sales.GroupBy(x => x.Id).Select(async g =>
+            {
+                if (!byId.TryGetValue(g.Key, out var mb)) return;
+                var m = await AskAsync(mb, new { op = "sell", uids = g.Select(x => x.Horse.Uid).ToArray() });
+                var acc = m is { } e ? HorseAccount.From(mb.Id, mb.CharName, e) : Failed(mb, "timeout");
+                var sold = acc.Sold ?? Array.Empty<string>();
+                if (sold.Count > 0)
+                {
+                    var names = string.Join(", ", sold.GroupBy(n => n).Select(x => x.Count() > 1 ? $"{x.Key} ×{x.Count()}" : x.Key));
+                    AddLine($"💰 {mb.CharName}: bán {sold.Count} con thừa ({names})");
+                    mb.Note($"🐴 Bán {sold.Count} ngựa thừa không acc nào cần");
+                }
+                if (sold.Count < g.Count())
+                {
+                    AddLine($"⚠ {mb.CharName}: {g.Count() - sold.Count} con không bán được");
+                    if (m is { } e2 && e2.TryGetProperty("failed", out var f)) Log.Write($"[{mb.Id}] horse sell failed={f.GetString()}");
+                }
+            }));
+            lock (_gate) { _plan = new(); _sales = new(); }
             End("done");
         }
         catch (Exception ex)
@@ -218,6 +266,7 @@ public sealed class HorseCoordinator
         {
             if (Busy) return;
             _plan = new();
+            _sales = new();
             Phase = "idle";
         }
         Changed?.Invoke();
@@ -229,7 +278,7 @@ public sealed class HorseCoordinator
         {
             if (Busy) return false;
             Phase = phase;
-            if (phase == "scanning") { _log.Clear(); _accounts = new(); _plan = new(); }
+            if (phase == "scanning") { _log.Clear(); _accounts = new(); _plan = new(); _sales = new(); }
             UpdatedAt = DateTime.Now;
         }
         Changed?.Invoke();

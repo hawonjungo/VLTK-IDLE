@@ -712,6 +712,12 @@ public sealed class SessionManager : IAsyncDisposable
         lines = _horses.Lines,
         accounts = _horses.Accounts.Select(a => new { a.Id, name = a.CharName, a.Result, a.Have, a.Total, spares = a.Spares.Count }),
         plan = _horses.Plan.Select(p => new { from = p.FromName, to = p.ToName, horse = p.Horse.Name, locked = p.Horse.Locked, inStable = p.Horse.Where == "st" }),
+        sales = _horses.Sales.GroupBy(x => x.CharName).Select(g => new
+        {
+            name = g.Key,
+            count = g.Count(),
+            horses = string.Join(", ", g.GroupBy(x => x.Horse.Name).Select(x => x.Count() > 1 ? $"{x.Key} ×{x.Count()}" : x.Key)),
+        }),
     };
 
     // Nhập mật khẩu hàng loạt (lệnh --import-credentials), dùng khi chuyển từ bản Desktop sang

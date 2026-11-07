@@ -985,15 +985,20 @@ public partial class MainWindow : Window
             await _horses.ScanAsync(members, names, chests == MessageBoxResult.Yes);
             var lines = string.Join("\n", _horses.Lines);
             var plan = _horses.Plan;
-            if (_horses.Phase != "ready" || plan.Count == 0)
+            var sales = _horses.Sales;
+            if (_horses.Phase != "ready" || plan.Count + sales.Count == 0)
             {
-                CommandFeedback.Text = "🐴 Quét xong – không có ngựa nào để chuyển";
+                CommandFeedback.Text = "🐴 Quét xong – không có ngựa nào để chuyển hay bán";
                 MessageBox.Show(this, lines, "🐴 Mã Trường", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
             var list = string.Join("\n", plan.Select(p => $"• {p.FromName} → {p.ToName}: {p.Horse.Name}"
                 + (p.Horse.Locked ? " (🔒 sẽ mở khoá)" : "") + (p.Horse.Where == "st" ? " (lấy ra từ Mã Trường)" : "")));
-            var ok = MessageBox.Show(this, $"{lines}\n\nChuyển {plan.Count} con qua thư tặng (0 KNB)?\n\n{list}",
+            var sell = string.Join("\n", sales.GroupBy(x => x.CharName).Select(g => $"• {g.Key}: "
+                + string.Join(", ", g.GroupBy(x => x.Horse.Name).Select(x => x.Count() > 1 ? $"{x.Key} ×{x.Count()}" : x.Key))));
+            var ok = MessageBox.Show(this,
+                $"{lines}\n\nChuyển {plan.Count} con qua thư tặng (0 KNB) và bán {sales.Count} con thừa mà không acc nào cần (không bán con đang khoá)?"
+                + (plan.Count > 0 ? $"\n\nChuyển:\n{list}" : "") + (sales.Count > 0 ? $"\n\nBán:\n{sell}" : ""),
                 "🐴 Mã Trường", MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (ok != MessageBoxResult.Yes)
             {
@@ -1001,9 +1006,9 @@ public partial class MainWindow : Window
                 CommandFeedback.Text = "🐴 Đã bỏ danh sách chuyển";
                 return;
             }
-            CommandFeedback.Text = $"🐴 Đang chuyển {plan.Count} con…";
+            CommandFeedback.Text = $"🐴 Đang chuyển {plan.Count} con, bán {sales.Count} con…";
             await _horses.SendAsync(members, names);
-            CommandFeedback.Text = "🐴 Chuyển ngựa xong";
+            CommandFeedback.Text = "🐴 Xong";
             MessageBox.Show(this, string.Join("\n", _horses.Lines), "🐴 Mã Trường", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         finally

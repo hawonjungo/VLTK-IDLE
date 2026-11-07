@@ -434,16 +434,24 @@ async function renderHorses() {
   }
   if (busy) parts.push(h('p', { text: st.phase === 'scanning' ? '⏳ Đang quét các acc…' : '⏳ Đang chuyển ngựa…' }));
   if (st.lines?.length) parts.push(h('div', { class: 'horse-lines' }, st.lines.map((l) => h('div', { text: l }))));
+  const nSell = (st.sales || []).reduce((n, x) => n + x.count, 0);
   if (st.phase === 'ready' && st.plan?.length) {
     parts.push(h('h3', { text: `Danh sách chuyển (${st.plan.length} con)` }));
     parts.push(h('div', { class: 'horse-plan' }, st.plan.map((p) => h('div', {
       text: `${p.from} → ${p.to}: ${p.horse}` + (p.locked ? ' · 🔒 sẽ mở khoá' : '') + (p.inStable ? ' · lấy ra từ Mã Trường' : ''),
     }))));
   }
+  if (st.phase === 'ready' && nSell) {
+    parts.push(h('h3', { text: `Bán ngựa thừa không acc nào cần (${nSell} con, không bán con đang khoá)` }));
+    parts.push(h('div', { class: 'horse-plan' }, st.sales.map((x) => h('div', { text: `${x.name}: ${x.horses}` }))));
+  }
   const actions = [];
   if (st.phase === 'ready') {
-    actions.push(h('button', { class: 'btn primary', text: `Chuyển ${st.plan.length} con`, onclick: async () => {
-      if (!confirm(`Gửi ${st.plan.length} con ngựa qua thư tặng (0 KNB) giữa các nhân vật của bạn?`)) return;
+    const what = [st.plan.length ? `Chuyển ${st.plan.length} con` : '', nSell ? `Bán ${nSell} con` : ''].filter(Boolean).join(' · ');
+    actions.push(h('button', { class: 'btn primary', text: what, onclick: async () => {
+      if (!confirm(`${what}?
+
+Chuyển: thư tặng (0 KNB) giữa các nhân vật của bạn. Bán: ngựa thừa mà không acc nào còn thiếu loài đó.`)) return;
       try { await api('horses/send', {}); } catch (e) { toast(e.message); }
       renderHorses();
     } }));
