@@ -69,8 +69,35 @@ var manager = new SessionManager(options);
 var auth = new WebAuth(options);
 var app = builder.Build();
 
-app.UseDefaultFiles();
-app.UseStaticFiles();
+// Trang chính: gắn phiên bản vào app.js / app.css (theo giờ sửa file) để trình duyệt / app cài trên điện thoại không
+// dùng lại bản cũ sau khi cập nhật (không có Cache-Control, Chrome tự đoán "còn mới" và giữ app.js cũ hàng giờ:
+// nút 🐴 hiện ra mà bấm không có gì, 07/11/2026). Các file khác: luôn hỏi lại server (ETag, không đổi thì 304).
+var webRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+string Versioned(string html)
+{
+    foreach (var f in new[] { "app.js", "app.css" })
+    {
+        var v = File.GetLastWriteTimeUtc(Path.Combine(webRoot, f)).Ticks.ToString("x");
+        html = html.Replace($"\"{f}\"", $"\"{f}?v={v}\"");
+    }
+    return html;
+}
+app.Use(async (ctx, next) =>
+{
+    var path = ctx.Request.Path.Value ?? "";
+    if (HttpMethods.IsGet(ctx.Request.Method) && path is "/" or "/index.html")
+    {
+        ctx.Response.ContentType = "text/html; charset=utf-8";
+        ctx.Response.Headers.CacheControl = "no-cache";
+        await ctx.Response.WriteAsync(Versioned(await File.ReadAllTextAsync(Path.Combine(webRoot, "index.html"))));
+        return;
+    }
+    await next();
+});
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = c => c.Context.Response.Headers.CacheControl = "no-cache",
+});
 app.UseWebSockets();
 
 // Mọi /api/ (trừ đăng nhập) cần cookie đăng nhập
