@@ -74,6 +74,11 @@ public sealed class AppSettings
     public bool GuildThbt { get; set; } = true;       // Tinh Hồng Bảo Thạch (6/tuần)
     public int GuildDonateCap { get; set; } = 1500;
 
+    // 💰 Hành trang còn ≤ AutoSellFreeSlots ô trống → bấm "Bán thừa" của game (bán món không khớp bộ lọc ⚙ Nhặt đồ,
+    // không khoá, không phải đồ Dã Tẩu). Đồ Hoàng Kim nằm ở hàng chờ khi túi đầy sẽ tự vào lại hành trang.
+    public bool AutoSellJunk { get; set; } = true;
+    public int AutoSellFreeSlots { get; set; } = 20;
+
     // Chết trong tháp (game đẩy ra Luyện Công): vào lại tháp ngay. Chết nhanh (sống dưới TowerFastDeathMinutes phút)
     // TowerFastDeathCount lần trong TowerFastDeathWindowMinutes phút → nghỉ tháp TowerRestMinutes phút, Luyện Công và báo.
     public int TowerFastDeathMinutes { get; set; } = 3;
@@ -114,6 +119,7 @@ public sealed class AppSettings
         TowerRestMinutes = Math.Clamp(TowerRestMinutes, 5, 720);
         EventTeacherSpendCap = Math.Clamp(EventTeacherSpendCap, 0, 5000);
         GuildDonateCap = Math.Clamp(GuildDonateCap, 0, 20000);
+        AutoSellFreeSlots = Math.Clamp(AutoSellFreeSlots, 1, 200);
     }
 
     // Mặc định 3 acc ở khung nhỏ nằm trong nhóm điều khiển, acc ở khung lớn thì không

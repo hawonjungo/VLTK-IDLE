@@ -1408,6 +1408,10 @@
       knbFlow().then((res) => post({ t: 'knbResult', ...res }), (err) => post({ t: 'knbResult', r: 'error: ' + err.message }));
     } else if (m.t === 'guild') {
       guildFlow(m.arg || {}).then((res) => post({ t: 'guildResult', ...res }), (err) => post({ t: 'guildResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'bossHk') {
+      bossHkFlow(m.arg || {}).then((res) => post({ t: 'bossHkResult', ...res }), (err) => post({ t: 'bossHkResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'sellJunk') {
+      sellJunkFlow().then((res) => post({ t: 'sellJunkResult', ...res }), (err) => post({ t: 'sellJunkResult', r: 'error: ' + err.message }));
     } else if (m.t === 'horse') {
       horseFlow(m.arg || {}).then((res) => post({ t: 'horseResult', ...res }), (err) => post({ t: 'horseResult', r: 'error: ' + err.message }));
     } else if (m.t === 'buffs') {
@@ -1647,6 +1651,93 @@
     } catch (err) { extra += ' (' + err.message + ')'; }
     return 'ok: ' + label + extra;
   };
+  // 👑 Boss Hoàng Kim trong đợt (app gọi): bảng Nhiệm vụ › tab Boss (data-qt="wb") › thẻ Boss Hoàng Kim.
+  // Boss còn sống: "<tên> cấp N tại <bản đồ> · còn M phút · Boss còn X% máu" + nút #gbGo "Đến ngay";
+  // đánh xong: "Đã hạ Boss đợt này. Đợt sau: …" (chỉ hiện tới hết đợt). arg.go → bấm "Đến ngay" nếu có.
+  const bossHkFlow = async (arg) => {
+    if (flowBusy || anyWindowOpen()) return { r: 'busy' };
+    const btn = $('#u20menu > button[data-u="quest"]'), tab = $('#t-quest');
+    if (!btn || !tab) return { r: 'not-ready' };
+    flowBusy = true;
+    const res = { r: 'ok', done: false, alive: false, went: false, info: '' };
+    try {
+      btn.click();
+      const t = await waitFor(() => tab.querySelector('[data-qt="wb"]'), 2000);
+      if (!t) return { ...res, r: 'no-tab' };
+      t.click();
+      const card = await waitFor(() => {
+        const b = [...tab.querySelectorAll('b')].find((x) => /Boss Hoàng Kim/.test(x.textContent));
+        return b && b.closest('.card');
+      }, 2000);
+      if (!card) { reportUnreadable('boss-hk', tabText(tab)); return { ...res, r: 'no-card' }; }
+      const text = card.innerText.replace(/\s+/g, ' ');
+      res.done = /Đã hạ Boss đợt này/.test(text);
+      const go = $('#gbGo');
+      res.alive = !!go && isVisible(go);
+      const m = text.match(/(\S[^·|]*? cấp \d+ tại [^·]+·[^·]+(?:· Boss còn \d+% máu)?)/);
+      res.info = (m ? m[1] : text.split('⚔')[0]).trim().slice(0, 140);
+      if (arg.go && res.alive && !go.disabled) {
+        go.click();
+        res.went = true;
+        await sleep(800);
+      }
+    } catch (err) {
+      res.r = 'error: ' + err.message;
+    } finally {
+      closeQuestWindows();
+      flowBusy = false;
+    }
+    return res;
+  };
+
+  // 💰 Bán đồ thừa (app gọi khi Hành trang sắp đầy): nút "💰 Bán thừa N" (#bSellAll) của game bán các món không khớp
+  // bộ lọc ⚙ Nhặt đồ và không được bảo vệ (khoá, đồ Dã Tẩu…). Game hỏi lại "Bán N món đồ thừa (không được giữ,
+  // không khóa) lấy X lượng…?" → chỉ đồng ý đúng câu này. Đồ Hoàng Kim nằm ở hàng chờ khi túi đầy sẽ tự vào lại.
+  const sellJunkFlow = async () => {
+    if (flowBusy || anyWindowOpen()) return { r: 'busy' };
+    if (inBossHk()) return { r: 'boss-hk' };
+    flowBusy = true;
+    const stop = watchMsgs();
+    const res = { r: 'ok', sold: 0, gold: '', before: '', after: '' };
+    try {
+      if (!(await openBag())) return { ...res, r: 'no-bag' };
+      const tab = $('#t-inv');
+      res.before = readBag(tab);
+      const b = $('#bSellAll');
+      const n = b ? +(((b.querySelector('small') || {}).textContent || '').replace(/\D/g, '')) || 0 : 0;
+      if (!b || b.disabled || !n) return { ...res, r: 'none' };
+      b.click();
+      const yes = await waitFor(() => {
+        const box = $('#askBox');
+        if (!box || !isVisible(box)) return null;
+        if (!/^Bán \d+ món đồ thừa/.test(box.innerText.trim())) return 'bad';
+        return [...box.querySelectorAll('button')].find((x) => x.dataset.a === '1' || /^Bán$/.test(x.textContent.trim())) || 'bad';
+      }, 2500);
+      if (!yes || yes === 'bad') {
+        const box = $('#askBox');
+        if (box && isVisible(box)) {
+          post({ t: 'log', msg: 'sell junk: unexpected dialog ' + box.innerText.replace(/\s+/g, ' ').slice(0, 120) });
+          [...box.querySelectorAll('button')].find((x) => /^Hủy$/.test(x.textContent.trim()))?.click();
+        }
+        return { ...res, r: 'no-confirm' };
+      }
+      yes.click();
+      await waitFor(() => readBag(tab) !== res.before, 3000);
+      res.after = readBag(tab);
+      res.sold = n;
+      const msg = horseMsgs.find((t) => /^Bán \d+ món \(\+/.test(t));
+      const g = msg && msg.match(/\(\+([^)]+?) lượng/);
+      res.gold = g ? g[1] : '';
+    } catch (err) {
+      res.r = 'error: ' + err.message;
+    } finally {
+      stop();
+      try { closeBag(); } catch (_) {}
+      flowBusy = false;
+    }
+    return res;
+  };
+
   // "Lệnh Bài Sát Thủ | 10 | Đã hạ | 60 (cao nhất cấp 90)" → "10/60"
   const readAssassin = (tab) => VLParse.assassin(tabText(tab));
   // Phó bản: "Hết lượt" tính 0 (xem VLParse.dungeons)

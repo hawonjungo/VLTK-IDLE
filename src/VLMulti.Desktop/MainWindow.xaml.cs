@@ -696,6 +696,8 @@ public partial class MainWindow : Window
         _setKnb = null!, _setBuffTtl = null!, _setBuffTtlSp = null!, _setBuffQht = null!,
         _setGuild = null!, _setGuildLdt = null!, _setGuildFdl = null!, _setGuildTtsp = null!, _setGuildThbt = null!;
     private TextBox _setGuildDonate = null!;
+    private CheckBox _setSellJunk = null!;
+    private TextBox _setSellFree = null!;
     private TextBox _setTeacherCap = null!;
     private CheckBox _setQuest = null!, _setDungeon = null!, _setBoat = null!, _setWeekBoss = null!, _setAssassin = null!;
     private ComboBox _setFallback = null!, _setKiteDir = null!;
@@ -771,6 +773,8 @@ public partial class MainWindow : Window
         body.Add(_setBuffTtl = Box("🌿 Tiên Thảo Lộ (+50% kinh nghiệm)"));
         body.Add(_setBuffTtlSp = Box("🌺 Tiên Thảo Lộ Đặc Biệt (+100% kinh nghiệm)"));
         body.Add(_setBuffQht = Box("🍶 Quế Hoa Tửu (+20 may mắn)"));
+        body.Add(_setSellJunk = Box("💰 Hành trang sắp đầy thì bấm \"Bán thừa\" của game (món không khớp ⚙ Nhặt đồ, không khoá)"));
+        body.Add(FormRow("Bán khi còn ≤ ô trống", _setSellFree = Number("1–200 ô")));
 
         body.Add(Section("Cửa hàng bang"));
         body.Add(Note("Mỗi ngày mua bằng điểm cống hiến; món tuần mua khi tuần còn lượt. Thiếu điểm thì góp vạn (1 vạn = 1 điểm). Đồ gửi về Hộp thư được tự nhận (chỉ thư \"Cửa hàng bang\"). Acc chưa vào bang thì bỏ qua."));
@@ -823,6 +827,8 @@ public partial class MainWindow : Window
         _setGuildTtsp.IsChecked = _settings.GuildTtsp;
         _setGuildThbt.IsChecked = _settings.GuildThbt;
         _setGuildDonate.Text = _settings.GuildDonateCap.ToString();
+        _setSellJunk.IsChecked = _settings.AutoSellJunk;
+        _setSellFree.Text = _settings.AutoSellFreeSlots.ToString();
         _setTeacherCap.Text = _settings.EventTeacherSpendCap.ToString();
         _loadingForm = false;
     }
@@ -860,6 +866,8 @@ public partial class MainWindow : Window
         _settings.GuildTtsp = _setGuildTtsp.IsChecked == true;
         _settings.GuildThbt = _setGuildThbt.IsChecked == true;
         if (int.TryParse(_setGuildDonate.Text, out var donate)) _settings.GuildDonateCap = donate;
+        _settings.AutoSellJunk = _setSellJunk.IsChecked == true;
+        if (int.TryParse(_setSellFree.Text, out var sellFree)) _settings.AutoSellFreeSlots = sellFree;
         if (int.TryParse(_setTeacherCap.Text, out var cap)) _settings.EventTeacherSpendCap = cap;
         SaveSettings(); // Normalize giới hạn các giá trị về khoảng hợp lệ
         LoadSettingsForm(); // hiện lại giá trị đã giới hạn

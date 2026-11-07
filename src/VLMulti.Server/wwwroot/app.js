@@ -607,6 +607,8 @@ function renderSettings() {
   const teacherCap = h('input', { type: 'number', min: 0, max: 5000, value: s.eventTeacherCap ?? 400 });
   const teacherEx = box(s.eventTeacherExchange !== false);
   const dailyKnb = box(s.dailyKnb !== false);
+  const sellJunk = box(s.autoSellJunk !== false);
+  const sellFree = h('input', { type: 'number', min: 1, max: 200, value: s.autoSellFreeSlots ?? 20 });
   const buffTtl = box(s.buffTtl !== false), buffTtlSp = box(s.buffTtlSpecial !== false), buffQht = box(s.buffQht !== false);
   const guild = box(s.guildShop !== false), gLdt = box(s.guildLdt !== false), gFdl = box(s.guildPhucDuyen !== false);
   const gTtsp = box(s.guildTtsp !== false), gThbt = box(s.guildThbt !== false);
@@ -683,8 +685,11 @@ function renderSettings() {
       h('label', { class: 'check-row' }, [buffTtl, '🌿 Tiên Thảo Lộ (+50% kinh nghiệm)']),
       h('label', { class: 'check-row' }, [buffTtlSp, '🌺 Tiên Thảo Lộ Đặc Biệt (+100% kinh nghiệm)']),
       h('label', { class: 'check-row' }, [buffQht, '🍶 Quế Hoa Tửu (+20 may mắn)']),
+      h('label', { class: 'check-row' }, [sellJunk, '💰 Hành trang sắp đầy thì bấm "Bán thừa" của game (món không khớp ⚙ Nhặt đồ, không khoá)']),
+      h('div', { class: 'form-grid' }, [h('label', { text: 'Bán khi còn ≤ ô trống' }), sellFree]),
       h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', {
         dailyKnb: dailyKnb.checked, buffTtl: buffTtl.checked, buffTtlSpecial: buffTtlSp.checked, buffQht: buffQht.checked,
+        autoSellJunk: sellJunk.checked, autoSellFreeSlots: +sellFree.value,
       }, 'Đã lưu việc mỗi ngày') }),
     ]),
     section('Cửa hàng bang', [

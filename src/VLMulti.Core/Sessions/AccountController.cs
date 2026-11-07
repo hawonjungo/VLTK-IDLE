@@ -502,6 +502,12 @@ public sealed class AccountController
                 case "guildResult":
                     OnGuildResult(m, now);
                     break;
+                case "bossHkResult":
+                    OnBossHkResult(m, now);
+                    break;
+                case "sellJunkResult":
+                    OnSellJunkResult(m, now);
+                    break;
                 case "horseResult":
                     Log.Write($"[{Account.Id}] horse {Str(m, "op")}: {Str(m, "r")} stored={Str(m, "stored")} sent={Str(m, "sent")} failed={Str(m, "failed")}");
                     HorseResult?.Invoke(m.Clone());
@@ -732,9 +738,128 @@ public sealed class AccountController
         return !doneThisWave;
     }
 
+    // ---------- 👑 Theo dõi từng đợt Boss Hoàng Kim: chắc chắn được đánh, không được thì cảnh báo ----------
+    // Trong đợt (acc bật vòng 🔁, đang trong game), chưa thấy game đưa đi đánh:
+    //  - bị đẩy ra khỏi tháp (chết) trong 10 phút đầu → vào lại tháp, tối đa 2 lần;
+    //  - dự phòng: bảng Nhiệm vụ › Boss › thẻ Boss Hoàng Kim có nút "Đến ngay" khi boss còn sống → bấm (tối đa 2 lần,
+    //    cách nhau 2 phút), từ phút thứ 2 của đợt; đợt trước không hạ được thì bấm ngay khi đợt bắt đầu.
+    // Gần hết đợt đọc lại thẻ ("Đã hạ Boss đợt này"). Hết đợt mà không thấy hạ boss → cảnh báo (không chỉ ghi nhật ký).
+    private static readonly TimeSpan BossTowerRetryWithin = TimeSpan.FromMinutes(11);
+    private const int BossTowerRetries = 2, BossGoTries = 2;
+    private bool _waveOn, _waveTracked, _waveCardDone, _waveCardChecked, _waveGoEarly, _bossAskPending;
+    private DateTime _waveStart, _waveTowerAt, _waveGoAt, _bossAskAt;
+    private int _waveTowerRetries, _waveGoTries;
+    private string _waveInfo = "";
+    private bool _waveSeenDead, _waveInDungeon;
+
+    private bool BossDoneThisWave => _waveCardDone || (_bossDoneAt is { } d && d >= _waveStart);
+
+    private void SuperviseBossWave(DateTime now)
+    {
+        bool window = BossHkSchedule(now);
+        if (window && !_waveOn)
+        {
+            _waveOn = true;
+            _waveStart = now;
+            _waveTracked = _waveCardDone = _waveCardChecked = _bossAskPending = _waveSeenDead = _waveInDungeon = false;
+            _waveTowerRetries = _waveGoTries = 0;
+            _waveTowerAt = _waveGoAt = DateTime.MinValue;
+            _waveInfo = "";
+        }
+        if (!window)
+        {
+            if (_waveOn) { _waveOn = false; EndBossWave(now); }
+            return;
+        }
+        if (!Account.AutoMode || Screen != "game" || Away) return;
+        _waveTracked = true;
+        if (_bossAskPending && now - _bossAskAt > TimeSpan.FromMinutes(2)) _bossAskPending = false;
+        if (BossDoneThisWave) return;
+        if (ModeCode == ModeRules.Dungeon) { _waveInDungeon = true; return; } // không bỏ dở Phó Bản
+        bool engaged = Tracker.Contains("Hoàng Kim") || (_bossEngagedAt is { } e && e >= _waveStart && now - e < BossFightMax);
+        var since = now - _waveStart;
+
+        // Chưa ở tháp (chết bị đẩy ra Luyện Công, hoặc lỡ bước chuẩn bị) khi chưa được đưa đi đánh → vào tháp
+        if (!engaged && ModeCode is not ("" or ModeRules.Tower) && since < BossTowerRetryWithin && now - _bossPrepAt > TimeSpan.FromSeconds(60)
+            && now - _waveTowerAt > TimeSpan.FromSeconds(90) && _waveTowerRetries < BossTowerRetries && !IsModeBlocked(ModeRules.Tower, now))
+        {
+            if (ModeCode == ModeRules.Farm) _waveSeenDead = true;
+            _waveTowerRetries++;
+            _waveTowerAt = now;
+            _pendingAutoMode = ModeRules.Tower;
+            _lastAutoModeCmd = now;
+            Log.Write($"[{Account.Id}] boss HK: {ModeCode} before the fight, into tower ({_waveTowerRetries}/{BossTowerRetries})");
+            Note(now, ModeCode == ModeRules.Farm
+                ? $"👑 Boss Hoàng Kim: bị đẩy ra khỏi tháp trước khi được đưa đi đánh – vào lại tháp ({_waveTowerRetries}/{BossTowerRetries})"
+                : $"👑 Boss Hoàng Kim đang ra mà acc chưa ở tháp – vào tháp để game đưa đi đánh ({_waveTowerRetries}/{BossTowerRetries})", StatusLevel.Warn);
+            RunCommand("mode", ModeRules.Tower);
+            return;
+        }
+        if (_bossAskPending) return;
+        // Dự phòng: "Đến ngay"
+        var goAfter = _waveGoEarly ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(3);
+        if (!engaged && since >= goAfter && _waveGoTries < BossGoTries && now - _waveGoAt > TimeSpan.FromMinutes(2))
+        {
+            _waveGoTries++;
+            _waveGoAt = now;
+            AskBossCard(now, go: true);
+            return;
+        }
+        // Gần hết đợt: đọc thẻ xem đã hạ chưa (dòng kênh Hệ thống có thể bị lỡ)
+        if (!_waveCardChecked && since >= TimeSpan.FromMinutes(30))
+        {
+            _waveCardChecked = true;
+            AskBossCard(now, go: false);
+        }
+    }
+
+    private void AskBossCard(DateTime now, bool go)
+    {
+        _bossAskPending = true;
+        _bossAskAt = now;
+        Post(new { t = "bossHk", arg = new { go } });
+    }
+
+    private void OnBossHkResult(JsonElement m, DateTime now)
+    {
+        _bossAskPending = false;
+        bool Flag(string n) => m.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.True;
+        var r = Str(m, "r");
+        var info = Str(m, "info");
+        Log.Write($"[{Account.Id}] boss HK card: {r} done={Flag("done")} alive={Flag("alive")} went={Flag("went")} {info}");
+        if (r == "busy") { _waveGoAt = DateTime.MinValue; if (_waveGoTries > 0) _waveGoTries--; return; }
+        if (info.Length > 0) _waveInfo = info;
+        if (Flag("done")) { _waveCardDone = true; return; }
+        if (Flag("went")) Note(now, $"👑 Boss Hoàng Kim: chưa được đưa đi đánh – bấm \"Đến ngay\" ({info})", StatusLevel.Warn);
+    }
+
+    private void EndBossWave(DateTime now)
+    {
+        if (!_waveTracked) return;
+        var vn = _waveStart.ToUniversalTime().AddHours(7).AddMinutes(1);
+        var wave = $"{vn:HH}:{(vn.Minute >= 15 && vn.Minute < 45 ? "30" : "00")}";
+        if (BossDoneThisWave)
+        {
+            _waveGoEarly = false;
+            Note(now, $"👑 Đã hạ Boss Hoàng Kim đợt {wave}", StatusLevel.Ok);
+            return;
+        }
+        var why = new List<string>();
+        if (_waveInDungeon) why.Add("đang trong Phó Bản");
+        if (_waveSeenDead) why.Add($"bị đẩy ra khỏi tháp, đã vào lại {_waveTowerRetries} lần");
+        if (_waveGoTries > 0) why.Add($"đã bấm \"Đến ngay\" {_waveGoTries} lần");
+        if (_waveInfo.Length > 0) why.Add("thẻ boss: " + _waveInfo);
+        if (why.Count == 0) why.Add("không thấy game đưa đi đánh");
+        var plan = _waveGoEarly
+            ? "hai đợt liền không hạ được – hãy ▶ Chơi acc này lúc boss ra để xem tận mắt"
+            : "đợt sau bấm \"Đến ngay\" ngay khi boss ra, không chờ game kéo đi";
+        _waveGoEarly = true;
+        Raise("boss-hk", $"Không hạ được Boss Hoàng Kim đợt {wave} ({string.Join("; ", why)}). Dự phòng: {plan}");
+    }
+
     // Boss Hoàng Kim chỉ kéo nhân vật đang Leo Tháp đi đánh ("… xuất hiện — tạm rời Tháp tầng N đi săn Boss";
     // ngày 07/11 các acc đang Nhiệm Vụ / Luyện Công không được kéo đi, cả 4 đợt không đánh). Vì vậy ngay trước đợt
-    // (và trong BossGrace đầu đợt nếu lỡ) acc bật vòng 🔁 đang ở chế độ khác → vào Leo Tháp, mỗi đợt một lần.
+    // acc bật vòng 🔁 đang ở chế độ khác → vào Leo Tháp, mỗi đợt một lần (trong đợt: SuperviseBossWave).
     // Không kéo ra khỏi Phó Bản (mất lượt), không chen khi đang Sát Thủ / đi thuyền / Boss tuần / mua lệnh bài.
     private static readonly TimeSpan BossPrepAhead = TimeSpan.FromMinutes(2);
     private DateTime _bossPrepAt = DateTime.MinValue;
@@ -743,9 +868,7 @@ public sealed class AccountController
     {
         if (!Account.AutoMode || Screen != "game" || ModeCode is "" or ModeRules.Tower or ModeRules.Dungeon) return;
         bool soon = !BossHkSchedule(now) && BossHkSchedule(now + BossPrepAhead);
-        bool engaged = Tracker.Contains("Hoàng Kim") || (_bossEngagedAt is { } e && now - e < BossFightMax);
-        bool early = BossHkSchedule(now) && now - _bossWindowSince < BossGrace && !engaged;
-        if (!soon && !early) return;
+        if (!soon) return;
         if (now - _bossPrepAt < TimeSpan.FromMinutes(40)) return; // mỗi đợt một lần
         if (_ldtBuyingSince is not null || EventRunning(now) || (AssassinActive && !AssassinStuck(now)) || IsModeBlocked(ModeRules.Tower, now)) return;
         _bossPrepAt = now;
@@ -873,6 +996,7 @@ public sealed class AccountController
         // trước đây đứng ở Luyện Công tới hết đợt (~30 phút).
         bool handsOff = BossHandsOff(now);
         SuperviseBossPrep(now);
+        SuperviseBossWave(now);
         if (handsOff != _bossTime)
         {
             _bossTime = handsOff;
@@ -908,6 +1032,7 @@ public sealed class AccountController
         SuperviseKnbBuy(now);
         SuperviseBuffs(now);
         SuperviseGuild(now);
+        SuperviseSellJunk(now);
         SuperviseStuck(now);
         SuperviseRecovery(now);
     }
@@ -1452,6 +1577,48 @@ public sealed class AccountController
         _buffLastTry = now;
         _buffPending = true;
         Post(new { t = "buffs", arg = new { items, keep = BuffKeep, minLeft = 300 } });
+    }
+
+    // ---------- 💰 Bán đồ thừa khi Hành trang sắp đầy (nút "Bán thừa" của game) ----------
+    private DateTime _junkLastTry;
+    private bool _junkPending;
+    private DateOnly _junkNoneNoted;
+
+    private void SuperviseSellJunk(DateTime now)
+    {
+        var cfg = SettingsProvider?.Invoke();
+        if (cfg is null || !cfg.AutoSellJunk || Screen != "game" || Away) return;
+        if (BagUsed is not { } used || BagMax is not { } max || max - used > cfg.AutoSellFreeSlots) return;
+        if (_junkPending && now - _junkLastTry < TimeSpan.FromMinutes(2)) return;
+        _junkPending = false;
+        if (now - _junkLastTry < TimeSpan.FromMinutes(5) || _ldtBuyingSince is not null || EventRunning(now)) return;
+        _junkLastTry = now;
+        _junkPending = true;
+        Post(new { t = "sellJunk" });
+    }
+
+    private void OnSellJunkResult(JsonElement m, DateTime now)
+    {
+        _junkPending = false;
+        var r = Str(m, "r");
+        int sold = m.TryGetProperty("sold", out var sv) && sv.ValueKind == JsonValueKind.Number ? sv.GetInt32() : 0;
+        Log.Write($"[{Account.Id}] sell junk: {r} sold={sold} gold={Str(m, "gold")} bag {Str(m, "before")} -> {Str(m, "after")}");
+        if (r is "busy" or "boss-hk") { _junkLastTry = now - TimeSpan.FromMinutes(4); return; }
+        if (r == "ok" && sold > 0)
+        {
+            var gold = Str(m, "gold");
+            Note(now, $"💰 Hành trang sắp đầy: bán {sold} món đồ thừa" + (gold.Length > 0 ? $" (+{gold} lượng)" : "")
+                + (Str(m, "after").Length > 0 ? $" · {Str(m, "before")} → {Str(m, "after")}" : ""), StatusLevel.Ok);
+            if (BagPattern.Match(Str(m, "after")) is { Success: true } a) (BagUsed, BagMax) = (int.Parse(a.Groups[1].Value), int.Parse(a.Groups[2].Value));
+            return;
+        }
+        // Không có đồ thừa (mọi món đều được giữ) → thôi một lúc, nhắc một lần mỗi ngày
+        _junkLastTry = now + TimeSpan.FromMinutes(15);
+        if (r == "none" && _junkNoneNoted != VnDate(now))
+        {
+            _junkNoneNoted = VnDate(now);
+            Note(now, "💰 Hành trang sắp đầy mà không có đồ thừa để bán – xem lại ⚙ Nhặt đồ (bộ lọc đang giữ quá nhiều)", StatusLevel.Warn);
+        }
     }
 
     // ---------- 🏯 Cửa hàng bang: mỗi ngày một lần (trang làm, xem guildFlow trong agent.js) ----------

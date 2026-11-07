@@ -673,10 +673,10 @@ public class AccountControllerTests
         boss = true;
         t = Run(ctl, t, 10, St("farm"));
         Assert.Equal(new[] { "tower" }, ModeCommands(page));
-        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("👑 Sắp tới Boss Hoàng Kim"));
-        // Game đẩy ra Luyện Công trong đợt (đưa đi đánh / đợt đã hạ) → không ra lệnh lại, không giành giật
+        Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("vào lại tháp (1/2)"));
+        // Vẫn bị đẩy ra: vào lại tối đa 2 lần trong 10 phút đầu, sau đó không ra lệnh nữa (không giành giật với game)
         t = Run(ctl, t, 25 * 60, St("farm"));
-        Assert.Equal(new[] { "tower" }, ModeCommands(page));
+        Assert.Equal(new[] { "tower", "tower" }, ModeCommands(page));
         // Hết đợt → vòng chạy lại bình thường
         boss = false;
         RunUntilMode(ctl, page, t, St("farm"), "tower", 5 * 60);
@@ -700,6 +700,81 @@ public class AccountControllerTests
         // Vào tháp, tới đợt boss: không quay lại Nhiệm Vụ trong đợt
         t = Run(ctl, t, 10 * 60, St("tower", "20/200"));
         Assert.Equal(n, ModeCommands(page).Count);
+    }
+
+    private static int Count(FakePage page, string t) => page.Sent.Count(m => m.GetProperty("t").GetString() == t);
+
+    [Fact]
+    public void Boss_wave_retries_tower_after_death_then_uses_go_now_and_warns_when_boss_not_killed()
+    {
+        var (ctl, page, _) = Make();
+        var problems = new List<(string Key, string Msg)>();
+        ctl.Problem += (k, msg) => problems.Add((k, msg));
+        bool boss = false;
+        ctl.BossHkSchedule = _ => boss;
+        var t = Run(ctl, T0, 15, St("tower"));
+        ctl.SetAutoMode(true, t);
+        t = Run(ctl, t, 70, St("tower"));
+        boss = true;
+        t = Run(ctl, t, 30, St("tower"));
+        // Chết trong tháp trước khi được kéo đi → vào lại tháp, tối đa 2 lần
+        t = Run(ctl, t, 4 * 60, St("farm"));
+        Assert.Equal(2, ModeCommands(page).Count(m => m == "tower"));
+        Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("vào lại tháp (2/2)"));
+        // Dự phòng: đọc thẻ boss, bấm "Đến ngay"
+        Assert.True(Count(page, "bossHk") >= 1);
+        Assert.True(page.Sent.Last(m => m.GetProperty("t").GetString() == "bossHk").GetProperty("arg").GetProperty("go").GetBoolean());
+        ctl.OnPageMessage("""{"t":"bossHkResult","r":"ok","done":false,"alive":true,"went":true,"info":"Hà Linh Phiêu cấp 125 tại Trường Bạch sơn Bắc · còn 22 phút"}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("Đến ngay"));
+        t = Run(ctl, t, 30 * 60, St("farm"));
+        Assert.True(Count(page, "bossHk") <= 3); // 2 lần "Đến ngay" + 1 lần đọc thẻ cuối đợt
+        // Hết đợt, không thấy hạ boss → cảnh báo kèm phương án dự phòng
+        boss = false;
+        Run(ctl, t, 6, St("farm"));
+        var alert = Assert.Single(problems, p => p.Key == "boss-hk");
+        Assert.Contains("Không hạ được Boss Hoàng Kim", alert.Msg);
+        Assert.Contains("Dự phòng", alert.Msg);
+    }
+
+    [Fact]
+    public void Boss_wave_killed_is_noted_not_alerted()
+    {
+        var (ctl, page, _) = Make();
+        var problems = new List<string>();
+        ctl.Problem += (k, _) => problems.Add(k);
+        bool boss = false;
+        ctl.BossHkSchedule = _ => boss;
+        var t = Run(ctl, T0, 15, St("tower"));
+        ctl.SetAutoMode(true, t);
+        t = Run(ctl, t, 70, St("tower"));
+        boss = true;
+        t = Run(ctl, t, 30, St("tower"));
+        ctl.OnPageMessage("""{"t":"sysNote","text":"👑 Boss Hoàng Kim Hà Linh Phiêu xuất hiện — tạm rời Tháp tầng 900 đi săn Boss.","boss":true}""", t);
+        t = Run(ctl, t, 5 * 60, St("farm"));
+        Assert.Equal(0, Count(page, "bossHk")); // đang đánh: không cần dự phòng
+        ctl.OnPageMessage("""{"t":"sysNote","text":"🎁 Hạ Boss Hoàng Kim: 15.00M kinh nghiệm, 1 Lam Thủy Tinh","boss":true}""", t);
+        t = Run(ctl, t, 30 * 60, St("tower"));
+        boss = false;
+        Run(ctl, t, 6, St("tower"));
+        Assert.DoesNotContain("boss-hk", problems);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("👑 Đã hạ Boss Hoàng Kim"));
+    }
+
+    [Fact]
+    public void Sells_junk_when_bag_is_nearly_full()
+    {
+        var (ctl, page, cfg) = Make();
+        string Bag(string bag) => Status("game", "tower", "Thông Thiên Tháp · tầng 900", bag: bag);
+        var t = Run(ctl, T0, 30, Bag("150/180"));
+        Assert.Equal(0, Count(page, "sellJunk")); // còn 30 ô
+        t = Run(ctl, t, 30, Bag("161/180"));
+        Assert.Equal(1, Count(page, "sellJunk"));
+        ctl.OnPageMessage("""{"t":"sellJunkResult","r":"ok","sold":23,"gold":"1,2 vạn","before":"161/180","after":"138/180"}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("💰 Hành trang sắp đầy: bán 23 món đồ thừa"));
+        // Tắt tuỳ chọn → không bán
+        cfg.AutoSellJunk = false;
+        Run(ctl, t, 10 * 60, Bag("175/180"));
+        Assert.Equal(1, Count(page, "sellJunk"));
     }
 
     [Fact]
