@@ -654,25 +654,65 @@ public class AccountControllerTests
         Assert.Empty(Sent(page2, "buffs"));
     }
 
+    private static string St(string mode, string dt = "200/200") => JsonSerializer.Serialize(new
+    {
+        t = "status", screen = "game", lv = "139", gold = "1 vạn", knb = "1 🔒1", mode, modeText = mode,
+        zone = mode == "tower" ? "Thông Thiên Tháp · tầng 900" : "Hoa Sơn",
+        dt, pb = "0/4", ldtHave = "0", ldtUsed = "160/160", ldtBuy = "100/100", st = "0/60",
+    });
+
     [Fact]
-    public void Account_not_pulled_into_boss_wave_returns_to_tower_after_grace()
+    public void Account_not_in_tower_when_boss_wave_starts_goes_to_tower_once_to_be_pulled()
     {
         var (ctl, page, _) = Make();
         bool boss = false;
         ctl.BossHkSchedule = _ => boss;
-        // Vừa chết trong tháp ra Luyện Công thì đợt boss bắt đầu, game không đưa đi đánh
-        string Farm() => JsonSerializer.Serialize(new
-        {
-            t = "status", screen = "game", lv = "139", gold = "1 vạn", knb = "1 🔒1", mode = "farm", modeText = "farm", zone = "Hoa Sơn",
-            dt = "200/200", pb = "0/4", ldtHave = "0", ldtUsed = "160/160", ldtBuy = "100/100", st = "0/60",
-        });
-        var t = Run(ctl, T0, 15, Farm());
+        // Vừa chết trong tháp ra Luyện Công thì đợt boss bắt đầu: game chỉ kéo nhân vật đang Leo Tháp đi đánh
+        var t = Run(ctl, T0, 15, St("farm"));
         ctl.SetAutoMode(true, t);
         boss = true;
-        t = Run(ctl, t, 2 * 60, Farm());
-        Assert.Empty(ModeCommands(page));                 // 3 phút đầu đợt: chờ game kịp đưa đi
-        var back = RunUntilMode(ctl, page, t, Farm(), "tower", 3 * 60);
-        Assert.True(back - T0 < TimeSpan.FromMinutes(6));  // không chờ tới hết đợt (~33 phút)
+        t = Run(ctl, t, 10, St("farm"));
+        Assert.Equal(new[] { "tower" }, ModeCommands(page));
+        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("👑 Sắp tới Boss Hoàng Kim"));
+        // Game đẩy ra Luyện Công trong đợt (đưa đi đánh / đợt đã hạ) → không ra lệnh lại, không giành giật
+        t = Run(ctl, t, 25 * 60, St("farm"));
+        Assert.Equal(new[] { "tower" }, ModeCommands(page));
+        // Hết đợt → vòng chạy lại bình thường
+        boss = false;
+        RunUntilMode(ctl, page, t, St("farm"), "tower", 5 * 60);
+    }
+
+    [Fact]
+    public void Auto_loop_moves_quest_account_into_tower_just_before_boss_wave()
+    {
+        var (ctl, page, _) = Make();
+        var start = T0.AddMinutes(6);
+        ctl.BossHkSchedule = now => now >= start && now < start.AddMinutes(34);
+        // Đang làm Nhiệm Vụ → 2 phút trước đợt vào tháp, trong đợt đứng yên
+        var t = Run(ctl, T0, 15, St("quest", "20/200"));
+        ctl.SetAutoMode(true, t);
+        t = Run(ctl, t, 3 * 60, St("quest", "20/200"));
+        Assert.DoesNotContain("tower", ModeCommands(page));
+        t = Run(ctl, t, 2 * 60 + 30, St("quest", "20/200"));
+        Assert.Equal("tower", ModeCommands(page).Last());
+        int n = ModeCommands(page).Count;
+        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("👑 Sắp tới Boss Hoàng Kim"));
+        // Vào tháp, tới đợt boss: không quay lại Nhiệm Vụ trong đợt
+        t = Run(ctl, t, 10 * 60, St("tower", "20/200"));
+        Assert.Equal(n, ModeCommands(page).Count);
+    }
+
+    [Fact]
+    public void Boss_prep_does_not_pull_an_account_out_of_a_dungeon()
+    {
+        var (ctl, page, _) = Make();
+        bool boss = false;
+        ctl.BossHkSchedule = _ => boss;
+        var t = Run(ctl, T0, 15, St("dg"));
+        ctl.SetAutoMode(true, t);
+        boss = true;
+        Run(ctl, t, 5 * 60, St("dg"));
+        Assert.DoesNotContain("tower", ModeCommands(page));
     }
 
     [Fact]
