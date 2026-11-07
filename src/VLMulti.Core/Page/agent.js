@@ -575,27 +575,24 @@
     return done;
   };
   // Mở 1 Đại Hồng Bao: Hành trang › 🧧 → hộp "Đại Hồng Bao" › "Dùng 1". Trả về số KNB nhận được (0 nếu không mở được)
-  const bigRedCount = () => { const m = (($('#bHbOpen') || {}).title || '').match(/Đại Hồng Bao\s+(\d+)/i); return m ? +m[1] : 0; };
-  const openBigRed = async () => {
-    closeModal();
-    await waitFor(() => !isVisible($('#modal')), 2000);
-    const inv = $('#u20menu > button[data-u="inv"]'), win = $('#u2bagw');
-    if (!inv) return 0;
-    if (!isOpen(win)) inv.click();
+  const bigRedCount = () => hbCounts().dhb;
+  // Mở Đại Hồng Bao (100–1000 KNB mỗi cái): tối đa `max` cái một lần bấm (1 = mở 1; Infinity = nút "Mở ×tất cả").
+  // Trả về số KNB nhận được (0 nếu không mở được)
+  const openBigRed = async (max = 1) => {
     let got = 0;
     try {
-      const hb = await waitFor(() => { const b = $('#bHbOpen'); return b && isVisible(b) ? b : null; }, 2000);
-      if (!hb) return 0;
-      hb.click();
-      const use = await waitFor(() => /Đại Hồng Bao/.test(($('#mBody h3') || {}).textContent || '') && $('#kiUse'), 2000);
-      if (!use) return 0;
+      if (!(await openHbModal())) return 0;
+      const b = hbButton('dhb', max);
+      if (!b) return 0;
       const before = knbNow();
-      use.click();
+      b.click();
       const after = await waitFor(() => { const k = knbNow(); return k && before && k.knb > before.knb ? k : null; }, 8000);
-      got = after ? after.knb - before.knb : 0;
+      if (after) await sleep(1500); // mở nhiều cái: chờ số dừng tăng
+      const fin = knbNow();
+      got = fin && before ? fin.knb - before.knb : 0;
     } finally {
-      closeModal();
-      const w = $('#u2bagw'), x = $('#u2bwx'); if (x && isOpen(w)) x.click();
+      await closeModalSure();
+      closeBag();
     }
     return got;
   };
@@ -631,19 +628,43 @@
 
   // Ngân lượng (vạn) ở ô #gold ("12.754 vạn")
   const silverNow = () => VLParse.silver(txt('#gold'));
+  // 🧧 Hồng Bao / Đại Hồng Bao lưu trên máy chủ (không nằm trong Hành trang, từ bản 1041): Hành trang › nút 🧧 (#bHbOpen,
+  // title "Hồng Bao 315 · Đại Hồng Bao 4") → hộp "🧧 Hồng Bao" với nút data-hbo="hb"|"dhb" data-n="1"|"10"|"N" (Mở 1 / ×10 / ×tất cả)
+  const hbCounts = () => {
+    const t = (($('#bHbOpen') || {}).title || '') + ' ' + ((isVisible($('#modal')) && /Hồng Bao/.test(txt('#mBody h3'))) ? ($('#mBody') || {}).innerText || '' : '');
+    const big = t.match(/Đại Hồng Bao:?\s*([\d.]+)/i);
+    const small = t.replace(/Đại Hồng Bao:?\s*[\d.]+/gi, '').match(/Hồng Bao:?\s*([\d.]+)/i);
+    return { hb: small ? +small[1].replace(/\./g, '') : 0, dhb: big ? +big[1].replace(/\./g, '') : 0 };
+  };
+  const hbModalOpen = () => isVisible($('#modal')) && /Hồng Bao/.test(txt('#mBody h3')) && !!$('#mBody [data-hbo]');
+  const openHbModal = async () => {
+    if (hbModalOpen()) return true;
+    await closeModalSure();
+    if (!(await openBag())) return false;
+    const b = await waitFor(() => { const x = $('#bHbOpen'); return x && isVisible(x) ? x : null; }, 2000);
+    if (!b) return false;
+    b.click();
+    return !!(await waitFor(hbModalOpen, 3000));
+  };
+  // Nút mở nhiều nhất không quá `max` cái của loại `kind` (hb | dhb)
+  const hbButton = (kind, max = Infinity) => {
+    const bs = [...document.querySelectorAll(`#mBody [data-hbo="${kind}"]`)].filter((b) => !b.disabled && +b.dataset.n > 0 && +b.dataset.n <= max);
+    return bs.sort((a, b) => +b.dataset.n - +a.dataset.n)[0] || null;
+  };
   // Thiếu vạn lượng: mở Hồng Bao (1–1000 vạn mỗi cái, máy chủ quay số), ×10 mỗi lần, tới khi đủ `need` vạn hoặc hết Hồng Bao.
-  // Đại Hồng Bao (ra KNB) để dành cho mua lệnh bài, không mở ở đây.
-  const openRedForSilver = async (need) => {
+  const openRedForSilver = async (need, rounds = 5) => {
     const res = { opened: 0, gained: 0 };
     const start = silverNow();
-    if (start == null || !(await openBag())) return res;
+    if (start == null || !(await openHbModal())) return res;
     try {
-      for (let i = 0; i < 5 && (silverNow() ?? 0) < need; i++) {
-        const have = bagCount('hb');
-        if (have <= 0) break;
-        const before = silverNow() ?? 0, ten = have >= 10;
-        if (!(await useBagItem('hb', /^Hồng Bao/, ten ? '#kiUse10' : '#kiUse', () => (silverNow() ?? 0) > before))) break;
-        res.opened += ten ? 10 : 1;
+      for (let i = 0; i < rounds && (silverNow() ?? 0) < need; i++) {
+        const b = hbButton('hb', 10);
+        if (!b) break;
+        const n = +b.dataset.n, before = silverNow() ?? 0;
+        b.click();
+        if (!(await waitFor(() => (silverNow() ?? 0) > before, 6000))) break;
+        res.opened += n;
+        await sleep(400);
       }
     } finally {
       await closeModalSure();
@@ -785,14 +806,250 @@
     const menu = $('#u20menu > button[data-u="bang"]');
     if (!menu) return { r: 'no-guild' };
     flowBusy = true;
-    const res = { r: 'ok', bought: [], spent: 0, donated: 0, mails: 0, points: null };
+    const res = { r: 'ok', bought: [], spent: 0, donated: 0, mails: 0, points: null,
+      daily: 0, redOpened: 0, burned: 0, burnPts: 0, kept: [], stashed: 0, approved: [], week: null };
     try {
       await guildShop(arg, menu, res);
       if (res.r !== 'no-guild') await guildMail(res);
+      if (res.r !== 'no-guild') await guildExtras(arg, res);
     } finally {
       flowBusy = false;
     }
     res.bought = res.bought.join(',');
+    res.kept = res.kept.join(', ');
+    res.approved = res.approved.join(', ');
+    return res;
+  };
+
+  // ---------- 🏯 Bang hội: cống hiến hằng ngày, Lò Đốt Đồ, duyệt đơn, điều kiện tuần ----------
+  // Trạng thái bang đọc qua cầu nối của game (H5.G): BH.d.bang (cấp, quỹ, điểm tuần / mục tiêu, miễn xét, cảnh báo),
+  // BH.d.toi (chức vụ, góp hôm nay / tối đa), BH.d.tv (thành viên, lần vào game cuối), BH.d.don (đơn xin vào).
+  const gameGet = (name) => { try { return window.H5 && window.H5.G ? window.H5.G(name) : undefined; } catch (_) { return undefined; } };
+  const openGuildTab = async (tab) => {
+    if (!$('#mBody [data-bht]')) {
+      await closeModalSure();
+      $('#u20menu > button[data-u="bang"]')?.click();
+      if (!(await waitFor(() => $('#mBody [data-bht]'), 3000))) return false;
+    }
+    const t = $(`#mBody [data-bht="${tab}"]`);
+    if (!t) return false;
+    t.click();
+    await sleep(500);
+    return true;
+  };
+  // Đồ Hoàng Kim giữ lại (không đốt) và cất vào Rương: dòng `attr` đạt mức cao nhất của món, chỉ với bộ có tên bắt đầu `set`.
+  // Mức cao nhất tra trong dữ liệu game: JX.sets.gold (mẫu món theo grp/sid → mã dòng phụ) và JX.ge (mã → thuộc tính, [min,max]).
+  const goldLineMax = (it, attr) => {
+    const JX = window.JX;
+    if (!JX || !it || !it.set) return null;
+    const tpl = (JX.sets && JX.sets.gold || []).find((t) => t.grp === it.set.grp && t.sid === it.set.sid);
+    if (!tpl) return null;
+    for (const id of tpl.mag || []) {
+      const g = JX.ge && JX.ge[id];
+      if (g && JX.attr[g.a] === attr && g.p && g.p[0]) return g.p[0][1];
+    }
+    return null;
+  };
+  const goldLineValue = (it, attr) => {
+    const JX = window.JX;
+    const m = (it.mag || []).find((x) => JX && JX.attr[x.a] === attr);
+    return m && m.p ? +m.p[0] : null;
+  };
+  const goldKeep = (it, rules) => rules.some((r) => {
+    if (!new RegExp('^' + r.set, 'i').test(it.n || '')) return false;
+    const v = goldLineValue(it, r.attr), max = goldLineMax(it, r.attr);
+    return v != null && max != null && v >= max;
+  });
+  const stashItem = async (uid) => {
+    if (!(await openBag())) return false;
+    const it = $(`#t-inv [data-uid="${uid}"]`);
+    if (!it) return false;
+    it.click();
+    const b = await waitFor(() => { const x = $('#bStashIt'); return x && isVisible(x) && !x.disabled ? x : null; }, 2000);
+    if (!b) { await closeModalSure(); return false; }
+    b.click();
+    const ok = !!(await waitFor(() => !$(`#t-inv [data-uid="${uid}"]`), 3000));
+    await closeModalSure();
+    return ok;
+  };
+  const guildExtras = async (arg, res) => {
+    try {
+      // 1. Cống hiến vạn tới arg.dailyAmount trong ngày (không quá mức tối đa của game). Thiếu vạn → mở Hồng Bao;
+      //    hết Hồng Bao → chừa arg.reserve vạn.
+      if (arg.dailyAmount > 0 && (await openGuildTab('gop'))) {
+        const card = $('#bhGopV')?.closest('.u2card');
+        const info = card ? VLParse.guildDonate(card.innerText) : null;
+        let want = info ? Math.max(0, Math.min(arg.dailyAmount, info.cap) - info.done) : 0;
+        if (want > 0) {
+          if ((silverNow() ?? 0) < want) {
+            await closeModalSure();
+            const got = await openRedForSilver(want, 12);
+            res.redOpened = got.opened;
+          }
+          await openGuildTab('gop');
+          await openBag();
+          const hbLeft = hbCounts().hb > 0;
+          closeBag();
+          await openGuildTab('gop');
+          const silver = silverNow() ?? 0;
+          const room = hbLeft ? silver : silver - (arg.reserve ?? 3000);
+          const amount = Math.max(0, Math.min(want, Math.floor(room)));
+          const input = $('#bhGopV'), btn = $('#bhGopVb');
+          if (amount > 0 && input && btn) {
+            const before = guildPts();
+            setValue(input, String(amount));
+            if (await pressAndAgree(btn, /góp|cống hiến/i)) {
+              const after = await waitFor(() => { const p = guildPts(); return p != null && p > (before ?? 0) ? p : null; }, 4000);
+              res.daily = after != null && before != null ? after - before : amount;
+            }
+          }
+        }
+      }
+      // 2. Lò Đốt Đồ: góp Hoàng Kim bộ chung trong Hành trang, trừ món khoá và món giữ lại (cất vào Rương)
+      if (arg.furnace && (await openGuildTab('lo'))) {
+        await waitFor(() => /Lò đợt|Chưa có Hoàng Kim/.test(($('#mBody') || {}).innerText || ''), 4000);
+        const S = gameGet('S'), BH = gameGet('BH'), gop = gameGet('bhLoGop');
+        const grp = BH && BH.lo && Array.isArray(BH.lo.grp) ? BH.lo.grp : [];
+        const rules = arg.keep || [];
+        const gold = (S && S.inv || []).filter((i) => i && i.set && i.set.kind === 'gold');
+        const keepers = gold.filter((i) => goldKeep(i, rules));
+        res.kept = keepers.map((i) => i.n);
+        const burn = gold.filter((i) => !i.lock && !keepers.includes(i) && grp.includes(+i.set.grp));
+        if (burn.length && typeof gop === 'function') {
+          const before = gold.length;
+          const p = gop(burn.slice(0, 200));
+          const yes = await waitFor(() => {
+            const box = $('#askBox');
+            if (!box || !isVisible(box) || !/Lò Đốt Đồ/.test(box.innerText)) return null;
+            return [...box.querySelectorAll('button')].find((b) => b.dataset.a === '1' || /^(Đồng ý|Góp|OK)$/i.test(b.textContent.trim()));
+          }, 3000);
+          if (yes) {
+            yes.click();
+            try { await Promise.race([p, sleep(8000)]); } catch (_) {}
+            const now = (gameGet('S').inv || []).filter((i) => i && i.set && i.set.kind === 'gold').length;
+            res.burned = Math.max(0, before - now);
+            res.burnPts = res.burned * ((BH.lo && +BH.lo.diem) || 20);
+          } else {
+            const box = $('#askBox');
+            if (box && isVisible(box)) { post({ t: 'log', msg: 'furnace: unexpected dialog ' + box.innerText.replace(/\s+/g, ' ').slice(0, 120) }); [...box.querySelectorAll('button')].find((b) => /^Hủy$/.test(b.textContent.trim()))?.click(); }
+          }
+        }
+        await closeModalSure();
+        for (const k of keepers) if (await stashItem(k.uid)) res.stashed++;
+        closeBag();
+      }
+      // 3. Duyệt đơn xin vào của nhân vật của bạn (chỉ khi acc này được duyệt: Bang Chủ / Phó / Trưởng Lão)
+      if ((arg.approve || []).length && (await openGuildTab('bang'))) {
+        for (let i = 0; i < 10; i++) {
+          const b = [...document.querySelectorAll('#mBody [data-bhok]')].find((x) => arg.approve.includes(x.dataset.bhok));
+          if (!b) break;
+          const name = b.dataset.bhok;
+          b.click();
+          if (await waitFor(() => ![...document.querySelectorAll('#mBody [data-bhok]')].some((x) => x.dataset.bhok === name), 4000)) res.approved.push(name);
+          else break;
+        }
+      }
+      // 4. Điều kiện tuần (game xét thứ Hai: ≥ 15 người vào game trong tuần, đủ điểm tuần, quỹ ≥ 20.000 vạn × cấp)
+      const d = (gameGet('BH') || {}).d;
+      if (d && d.bang) {
+        const vn = new Date(Date.now() + 7 * 3600000);
+        const monday = Date.UTC(vn.getUTCFullYear(), vn.getUTCMonth(), vn.getUTCDate() - ((vn.getUTCDay() + 6) % 7)) - 7 * 3600000;
+        const tv = d.tv || [];
+        res.week = {
+          name: d.bang.ten, cap: d.bang.cap | 0, fund: +d.bang.quy_luong || 0, points: +d.bang.tuan_diem || 0, target: +d.bang.tuan_muc || 0,
+          members: tv.length, active: tv.filter((m) => +m.on >= monday).length, exemptUntil: +d.bang.mien_den || 0,
+          warning: d.bang.canh_bao || '', role: (d.toi && d.toi.chuc) || '',
+        };
+      }
+    } catch (err) {
+      post({ t: 'log', msg: 'guild extras: ' + err.message });
+    } finally {
+      try { await closeModalSure(); closeBag(); } catch (_) {}
+    }
+  };
+
+  // ---------- 💰 KNB: mở Đại Hồng Bao rồi gửi KNB thừa về nhân vật chính (thư tặng) / nhân vật chính nhận thư ----------
+  // KNB thường chính xác (ô #knbTop viết gọn "17.2k"), lấy từ trạng thái game; không có thì đọc ô trên cùng
+  const knbExact = () => { const S = gameGet('S'); return S && typeof S.knb === 'number' ? S.knb : ((knbNow() || {}).knb ?? null); };
+  const knbFlowSend = async (arg) => {
+    if (flowBusy || anyWindowOpen()) return { r: 'busy' };
+    if (inBossHk()) return { r: 'boss-hk' };
+    const res = { r: 'ok', opened: 0, gained: 0, sent: 0, mails: 0, knb: 0 };
+    if (arg.op === 'send' && !(arg.to && (arg.allowed || []).includes(arg.to))) return { ...res, r: 'not-allowed' };
+    flowBusy = true;
+    const stop = watchMsgs();
+    try {
+      if (arg.op === 'collect') {
+        // Nhân vật chính: nhận thư chỉ có KNB từ nhân vật của bạn
+        $('#u20mail')?.click();
+        if (await waitFor(() => $('#mBody #nmTo') || $('#mBody .nmrow'), 3000)) {
+          for (let i = 0, misses = 0; i < 20 && misses < 2; i++) {
+            await sleep(500);
+            const row = [...document.querySelectorAll('#mBody .nmrow')].find((r) =>
+              (arg.from || []).includes(((r.querySelector(':scope > span > b') || {}).textContent || '').trim())
+              && r.querySelector('[data-take]') && /KNB/.test(r.innerText) && !/khóa/.test(r.innerText));
+            if (!row) break;
+            const id = row.querySelector('[data-take]').dataset.take;
+            row.querySelector('[data-take]').click();
+            if (await waitFor(() => !$(`#mBody [data-take="${id}"]`), 3000)) { res.mails++; misses = 0; } else misses++;
+          }
+        }
+      } else {
+        // 1. Mở hết Đại Hồng Bao
+        if (arg.openBig) {
+          await openBag();
+          const n = bigRedCount();
+          closeBag();
+          if (n > 0) {
+            const before = knbExact();
+            const got = await openBigRed(Infinity);
+            if (got > 0) { res.opened = n; res.gained = (knbExact() ?? 0) - (before ?? 0) || got; }
+          }
+        }
+        // 2. Gửi phần trên mức giữ lại về nhân vật chính
+        const have = knbExact();
+        const amount = have != null ? Math.floor(have - (arg.keep ?? 1000)) : 0;
+        if (arg.op === 'send' && amount >= (arg.min ?? 1)) {
+          await closeModalSure();
+          $('#u20mail')?.click();
+          const toBox = await waitFor(() => $('#mBody #nmTo'), 3000);
+          if (toBox) {
+            setValue(toBox, arg.to);
+            const trade = $('#nmGdOn');
+            if (trade && trade.checked) trade.click();
+            if (/Đang chọn/.test(($('#nmPick') || {}).innerText || '')) { res.r = 'items-selected'; }
+            else {
+              setValue($('#nmGold'), String(amount));
+              $('#nmSend').click();
+              const yes = await waitFor(() => {
+                const box = $('#askBox');
+                if (!box || !isVisible(box)) return null;
+                const t = box.innerText.replace(/\s+/g, ' ');
+                if (!new RegExp('^Gửi [\\d.,]+ KNB cho ' + arg.to.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\?').test(t)) return 'bad';
+                return [...box.querySelectorAll('button')].find((b) => b.dataset.a === '1' || /^Gửi$/.test(b.textContent.trim())) || 'bad';
+              }, 3000);
+              if (yes && yes !== 'bad') {
+                yes.click();
+                const after = await waitFor(() => { const x = knbExact(); return x != null && x <= have - amount ? x : null; }, 5000);
+                res.sent = after != null ? have - after : 0;
+                if (!after) res.r = 'not-sent';
+              } else {
+                res.r = 'no-confirm';
+                const box = $('#askBox');
+                if (box && isVisible(box)) { post({ t: 'log', msg: 'knb send: unexpected dialog ' + box.innerText.replace(/\s+/g, ' ').slice(0, 120) }); [...box.querySelectorAll('button')].find((b) => /^Hủy$/.test(b.textContent.trim()))?.click(); }
+              }
+            }
+          }
+        }
+      }
+      res.knb = knbExact() ?? 0;
+    } catch (err) {
+      res.r = 'error: ' + err.message;
+    } finally {
+      stop();
+      try { await closeModalSure(); closeBag(); } catch (_) {}
+      flowBusy = false;
+    }
     return res;
   };
   const guildShop = async (arg, menu, res) => {
@@ -1408,6 +1665,8 @@
       knbFlow().then((res) => post({ t: 'knbResult', ...res }), (err) => post({ t: 'knbResult', r: 'error: ' + err.message }));
     } else if (m.t === 'guild') {
       guildFlow(m.arg || {}).then((res) => post({ t: 'guildResult', ...res }), (err) => post({ t: 'guildResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'knbSend') {
+      knbFlowSend(m.arg || {}).then((res) => post({ t: 'knbSendResult', ...res }), (err) => post({ t: 'knbSendResult', r: 'error: ' + err.message }));
     } else if (m.t === 'bossHk') {
       bossHkFlow(m.arg || {}).then((res) => post({ t: 'bossHkResult', ...res }), (err) => post({ t: 'bossHkResult', r: 'error: ' + err.message }));
     } else if (m.t === 'sellJunk') {

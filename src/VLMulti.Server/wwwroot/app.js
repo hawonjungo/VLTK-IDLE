@@ -596,25 +596,43 @@ function renderSettings() {
   const toggleRow = (label, on, onclick) => h('div', { class: 'set-row' }, [h('span', { text: label }),
     h('button', { class: 'btn small' + (on ? ' on' : ''), text: on ? 'Đang bật' : 'Đang tắt', onclick })]);
 
+  // Ô chọn thay cho ô nhập số (trên điện thoại ô số hiển thị xấu, bàn phím che): [[giá trị, chữ]]; giá trị đang dùng
+  // không có trong danh sách thì thêm vào để không mất cài đặt cũ
+  const pick = (options, value, fmtLabel) => {
+    const opts = options.map((o) => (Array.isArray(o) ? o : [o, fmtLabel ? fmtLabel(o) : String(o)]));
+    if (value != null && !opts.some(([v]) => String(v) === String(value))) opts.push([value, fmtLabel ? fmtLabel(value) : String(value)]);
+    opts.sort((a, b) => (typeof a[0] === 'number' && typeof b[0] === 'number' ? a[0] - b[0] : 0));
+    return h('select', {}, opts.map(([v, t]) => { const o = h('option', { value: v, text: t }); o.selected = String(v) === String(value); return o; }));
+  };
+  const n0 = (n) => Number(n).toLocaleString('vi-VN');
+  const vanLabel = (n) => (+n ? `${n0(n)} vạn` : 'Không');
   // Kéo quái & luật đổi chế độ
   const dir = h('select', {}, s.kiteDirections.map((d) => { const o = h('option', { value: d.id, text: d.label }); o.selected = d.id === s.kiteDirection; return o; }));
-  const dist = h('input', { type: 'number', min: 80, max: 600, value: s.kiteDistance });
-  const interval = h('input', { type: 'number', min: 3, max: 120, value: s.kiteInterval });
+  const dist = pick([120, 180, 250, 350, 450, 600], s.kiteDistance, (n) => `${n} px`);
+  const interval = pick([4, 6, 8, 10, 15, 20, 30], s.kiteInterval, (n) => `${n} giây`);
   const box = (checked) => { const c = h('input', { type: 'checkbox' }); c.checked = checked; return c; };
   const quest = box(s.autoQuest), dg = box(s.autoDungeon), assassin = box(s.autoAssassin);
   const boat = box(s.autoBoat !== false), weekBoss = box(s.autoWeekBoss !== false);
   const teacher = box(s.eventTeacher !== false);
-  const teacherCap = h('input', { type: 'number', min: 0, max: 5000, value: s.eventTeacherCap ?? 400 });
+  const teacherCap = pick([0, 200, 400, 800, 1500], s.eventTeacherCap ?? 400, vanLabel);
   const teacherEx = box(s.eventTeacherExchange !== false);
   const dailyKnb = box(s.dailyKnb !== false);
   const sellJunk = box(s.autoSellJunk !== false);
-  const sellFree = h('input', { type: 'number', min: 1, max: 200, value: s.autoSellFreeSlots ?? 20 });
+  const sellFree = pick([5, 10, 20, 30, 40], s.autoSellFreeSlots ?? 20, (n) => `${n} ô`);
   const buffTtl = box(s.buffTtl !== false), buffTtlSp = box(s.buffTtlSpecial !== false), buffQht = box(s.buffQht !== false);
   const guild = box(s.guildShop !== false), gLdt = box(s.guildLdt !== false), gFdl = box(s.guildPhucDuyen !== false);
   const gTtsp = box(s.guildTtsp !== false), gThbt = box(s.guildThbt !== false);
-  const gDonate = h('input', { type: 'number', min: 0, max: 20000, value: s.guildDonateCap ?? 1500 });
+  const gDonate = pick([0, 1500, 3000, 5000], s.guildDonateCap ?? 1500, vanLabel);
+  const gDaily = pick([[0, 'Tắt'], [5000, '5.000 vạn'], [10000, '10.000 vạn'], [20000, '20.000 vạn (tối đa)']], s.guildDailyAmount ?? 0, vanLabel);
+  const gReserve = pick([0, 1000, 3000, 5000, 10000], s.guildDonateReserve ?? 3000, vanLabel);
+  const gFurnace = box(!!s.guildFurnace), gApprove = box(s.guildApproveOwn !== false), gWeek = box(s.guildWeekAlert !== false);
+  const knbOn = box(!!s.knbSendOn), knbBig = box(s.knbOpenBig !== false);
+  const knbMain = h('select', {}, [h('option', { value: '', text: '— Chọn —' })].concat((s.charNames || []).map((n) => {
+    const o = h('option', { value: n, text: n }); o.selected = n === s.knbMainName; return o;
+  })));
+  const knbKeep = pick([500, 1000, 2000, 5000], s.knbKeep ?? 1000, (n) => `${n0(n)} KNB`);
   const fallback = h('select', {}, [['tower', 'Leo Tháp'], ['farm', 'Luyện Công']].map(([v, t]) => { const o = h('option', { value: v, text: t }); o.selected = v === s.autoFallback; return o; }));
-  const rest = h('input', { type: 'number', min: 5, max: 720, value: s.towerRest });
+  const rest = pick([30, 60, 120, 240], s.towerRest, (n) => `${n} phút`);
 
   // Mật khẩu game: acc đã lưu chỉ hiện tên tài khoản + nút "Đổi"
   const forms = state.accounts.map((a) => {
@@ -692,18 +710,34 @@ function renderSettings() {
         autoSellJunk: sellJunk.checked, autoSellFreeSlots: +sellFree.value,
       }, 'Đã lưu việc mỗi ngày') }),
     ]),
-    section('Cửa hàng bang', [
-      h('p', { class: 'note', text: 'Mỗi ngày mua bằng điểm cống hiến; món tuần mua khi tuần còn lượt. Thiếu điểm thì góp vạn (1 vạn = 1 điểm). Đồ gửi về Hộp thư được tự nhận (chỉ thư "Cửa hàng bang"). Acc chưa vào bang thì bỏ qua.' }),
+    section('💰 Gửi KNB về acc chính', [
+      h('p', { class: 'note', text: 'Mỗi ngày một lần (sau khi đổi vạn → KNB) các acc khác mở Đại Hồng Bao rồi gửi thư tặng phần KNB trên mức giữ lại về acc chính; acc chính tự nhận thư mỗi 30 phút. Chỉ gửi cho nhân vật trong danh sách acc.' }),
+      h('label', { class: 'check-row' }, [knbOn, 'Bật gửi KNB về acc chính']),
+      h('div', { class: 'form-grid' }, [h('label', { text: 'Acc chính' }), knbMain, h('label', { text: 'Mỗi acc giữ lại' }), knbKeep]),
+      h('label', { class: 'check-row' }, [knbBig, '🧧 Mở hết Đại Hồng Bao trước khi gửi']),
+      h('button', { class: 'btn primary', text: 'Lưu', onclick: () => {
+        if (knbOn.checked && !knbMain.value) { toast('Chọn acc chính trước'); return; }
+        act('settings', { knbSendOn: knbOn.checked, knbMainName: knbMain.value, knbKeep: +knbKeep.value, knbOpenBig: knbBig.checked }, 'Đã lưu gửi KNB');
+      } }),
+    ]),
+    section('Bang hội', [
+      h('p', { class: 'note', text: 'Acc chưa vào bang thì bỏ qua. Cửa hàng: mua bằng điểm cống hiến mỗi ngày (món tuần khi tuần còn lượt), đồ gửi về Hộp thư được tự nhận (chỉ thư "Cửa hàng bang").' }),
       h('label', { class: 'check-row' }, [guild, '🏯 Mua ở cửa hàng bang mỗi ngày']),
       h('label', { class: 'check-row' }, [gLdt, 'Lệnh Bài Dã Tẩu (20 điểm · 10/ngày)']),
       h('label', { class: 'check-row' }, [gFdl, 'Bình Phúc Duyên Lộ (Tiểu) (100 điểm · 10/ngày)']),
       h('label', { class: 'check-row' }, [gTtsp, 'Tiên Thảo Lộ Đặc Biệt (300 điểm · 5/tuần)']),
       h('label', { class: 'check-row' }, [gThbt, 'Tinh Hồng Bảo Thạch (60 điểm · 6/tuần)']),
-      h('div', { class: 'form-grid' }, [h('label', { text: 'Góp vạn tối đa (vạn/acc/ngày, 0 = không góp)' }), gDonate]),
+      h('div', { class: 'form-grid' }, [h('label', { text: 'Thiếu điểm mua cửa hàng thì góp tối đa' }), gDonate]),
+      h('p', { class: 'note', text: '💰 Cống hiến mỗi ngày: góp tới mức đã chọn (tính cả phần đã góp hôm nay); thiếu vạn thì mở Hồng Bao, hết Hồng Bao thì chừa lại số vạn bên dưới. Không bao giờ góp KNB.' }),
+      h('div', { class: 'form-grid' }, [h('label', { text: 'Cống hiến mỗi ngày' }), gDaily, h('label', { text: 'Hết Hồng Bao thì chừa lại' }), gReserve]),
+      h('label', { class: 'check-row' }, [gFurnace, '🔥 Lò Đốt Đồ mỗi ngày: góp Hoàng Kim bộ chung (trừ món khoá); giữ Động Sát May mắn max và Hồng Ảnh Kinh nghiệm max, cất vào Rương']),
+      h('label', { class: 'check-row' }, [gApprove, '🏯 Tự duyệt đơn xin vào bang của nhân vật trong danh sách acc']),
+      h('label', { class: 'check-row' }, [gWeek, '⚠ Cảnh báo điều kiện tuần (điểm tuần, 15 người vào game, quỹ duy trì) vào thứ Bảy, Chủ Nhật']),
       h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', {
         guildShop: guild.checked, guildLdt: gLdt.checked, guildPhucDuyen: gFdl.checked, guildTtsp: gTtsp.checked, guildThbt: gThbt.checked,
-        guildDonateCap: +gDonate.value,
-      }, 'Đã lưu cửa hàng bang') }),
+        guildDonateCap: +gDonate.value, guildDailyAmount: +gDaily.value, guildDonateReserve: +gReserve.value,
+        guildFurnace: gFurnace.checked, guildApproveOwn: gApprove.checked, guildWeekAlert: gWeek.checked,
+      }, 'Đã lưu cài đặt bang hội') }),
     ]),
     section('Mật khẩu acc game', [
       h('p', { class: 'note', text: 'Mật khẩu được mã hoá và chỉ lưu trên máy chủ này, dùng để tự đăng nhập lại.' }),

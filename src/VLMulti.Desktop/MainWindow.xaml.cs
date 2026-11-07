@@ -692,11 +692,23 @@ public partial class MainWindow : Window
 
     // ---------- Cài đặt ----------
 
+    private static void SelectValue(ComboBox box, object value)
+    {
+        var item = box.Items.OfType<ComboBoxItem>().FirstOrDefault(i => Equals(i.Tag, value));
+        if (item is null)
+        {
+            item = new ComboBoxItem { Content = value is int n ? n.ToString("N0") : value.ToString(), Tag = value };
+            box.Items.Add(item);
+        }
+        box.SelectedItem = item;
+    }
+
     private CheckBox _setRecover = null!, _setSound = null!, _setTray = null!, _setTeacher = null!, _setTeacherEx = null!,
         _setKnb = null!, _setBuffTtl = null!, _setBuffTtlSp = null!, _setBuffQht = null!,
         _setGuild = null!, _setGuildLdt = null!, _setGuildFdl = null!, _setGuildTtsp = null!, _setGuildThbt = null!;
     private TextBox _setGuildDonate = null!;
-    private CheckBox _setSellJunk = null!;
+    private CheckBox _setSellJunk = null!, _setGuildFurnace = null!, _setGuildApprove = null!, _setGuildWeek = null!, _setKnbOn = null!, _setKnbBig = null!;
+    private ComboBox _setGuildDaily = null!, _setGuildReserve = null!, _setKnbMain = null!, _setKnbKeep = null!;
     private TextBox _setSellFree = null!;
     private TextBox _setTeacherCap = null!;
     private CheckBox _setQuest = null!, _setDungeon = null!, _setBoat = null!, _setWeekBoss = null!, _setAssassin = null!;
@@ -730,6 +742,14 @@ public partial class MainWindow : Window
             Grid.SetColumn(input, 1);
             g.Children.Add(input);
             return g;
+        }
+        // Ô chọn: (giá trị, chữ); giá trị đang lưu được chọn khi nạp lại cài đặt (SelectValue)
+        ComboBox Pick(params (object Value, string Text)[] items)
+        {
+            var c = new ComboBox();
+            foreach (var (v, t) in items) c.Items.Add(new ComboBoxItem { Content = t, Tag = v });
+            c.DropDownClosed += (_, _) => SaveSettingsForm(); // chỉ khi bạn chọn (nạp form không kích hoạt lưu)
+            return c;
         }
         TextBox Number(string tip)
         {
@@ -775,6 +795,13 @@ public partial class MainWindow : Window
         body.Add(_setBuffQht = Box("🍶 Quế Hoa Tửu (+20 may mắn)"));
         body.Add(_setSellJunk = Box("💰 Hành trang sắp đầy thì bấm \"Bán thừa\" của game (món không khớp ⚙ Nhặt đồ, không khoá)"));
         body.Add(FormRow("Bán khi còn ≤ ô trống", _setSellFree = Number("1–200 ô")));
+        body.Add(Section("💰 Gửi KNB về acc chính"));
+        body.Add(Note("Mỗi ngày một lần (sau khi đổi vạn → KNB) các acc khác gửi thư tặng phần KNB trên mức giữ lại về acc chính; acc chính tự nhận thư mỗi 30 phút."));
+        body.Add(_setKnbOn = Box("Bật gửi KNB về acc chính"));
+        body.Add(FormRow("Acc chính", _setKnbMain = Pick(new[] { ((object)"", "— Chọn —") }
+            .Concat(_settings.Accounts.Select(a => a.CharName).Where(n => !string.IsNullOrWhiteSpace(n)).Distinct().Select(n => ((object)n!, n!))).ToArray())));
+        body.Add(FormRow("Mỗi acc giữ lại", _setKnbKeep = Pick((500, "500 KNB"), (1000, "1.000 KNB"), (2000, "2.000 KNB"), (5000, "5.000 KNB"))));
+        body.Add(_setKnbBig = Box("🧧 Mở hết Đại Hồng Bao trước khi gửi"));
 
         body.Add(Section("Cửa hàng bang"));
         body.Add(Note("Mỗi ngày mua bằng điểm cống hiến; món tuần mua khi tuần còn lượt. Thiếu điểm thì góp vạn (1 vạn = 1 điểm). Đồ gửi về Hộp thư được tự nhận (chỉ thư \"Cửa hàng bang\"). Acc chưa vào bang thì bỏ qua."));
@@ -783,7 +810,13 @@ public partial class MainWindow : Window
         body.Add(_setGuildFdl = Box("Bình Phúc Duyên Lộ (Tiểu) (100 điểm · 10/ngày)"));
         body.Add(_setGuildTtsp = Box("Tiên Thảo Lộ Đặc Biệt (300 điểm · 5/tuần)"));
         body.Add(_setGuildThbt = Box("Tinh Hồng Bảo Thạch (60 điểm · 6/tuần)"));
-        body.Add(FormRow("Góp vạn tối đa (vạn/acc/ngày, 0 = không góp)", _setGuildDonate = Number("0–20000 vạn")));
+        body.Add(FormRow("Thiếu điểm mua cửa hàng thì góp tối đa (vạn/acc/ngày)", _setGuildDonate = Number("0–20000 vạn")));
+        body.Add(Note("💰 Cống hiến mỗi ngày: góp tới mức đã chọn (tính cả phần đã góp hôm nay); thiếu vạn thì mở Hồng Bao, hết Hồng Bao thì chừa lại số vạn bên dưới. Không bao giờ góp KNB."));
+        body.Add(FormRow("Cống hiến mỗi ngày", _setGuildDaily = Pick((0, "Tắt"), (5000, "5.000 vạn"), (10000, "10.000 vạn"), (20000, "20.000 vạn (tối đa)"))));
+        body.Add(FormRow("Hết Hồng Bao thì chừa lại", _setGuildReserve = Pick((0, "Không"), (1000, "1.000 vạn"), (3000, "3.000 vạn"), (5000, "5.000 vạn"), (10000, "10.000 vạn"))));
+        body.Add(_setGuildFurnace = Box("🔥 Lò Đốt Đồ mỗi ngày: góp Hoàng Kim bộ chung (trừ món khoá); giữ Động Sát May mắn max và Hồng Ảnh Kinh nghiệm max, cất vào Rương"));
+        body.Add(_setGuildApprove = Box("🏯 Tự duyệt đơn xin vào bang của nhân vật trong danh sách acc"));
+        body.Add(_setGuildWeek = Box("⚠ Cảnh báo điều kiện tuần (điểm tuần, 15 người vào game, quỹ duy trì) vào thứ Bảy, Chủ Nhật"));
 
         body.Add(Section("Kéo quái khi Leo Tháp"));
         body.Add(Note("Bật riêng từng acc bằng nút \"Kéo quái\" trên khung. Mỗi chu kỳ nhân vật chạy một đoạn cho quái dồn về một phía rồi đánh tiếp. Bạn tự tắt Auto (chơi tay) thì app không kéo."));
@@ -829,6 +862,15 @@ public partial class MainWindow : Window
         _setGuildDonate.Text = _settings.GuildDonateCap.ToString();
         _setSellJunk.IsChecked = _settings.AutoSellJunk;
         _setSellFree.Text = _settings.AutoSellFreeSlots.ToString();
+        SelectValue(_setGuildDaily, _settings.GuildDailyAmount);
+        SelectValue(_setGuildReserve, _settings.GuildDonateReserve);
+        _setGuildFurnace.IsChecked = _settings.GuildFurnace;
+        _setGuildApprove.IsChecked = _settings.GuildApproveOwn;
+        _setGuildWeek.IsChecked = _settings.GuildWeekAlert;
+        _setKnbOn.IsChecked = _settings.KnbSendOn;
+        _setKnbBig.IsChecked = _settings.KnbOpenBig;
+        SelectValue(_setKnbMain, _settings.KnbMainName);
+        SelectValue(_setKnbKeep, _settings.KnbKeep);
         _setTeacherCap.Text = _settings.EventTeacherSpendCap.ToString();
         _loadingForm = false;
     }
@@ -868,6 +910,15 @@ public partial class MainWindow : Window
         if (int.TryParse(_setGuildDonate.Text, out var donate)) _settings.GuildDonateCap = donate;
         _settings.AutoSellJunk = _setSellJunk.IsChecked == true;
         if (int.TryParse(_setSellFree.Text, out var sellFree)) _settings.AutoSellFreeSlots = sellFree;
+        if (_setGuildDaily.SelectedItem is ComboBoxItem { Tag: int daily }) _settings.GuildDailyAmount = daily;
+        if (_setGuildReserve.SelectedItem is ComboBoxItem { Tag: int reserve }) _settings.GuildDonateReserve = reserve;
+        _settings.GuildFurnace = _setGuildFurnace.IsChecked == true;
+        _settings.GuildApproveOwn = _setGuildApprove.IsChecked == true;
+        _settings.GuildWeekAlert = _setGuildWeek.IsChecked == true;
+        if (_setKnbMain.SelectedItem is ComboBoxItem { Tag: string main }) _settings.KnbMainName = main;
+        if (_setKnbKeep.SelectedItem is ComboBoxItem { Tag: int knbKeep }) _settings.KnbKeep = knbKeep;
+        _settings.KnbSendOn = _setKnbOn.IsChecked == true && _settings.KnbMainName.Length > 0;
+        _settings.KnbOpenBig = _setKnbBig.IsChecked == true;
         if (int.TryParse(_setTeacherCap.Text, out var cap)) _settings.EventTeacherSpendCap = cap;
         SaveSettings(); // Normalize giới hạn các giá trị về khoảng hợp lệ
         LoadSettingsForm(); // hiện lại giá trị đã giới hạn

@@ -505,6 +505,9 @@ public sealed class AccountController
                 case "bossHkResult":
                     OnBossHkResult(m, now);
                     break;
+                case "knbSendResult":
+                    OnKnbSendResult(m, now);
+                    break;
                 case "sellJunkResult":
                     OnSellJunkResult(m, now);
                     break;
@@ -781,7 +784,7 @@ public sealed class AccountController
 
         // Chưa ở tháp (chết bị đẩy ra Luyện Công, hoặc lỡ bước chuẩn bị) khi chưa được đưa đi đánh → vào tháp
         if (!engaged && ModeCode is not ("" or ModeRules.Tower) && since < BossTowerRetryWithin && now - _bossPrepAt > TimeSpan.FromSeconds(60)
-            && now - _waveTowerAt > TimeSpan.FromSeconds(90) && _waveTowerRetries < BossTowerRetries && !IsModeBlocked(ModeRules.Tower, now))
+            && now - _waveTowerAt > TimeSpan.FromSeconds(90) && _waveTowerRetries < BossTowerRetries)
         {
             if (ModeCode == ModeRules.Farm) _waveSeenDead = true;
             _waveTowerRetries++;
@@ -870,7 +873,9 @@ public sealed class AccountController
         bool soon = !BossHkSchedule(now) && BossHkSchedule(now + BossPrepAhead);
         if (!soon) return;
         if (now - _bossPrepAt < TimeSpan.FromMinutes(40)) return; // mỗi đợt một lần
-        if (_ldtBuyingSince is not null || EventRunning(now) || (AssassinActive && !AssassinStuck(now)) || IsModeBlocked(ModeRules.Tower, now)) return;
+        // Không xét "nghỉ tháp" (chết nhanh): Boss chỉ kéo nhân vật đang ở tháp đi đánh, game kéo đi gần như ngay
+        // (07/11 23:37–23:40 cả 3 acc bị nghỉ tháp 2 giờ – nếu trùng giờ boss thì lỡ cả đợt)
+        if (_ldtBuyingSince is not null || EventRunning(now) || (AssassinActive && !AssassinStuck(now))) return;
         _bossPrepAt = now;
         _pendingAutoMode = ModeRules.Tower;
         _lastAutoModeCmd = now;
@@ -1033,6 +1038,7 @@ public sealed class AccountController
         SuperviseBuffs(now);
         SuperviseGuild(now);
         SuperviseSellJunk(now);
+        SuperviseKnbTransfer(now);
         SuperviseStuck(now);
         SuperviseRecovery(now);
     }
@@ -1579,6 +1585,56 @@ public sealed class AccountController
         Post(new { t = "buffs", arg = new { items, keep = BuffKeep, minLeft = 300 } });
     }
 
+    // ---------- 💰 KNB về nhân vật chính: mở Đại Hồng Bao, gửi phần trên mức giữ lại; nhân vật chính nhận thư ----------
+    private DateOnly _knbSendDay;
+    private DateTime _knbSendTry, _knbCollectAt;
+    private bool _knbSendPending;
+
+    private void SuperviseKnbTransfer(DateTime now)
+    {
+        var cfg = SettingsProvider?.Invoke();
+        if (cfg is null || !cfg.KnbSendOn || cfg.KnbMainName.Length == 0 || Screen != "game" || Away || string.IsNullOrWhiteSpace(Account.CharName)) return;
+        if (_knbSendPending && now - _knbSendTry < TimeSpan.FromMinutes(4)) return;
+        _knbSendPending = false;
+        if (_ldtBuyingSince is not null || _knbPending || _guildPending || EventRunning(now) || now - _screenSince < TimeSpan.FromSeconds(180)) return;
+        var own = cfg.Accounts.Select(a => a.CharName ?? "").Where(n => n.Length > 0).Distinct().ToArray();
+        if (!own.Contains(cfg.KnbMainName)) return; // nhân vật chính phải là một acc trong danh sách
+        if (Account.CharName == cfg.KnbMainName)
+        {
+            // Nhân vật chính: nhận thư KNB mỗi 30 phút
+            if (now - _knbCollectAt < TimeSpan.FromMinutes(30)) return;
+            _knbCollectAt = now;
+            _knbSendTry = now;
+            _knbSendPending = true;
+            Post(new { t = "knbSend", arg = new { op = "collect", from = own } });
+            return;
+        }
+        // Acc khác: mỗi ngày một lần, sau khi đã đổi KNB và làm việc bang
+        var vn = now.ToUniversalTime().AddHours(7);
+        if (_knbSendDay == DateOnly.FromDateTime(vn) || vn.TimeOfDay < TimeSpan.FromMinutes(20) || now - _knbSendTry < TimeSpan.FromMinutes(10)) return;
+        if (cfg.DailyKnbBuy && _knbDoneDay != DateOnly.FromDateTime(vn)) return;
+        _knbSendTry = now;
+        _knbSendPending = true;
+        Post(new { t = "knbSend", arg = new { op = "send", to = cfg.KnbMainName, keep = cfg.KnbKeep, openBig = cfg.KnbOpenBig, allowed = own, min = 100 } });
+    }
+
+    private void OnKnbSendResult(JsonElement m, DateTime now)
+    {
+        _knbSendPending = false;
+        int Int(string name) => m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? (int)v.GetDouble() : 0;
+        var r = Str(m, "r");
+        Log.Write($"[{Account.Id}] knb send: {r} opened={Int("opened")} gained={Int("gained")} sent={Int("sent")} mails={Int("mails")} knb={Int("knb")}");
+        if (r is "busy" or "boss-hk") return;
+        var cfg = SettingsProvider?.Invoke();
+        if (Int("opened") > 0) Note(now, $"🧧 Mở {Int("opened")} Đại Hồng Bao (+{Int("gained"):N0} KNB)", StatusLevel.Ok);
+        if (Int("sent") > 0) Note(now, $"💰 Gửi {Int("sent"):N0} KNB cho {cfg?.KnbMainName} (còn {Int("knb"):N0})", StatusLevel.Ok);
+        if (Int("mails") > 0) Note(now, $"💰 Nhận {Int("mails")} thư KNB từ các acc (có {Int("knb"):N0} KNB)", StatusLevel.Ok);
+        if (Account.CharName == cfg?.KnbMainName) return;
+        if (r == "ok") { _knbSendDay = VnDate(now); return; }
+        Raise("knb-send", $"Gửi KNB cho {cfg?.KnbMainName} không được ({r})");
+        _knbSendDay = VnDate(now);
+    }
+
     // ---------- 💰 Bán đồ thừa khi Hành trang sắp đầy (nút "Bán thừa" của game) ----------
     private DateTime _junkLastTry;
     private bool _junkPending;
@@ -1635,13 +1691,16 @@ public sealed class AccountController
     private void SuperviseGuild(DateTime now)
     {
         var cfg = SettingsProvider?.Invoke();
-        if (cfg is null || !cfg.GuildShop || Screen != "game" || Away) return;
+        if (cfg is null || Screen != "game" || Away) return;
         var items = new List<string>();
-        if (cfg.GuildLdt) items.Add("ldt");
-        if (cfg.GuildPhucDuyen) items.Add("fdl1");
-        if (cfg.GuildTtsp) items.Add("ttsp");
-        if (cfg.GuildThbt) items.Add("thbt");
-        if (items.Count == 0) return;
+        if (cfg.GuildShop)
+        {
+            if (cfg.GuildLdt) items.Add("ldt");
+            if (cfg.GuildPhucDuyen) items.Add("fdl1");
+            if (cfg.GuildTtsp) items.Add("ttsp");
+            if (cfg.GuildThbt) items.Add("thbt");
+        }
+        if (items.Count == 0 && cfg.GuildDailyAmount <= 0 && !cfg.GuildFurnace && !cfg.GuildApproveOwn && !cfg.GuildWeekAlert) return;
         var vn = now.ToUniversalTime().AddHours(7);
         if (_guildDoneDay == DateOnly.FromDateTime(vn) || vn.TimeOfDay < TimeSpan.FromMinutes(10)) return;
         if (_guildPending && now - _guildLastTry < TimeSpan.FromMinutes(3)) return;
@@ -1650,8 +1709,29 @@ public sealed class AccountController
             || now - _screenSince < TimeSpan.FromSeconds(150) || now - _guildLastTry < TeacherRetryGap) return;
         _guildLastTry = now;
         _guildPending = true;
-        Post(new { t = "guild", arg = new { items, donateCap = cfg.GuildDonateCap } });
+        // Nhân vật của bạn (cùng danh sách acc) được tự duyệt vào bang
+        var approve = cfg.GuildApproveOwn
+            ? cfg.Accounts.Select(a => a.CharName ?? "").Where(n => n.Length > 0 && n != Account.CharName).Distinct().ToArray()
+            : Array.Empty<string>();
+        Post(new
+        {
+            t = "guild",
+            arg = new
+            {
+                items, donateCap = cfg.GuildShop ? cfg.GuildDonateCap : 0,
+                dailyAmount = cfg.GuildDailyAmount, reserve = cfg.GuildDonateReserve,
+                furnace = cfg.GuildFurnace, keep = GuildFurnaceKeep, approve,
+            },
+        });
     }
+
+    // 🔥 Lò Đốt Đồ: giữ lại (cất vào Rương) – bộ Động Sát May mắn đạt mức cao nhất, bộ Hồng Ảnh Kinh nghiệm đạt mức cao nhất
+    private static readonly object[] GuildFurnaceKeep =
+    {
+        new { set = "Động Sát", attr = "lucky_v" },
+        new { set = "Hồng ảnh", attr = "expenhance_p" },
+    };
+    private DateOnly _guildWeekAlertDay;
 
     private void OnGuildResult(JsonElement m, DateTime now)
     {
@@ -1677,6 +1757,7 @@ public sealed class AccountController
             if (Int("mails") > 0) text += $" · nhận {Int("mails")} thư";
             Note(now, text, StatusLevel.Ok);
         }
+        OnGuildExtras(m, now);
         if (r == "ok")
         {
             _guildDoneDay = day;
@@ -1689,6 +1770,52 @@ public sealed class AccountController
             _guildFails = 0;
             Raise("guild-shop", $"Cửa hàng bang: mua không được ({r}) – bỏ qua hôm nay");
         }
+    }
+
+    // Cống hiến hằng ngày, Lò Đốt Đồ, duyệt đơn, điều kiện tuần (thông báo vào nhật ký; thiếu điều kiện → cảnh báo)
+    private void OnGuildExtras(JsonElement m, DateTime now)
+    {
+        int Int(string name) => m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
+        Log.Write($"[{Account.Id}] guild extras: daily={Int("daily")} red={Int("redOpened")} burned={Int("burned")} kept={Str(m, "kept")} stashed={Int("stashed")} approved={Str(m, "approved")}");
+        if (Int("daily") > 0)
+            Note(now, $"🏯 Cống hiến {Int("daily"):N0} vạn vào bang" + (Int("redOpened") > 0 ? $" (mở {Int("redOpened")} Hồng Bao)" : ""), StatusLevel.Ok);
+        if (Int("burned") > 0)
+            Note(now, $"🔥 Lò Đốt Đồ: góp {Int("burned")} món Hoàng Kim (+{Int("burnPts"):N0} cống hiến)", StatusLevel.Ok);
+        if (Str(m, "kept").Length > 0)
+            Note(now, $"🔥 Giữ lại (max %): {Str(m, "kept")}" + (Int("stashed") > 0 ? $" · cất {Int("stashed")} món vào Rương" : " · chưa cất được vào Rương"), Int("stashed") > 0 ? StatusLevel.Ok : StatusLevel.Warn);
+        if (Str(m, "approved").Length > 0)
+            Note(now, $"🏯 Duyệt vào bang: {Str(m, "approved")}", StatusLevel.Ok);
+
+        if (!m.TryGetProperty("week", out var w) || w.ValueKind != JsonValueKind.Object) return;
+        int W(string n) => w.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number ? (int)Math.Min(int.MaxValue, v.GetDouble()) : 0;
+        string WS(string n) => w.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+        int points = W("points"), target = W("target"), active = W("active"), fund = W("fund"), level = Math.Max(1, W("cap"));
+        int fee = 20000 * level;
+        var exempt = w.TryGetProperty("exemptUntil", out var ex) && ex.ValueKind == JsonValueKind.Number
+            ? DateTimeOffset.FromUnixTimeMilliseconds((long)ex.GetDouble()).UtcDateTime : DateTime.MinValue;
+        var summary = $"🏯 Bang {WS("name")}: điểm tuần {points:N0}/{target:N0} · {active}/15 người vào game tuần này · quỹ {fund:N0}/{fee:N0} vạn";
+        Note(now, summary);
+        var cfg = SettingsProvider?.Invoke();
+        if (cfg is null || !cfg.GuildWeekAlert) return;
+        // Một acc báo là đủ (Bang Chủ / Phó / Trưởng Lão), tránh 3–4 acc cùng báo
+        if (WS("role") is not ("chu" or "pho" or "lao")) return;
+        if (WS("warning").Length > 0)
+        {
+            Raise("guild-week", $"Bang {WS("name")}: {WS("warning")} – tuần này không đạt nữa bang sẽ bị giải tán");
+            return;
+        }
+        var vn = now.ToUniversalTime().AddHours(7);
+        var nextMonday = vn.Date.AddDays(((int)DayOfWeek.Monday - (int)vn.DayOfWeek + 7) % 7 == 0 ? 7 : ((int)DayOfWeek.Monday - (int)vn.DayOfWeek + 7) % 7);
+        bool weekend = vn.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday;
+        bool exemptThisWeek = exempt.AddHours(7) >= nextMonday;
+        if (!weekend || exemptThisWeek || _guildWeekAlertDay == VnDate(now)) return;
+        var lacks = new List<string>();
+        if (points < target) lacks.Add($"điểm tuần còn thiếu {target - points:N0}");
+        if (active < 15) lacks.Add($"mới {active}/15 người vào game trong tuần");
+        if (fund < fee) lacks.Add($"quỹ thiếu {fee - fund:N0} vạn phí duy trì");
+        if (lacks.Count == 0) return;
+        _guildWeekAlertDay = VnDate(now);
+        Raise("guild-week", $"Bang {WS("name")} chưa đủ điều kiện xét thứ Hai: {string.Join("; ", lacks)}");
     }
 
     private void OnBuffResult(JsonElement m, DateTime now)

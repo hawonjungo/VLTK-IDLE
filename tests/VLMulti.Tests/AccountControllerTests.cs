@@ -778,6 +778,78 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Sends_knb_to_main_character_daily_and_main_collects()
+    {
+        var (ctl, page, cfg) = Make();
+        cfg.DailyKnbBuy = false;
+        cfg.Accounts[0].CharName = "A";
+        cfg.Accounts[1].CharName = "Main";
+        ctl.Account.CharName = "A";
+        cfg.KnbMainName = "Main";
+        // Chọn acc chính mà chưa bật → không gửi
+        var t0 = Run(ctl, T0, 4 * 60, Status("game", "tower", "Thông Thiên Tháp · tầng 900"));
+        Assert.DoesNotContain(page.Sent, m => m.GetProperty("t").GetString() == "knbSend");
+        cfg.KnbSendOn = true;
+        var t = Run(ctl, t0, 4 * 60, Status("game", "tower", "Thông Thiên Tháp · tầng 900"));
+        var send = page.Sent.Single(m => m.GetProperty("t").GetString() == "knbSend").GetProperty("arg");
+        Assert.Equal("send", send.GetProperty("op").GetString());
+        Assert.Equal("Main", send.GetProperty("to").GetString());
+        Assert.Equal(1000, send.GetProperty("keep").GetInt32());
+        Assert.Equal(new[] { "A", "Main" }, send.GetProperty("allowed").EnumerateArray().Select(x => x.GetString()));
+        ctl.OnPageMessage("""{"t":"knbSendResult","r":"ok","opened":3,"gained":1500,"sent":4200,"mails":0,"knb":1000}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("💰 Gửi 4,200 KNB cho Main") || e.Text.StartsWith("💰 Gửi 4.200 KNB cho Main"));
+        Run(ctl, t, 30 * 60, Status("game", "tower", "Thông Thiên Tháp · tầng 900"));
+        Assert.Single(page.Sent, m => m.GetProperty("t").GetString() == "knbSend"); // mỗi ngày một lần
+
+        // Nhân vật chính: chỉ nhận thư, không gửi
+        var (main, mainPage, mainCfg) = Make();
+        mainCfg.Accounts[0].CharName = "A";
+        mainCfg.Accounts[1].CharName = "Main";
+        main.Account.CharName = "Main";
+        mainCfg.KnbMainName = "Main";
+        mainCfg.KnbSendOn = true;
+        Run(main, T0, 4 * 60, Status("game", "tower", "Thông Thiên Tháp · tầng 900"));
+        var collect = mainPage.Sent.Single(m => m.GetProperty("t").GetString() == "knbSend").GetProperty("arg");
+        Assert.Equal("collect", collect.GetProperty("op").GetString());
+
+        // Tên chính không thuộc danh sách acc → không làm gì
+        var (other, otherPage, otherCfg) = Make();
+        other.Account.CharName = "A";
+        otherCfg.Accounts[0].CharName = "A";
+        otherCfg.KnbMainName = "Người Lạ";
+        otherCfg.KnbSendOn = true;
+        Run(other, T0, 4 * 60, Status("game", "tower", "Thông Thiên Tháp · tầng 900"));
+        Assert.DoesNotContain(otherPage.Sent, m => m.GetProperty("t").GetString() == "knbSend");
+    }
+
+    [Fact]
+    public void Guild_week_shortfall_raises_an_alert_on_weekends_for_the_leader()
+    {
+        var (ctl, _, _) = Make();
+        var problems = new List<(string Key, string Msg)>();
+        ctl.Problem += (k, msg) => problems.Add((k, msg));
+        var saturday = new DateTime(2026, 1, 3, 5, 0, 0, DateTimeKind.Utc).ToLocalTime(); // 12:00 thứ Bảy giờ VN
+        string Result(string role, long exempt) => $$$"""{"t":"guildResult","r":"ok","bought":"","daily":20000,"burned":5,"burnPts":100,"kept":"Hồng ảnh Kiếm Bài","stashed":1,"approved":"B","week":{"name":"Bang Thử","cap":1,"fund":23000,"points":23000,"target":200000,"members":3,"active":3,"exemptUntil":{{{exempt}}},"warning":"","role":"{{{role}}}"}}""";
+        ctl.OnPageMessage(Result("chung", 0), saturday);
+        Assert.Empty(problems); // thành viên thường không báo
+        ctl.OnPageMessage(Result("chu", 0), saturday);
+        var alert = Assert.Single(problems);
+        Assert.Equal("guild-week", alert.Key);
+        Assert.Contains("mới 3/15 người", alert.Msg);
+        Assert.Contains("điểm tuần còn thiếu", alert.Msg);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("🔥 Lò Đốt Đồ: góp 5 món"));
+        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("🔥 Giữ lại (max %): Hồng ảnh Kiếm Bài"));
+        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("🏯 Duyệt vào bang: B"));
+        // Bang mới còn được miễn xét tuần này → không báo
+        var (ctl2, _, _) = Make();
+        var p2 = new List<string>();
+        ctl2.Problem += (k, _) => p2.Add(k);
+        long exemptMs = new DateTimeOffset(2026, 1, 10, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        ctl2.OnPageMessage(Result("chu", exemptMs), saturday);
+        Assert.Empty(p2);
+    }
+
+    [Fact]
     public void Boss_prep_does_not_pull_an_account_out_of_a_dungeon()
     {
         var (ctl, page, _) = Make();

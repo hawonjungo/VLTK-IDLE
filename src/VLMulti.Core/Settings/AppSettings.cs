@@ -73,6 +73,25 @@ public sealed class AppSettings
     public bool GuildTtsp { get; set; } = true;       // Tiên Thảo Lộ Đặc Biệt (5/tuần)
     public bool GuildThbt { get; set; } = true;       // Tinh Hồng Bảo Thạch (6/tuần)
     public int GuildDonateCap { get; set; } = 1500;
+    // Cống hiến vạn mỗi ngày tới GuildDailyAmount vạn (0 = tắt; 5.000 / 10.000 / 20.000 – game cho tối đa 20.000/ngày):
+    // thiếu vạn thì mở Hồng Bao, hết Hồng Bao thì chừa lại GuildDonateReserve vạn
+    public int GuildDailyAmount { get; set; }
+    // Bản cũ (bật = 20.000 vạn), chỉ để đọc cài đặt đã lưu
+    public bool GuildDonateDaily { get; set; }
+    public int GuildDonateReserve { get; set; } = 3000;
+    // 🔥 Lò Đốt Đồ: mỗi ngày góp Hoàng Kim bộ chung trong Hành trang (trừ món khoá); giữ lại và cất vào Rương:
+    // bộ Động Sát có May mắn đạt mức cao nhất, bộ Hồng Ảnh có Kinh nghiệm nhận được đạt mức cao nhất
+    public bool GuildFurnace { get; set; }
+    // Tự duyệt đơn xin vào bang của nhân vật trong danh sách acc (acc đang là Bang Chủ / Phó / Trưởng Lão)
+    public bool GuildApproveOwn { get; set; } = true;
+    // Cảnh báo điều kiện tuần của bang (thứ Bảy, Chủ Nhật): điểm tuần, ≥ 15 người vào game, quỹ đủ phí duy trì
+    public bool GuildWeekAlert { get; set; } = true;
+    // 💰 Gửi KNB (thư tặng) về acc chính KnbMainName, mỗi acc chừa KnbKeep KNB; chỉ chạy khi KnbSendOn và đã chọn acc chính.
+    // KnbOpenBig: mở hết Đại Hồng Bao trước khi gửi
+    public bool KnbSendOn { get; set; }
+    public string KnbMainName { get; set; } = "";
+    public int KnbKeep { get; set; } = 1000;
+    public bool KnbOpenBig { get; set; } = true;
 
     // 💰 Hành trang còn ≤ AutoSellFreeSlots ô trống → bấm "Bán thừa" của game (bán món không khớp bộ lọc ⚙ Nhặt đồ,
     // không khoá, không phải đồ Dã Tẩu). Đồ Hoàng Kim nằm ở hàng chờ khi túi đầy sẽ tự vào lại hành trang.
@@ -119,6 +138,12 @@ public sealed class AppSettings
         TowerRestMinutes = Math.Clamp(TowerRestMinutes, 5, 720);
         EventTeacherSpendCap = Math.Clamp(EventTeacherSpendCap, 0, 5000);
         GuildDonateCap = Math.Clamp(GuildDonateCap, 0, 20000);
+        GuildDonateReserve = Math.Clamp(GuildDonateReserve, 0, 1_000_000);
+        if (GuildDonateDaily && GuildDailyAmount == 0) GuildDailyAmount = 20000; // cài đặt cũ
+        GuildDailyAmount = Math.Clamp(GuildDailyAmount, 0, 20000);
+        GuildDonateDaily = GuildDailyAmount > 0;
+        KnbKeep = Math.Clamp(KnbKeep, 0, 1_000_000);
+        KnbMainName = (KnbMainName ?? "").Trim();
         AutoSellFreeSlots = Math.Clamp(AutoSellFreeSlots, 1, 200);
     }
 
