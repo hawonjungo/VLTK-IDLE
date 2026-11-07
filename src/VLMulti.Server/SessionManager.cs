@@ -35,6 +35,8 @@ public sealed class SessionManager : IAsyncDisposable
     private string? _liveId;
     private CancellationTokenSource? _loopCts;
     private Task? _loop;
+    // 🐴 Mã Trường: quét / chuyển ngựa giữa các acc (chỉ khi bạn bấm)
+    private readonly HorseCoordinator _horses = new();
 
     public SessionManager(ServerOptions options)
     {
@@ -90,6 +92,7 @@ public sealed class SessionManager : IAsyncDisposable
             lock (_gate) _settingsDirty = true;
         };
         c.LootFound += (src, text) => OnLoot(acc, src, text);
+        c.HorseResult += m => _horses.OnResult(acc.Id, m);
 
         lock (_gate) _sessions[acc.Id] = session;
         try
@@ -661,6 +664,55 @@ public sealed class SessionManager : IAsyncDisposable
             SettingsStore.Save(AppPaths.SettingsFile, _settings);
         }
     }
+
+    // ---------- 🐴 Mã Trường ----------
+
+    // Các acc đang trong game; tên nhân vật của mọi acc của bạn (chỉ gửi ngựa cho những tên này)
+    private (List<HorseMember> Members, List<string> Names) HorseParty()
+    {
+        var members = new List<HorseMember>();
+        foreach (var s in Sessions)
+        {
+            string screen = "";
+            s.Locked(c => screen = c.Screen);
+            var acc = s.Controller.Account;
+            if (screen != "game" || string.IsNullOrWhiteSpace(acc.CharName)) continue;
+            members.Add(new HorseMember(acc.Id, acc.CharName!,
+                msg => s.Locked(c => c.PostRaw(msg)),
+                text => s.Locked(c => c.Note(DateTime.Now, text, StatusLevel.Ok))));
+        }
+        List<string> names;
+        lock (_gate) names = _settings.Accounts.Select(a => a.CharName ?? "").Where(n => n.Length > 0).Distinct().ToList();
+        return (members, names);
+    }
+
+    public string? HorseScan(bool openChests)
+    {
+        if (_horses.Busy) return "Đang chạy, chờ xong đã";
+        var (members, names) = HorseParty();
+        if (members.Count == 0) return "Không có acc nào đang trong game";
+        _ = Task.Run(() => _horses.ScanAsync(members, names, openChests));
+        return null;
+    }
+
+    public string? HorseSend()
+    {
+        if (_horses.Phase != "ready") return "Chưa có danh sách chuyển – bấm Quét trước";
+        var (members, names) = HorseParty();
+        _ = Task.Run(() => _horses.SendAsync(members, names));
+        return null;
+    }
+
+    public void HorseCancel() => _horses.Cancel();
+
+    public object HorseSnapshot() => new
+    {
+        phase = _horses.Phase,
+        at = _horses.UpdatedAt,
+        lines = _horses.Lines,
+        accounts = _horses.Accounts.Select(a => new { a.Id, name = a.CharName, a.Result, a.Have, a.Total, spares = a.Spares.Count }),
+        plan = _horses.Plan.Select(p => new { from = p.FromName, to = p.ToName, horse = p.Horse.Name, locked = p.Horse.Locked, inStable = p.Horse.Where == "st" }),
+    };
 
     // Nhập mật khẩu hàng loạt (lệnh --import-credentials), dùng khi chuyển từ bản Desktop sang
     public static int ImportCredentials(IEnumerable<(string Id, string User, string Password)> items)

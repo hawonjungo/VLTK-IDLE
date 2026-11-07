@@ -142,7 +142,14 @@ app.MapPost("/api/mode", (ModeRequest req) => Results.Json(new { count = manager
 app.MapPost("/api/enter-all", () => { manager.EnterAll(); return Results.Ok(); });
 app.MapPost("/api/pause", async (ToggleRequest req) => { await manager.SetPausedAsync(req.On); return Results.Ok(); });
 app.MapPost("/api/auto-recover",(ToggleRequest req) => { manager.SetAutoRecover(req.On); return Results.Ok(); });
-app.MapPost("/api/alerts/clear", () => { manager.ClearAlerts(); return Results.Ok(); });
+// 🐴 Mã Trường: quét (mở rương, cất loài mới, lập danh sách chuyển) → bạn xem → chuyển
+app.MapGet("/api/horses", () => Results.Json(manager.HorseSnapshot()));
+app.MapPost("/api/horses/scan", (ToggleRequest req) =>
+    manager.HorseScan(req.On) is { } error ? Results.Json(new { error }, statusCode: 400) : Results.Ok());
+app.MapPost("/api/horses/send", () =>
+    manager.HorseSend() is { } error ? Results.Json(new { error }, statusCode: 400) : Results.Ok());
+app.MapPost("/api/horses/cancel", () => { manager.HorseCancel(); return Results.Ok(); });
+app.MapPost("/api/alerts/clear",() => { manager.ClearAlerts(); return Results.Ok(); });
 app.MapPost("/api/settings", (SettingsUpdate req) => { manager.UpdateSettings(req); return Results.Ok(); });
 
 await manager.StartAsync();

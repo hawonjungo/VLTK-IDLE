@@ -894,6 +894,275 @@
     }
   };
 
+  // ---------- 🐴 Mã Trường: mở Rương Ngựa, cất loài mới, chuyển ngựa thừa giữa các acc của bạn ----------
+  // Nút 🐴 (#u20stb) mở bảng Mã Trường trong #modal: thẻ ngựa đang cưỡi, bộ lọc, danh sách "Ngựa trong Mã Trường"
+  // (thu gọn, nút data-hfo "▾ Hiện (N)"; mỗi dòng .qrow có Cưỡi / Lấy ra data-sout / Bán) và "Ngựa trong hành trang"
+  // (Cưỡi / Cất vào Mã Trường data-sin / Bán), cuối cùng là bảng bộ sưu tập. Game tự đánh dấu "· trùng" và
+  // "· trùng, giữ lại (tốt nhất)"; ngựa thừa = trùng mà game không giữ lại. Không bao giờ bấm Bán / Cho ăn (KNB).
+  // Khoá / mở khoá ở thẻ món trong Hành trang (#bLock, miễn phí, không hỏi lại). Gửi thư ở 📨 Thư › 📤 Gửi thư:
+  // #nmTo tên nhân vật, bấm món (data-uid) để kèm, #nmGdOn = thư giao dịch (người nhận trả KNB) → luôn tắt.
+  const horseMsgs = [];
+  const watchMsgs = () => {
+    horseMsgs.length = 0;
+    const mo = new MutationObserver((ms) => {
+      for (const m of ms) for (const n of m.addedNodes) {
+        const t = ((n.innerText || n.textContent || '') + '').trim();
+        if (t && t.length < 200) horseMsgs.push(t);
+      }
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => mo.disconnect();
+  };
+  const sawMsg = (re) => horseMsgs.some((t) => re.test(t));
+  const stableOpen = () => isVisible($('#modal')) && /^Mã Trường/.test(txt('#mBody h3'));
+  const openStable = async () => {
+    if (!stableOpen()) {
+      await closeModalSure();
+      const b = $('#u20stb');
+      if (!b) return false;
+      b.click();
+      if (!(await waitFor(stableOpen, 3000))) return false;
+    }
+    // Bộ lọc về "Mọi bậc · Tất cả", bỏ "Chỉ ngựa trùng", mở danh sách trong Mã Trường
+    for (const sel of ['[data-hf="t"][data-hv="-1"]', '[data-hf="w"][data-hv="all"]']) {
+      const b = $('#mBody ' + sel);
+      if (b && !b.classList.contains('on')) { b.click(); await sleep(300); }
+    }
+    const dup = $('#mBody [data-hf="dup"]');
+    if (dup && dup.classList.contains('on')) { dup.click(); await sleep(300); }
+    const show = $('#mBody [data-hfo]');
+    if (show && /Hiện/.test(show.textContent)) {
+      show.click();
+      await waitFor(() => !/Hiện/.test((($('#mBody [data-hfo]') || {}).textContent) || ''), 1500);
+    }
+    return true;
+  };
+  const horseRows = () => [...document.querySelectorAll('#mBody .qrow')].map((r) => {
+    const sin = r.querySelector('[data-sin]'), sout = r.querySelector('[data-sout]');
+    if (!sin && !sout) return null;
+    const h = VLParse.horseRow((r.innerText || '').split('\n')[0], r.innerText);
+    return h && { ...h, uid: sin ? sin.dataset.sin : sout.dataset.sout, where: sin ? 'bag' : 'st', row: r };
+  }).filter(Boolean);
+  const stableNow = () => VLParse.stableCount(($('#mBody') || {}).innerText);
+  const stableFull = () => { const s = stableNow(); return !!s && s.used >= s.cap; };
+  // Bấm nút của một dòng (data-sin / data-sout) rồi chờ dòng đó đổi chỗ
+  const moveHorse = async (uid, attr) => {
+    const b = $(`#mBody [${attr}="${uid}"]`);
+    if (!b) return false;
+    b.click();
+    const other = attr === 'data-sin' ? 'data-sout' : 'data-sin';
+    return !!(await waitFor(() => $(`#mBody [${other}="${uid}"]`) || !$(`#mBody [${attr}="${uid}"]`), 3000));
+  };
+  // Mã Trường đầy: đưa một con thừa (trùng, không được giữ lại) từ Mã Trường ra Hành trang để lấy chỗ
+  const makeStableRoom = async () => {
+    const spare = horseRows().find((h) => h.where === 'st' && h.spare);
+    return !!spare && (await moveHorse(spare.uid, 'data-sout')) && !stableFull();
+  };
+  // Cất mọi loài chưa có (ngựa trong Hành trang không bị đánh dấu trùng) vào Mã Trường
+  const storeNewHorses = async (res) => {
+    if (!(await openStable())) return;
+    for (let i = 0; i < 30; i++) {
+      const h = horseRows().find((x) => x.where === 'bag' && !x.dup);
+      if (!h) break;
+      if (stableFull() && !(await makeStableRoom())) { res.stableFull = true; break; }
+      if (!(await moveHorse(h.uid, 'data-sin'))) break;
+      res.stored.push(h.name);
+      await sleep(300);
+    }
+  };
+  // Hành trang đầy: cất tới `n` con ngựa từ Hành trang vào Mã Trường (loài mới trước, rồi con trùng) để có chỗ nhận thư.
+  // Cất vài con một lượt vì đồ rơi khi luyện công nhặt vào chiếm ô trống rất nhanh. Trả về số ô đã dọn.
+  const makeBagRoom = async (n = 3) => {
+    if (!(await openStable())) return 0;
+    let freed = 0;
+    while (freed < n && !stableFull()) {
+      const rows = horseRows().filter((h) => h.where === 'bag');
+      const h = rows.find((x) => !x.dup) || rows.find((x) => x.dup);
+      if (!h || !(await moveHorse(h.uid, 'data-sin'))) break;
+      freed++;
+    }
+    return freed;
+  };
+  const chestCount = () => +((($('#t-inv [data-mi="rngua"] i') || {}).textContent) || 0) || 0;
+  const openHorseChests = async (res) => {
+    if (!(await openBag())) return;
+    try {
+      for (let i = 0, misses = 0; i < 30 && misses < 2; i++) {
+        const have = chestCount();
+        if (have <= 0) break;
+        $('#t-inv [data-mi="rngua"]').click();
+        const btn = await waitFor(() => { const b = $(have >= 10 ? '#miUse10' : '#miUse'); return b && isVisible(b) && !b.disabled ? b : null; }, 2000);
+        if (!btn) { misses++; await closeModalSure(); continue; }
+        horseMsgs.length = 0;
+        btn.click();
+        if (await waitFor(() => chestCount() < have, 5000)) { res.opened += have - chestCount(); misses = 0; }
+        else if (sawMsg(/Hành trang đầy|đầy/)) { res.bagFull = true; break; } // ngựa ra không còn chỗ (Mã Trường và Hành trang đều đầy)
+        else misses++;
+        await closeModalSure();
+      }
+    } finally {
+      await closeModalSure();
+      closeBag();
+    }
+  };
+  // Nhận thư có ngựa từ nhân vật của bạn (arg.from); Hành trang đầy thì cất bớt ngựa vào Mã Trường rồi nhận lại
+  const HORSE_IMG = /\/i\/10_\d+\.png$/;
+  const takeHorseMails = async (from, res) => {
+    const mailOpen = async () => {
+      if (!$('#mBody .nmrow') && !$('#mBody #nmTo')) {
+        await closeModalSure();
+        $('#u20mail')?.click();
+      }
+      return !!(await waitFor(() => $('#mBody #nmTo') || $('#mBody .nmrow'), 3000));
+    };
+    // Tên người gửi nằm ở <span><b>…</b>; ô món kèm theo cũng có thẻ <b> (vạch màu) nên không lấy <b> đầu tiên
+    const ownRow = () => [...document.querySelectorAll('#mBody .nmrow')].find((r) =>
+      from.includes(((r.querySelector(':scope > span > b') || {}).textContent || '').trim()) && r.querySelector('[data-take]')
+      && [...r.querySelectorAll('img')].some((img) => HORSE_IMG.test(img.getAttribute('src') || '')));
+    if (!(await mailOpen())) return;
+    for (let i = 0, misses = 0, rooms = 0; i < 20 && misses < 2; i++) {
+      // Danh sách vẽ lại sau mỗi lần nhận → chờ nhịp ngắn; vừa dọn chỗ thì bấm ngay
+      if (!rooms || res.mails) await sleep(500);
+      const row = await waitFor(ownRow, 1500);
+      if (!row) break;
+      const id = row.querySelector('[data-take]').dataset.take;
+      horseMsgs.length = 0;
+      row.querySelector('[data-take]').click();
+      if (await waitFor(() => !$(`#mBody [data-take="${id}"]`), 2500)) { res.mails++; misses = 0; continue; }
+      if (!sawMsg(/Hành trang đầy/)) { misses++; continue; }
+      // Đầy: dọn chỗ rồi nhận ngay (đồ rơi khi luyện công có thể chiếm chỗ trống rất nhanh)
+      if (++rooms > 5 || !(await makeBagRoom())) { res.bagFull = true; break; }
+      if (!(await mailOpen())) break;
+    }
+    await closeModalSure();
+  };
+  const horseScan = () => {
+    const coll = VLParse.horseCollection(($('#mBody') || {}).innerText);
+    const spares = horseRows().filter((h) => h.spare).map(({ uid, key, name, where, locked }) => ({ uid, key, name, where, locked }));
+    return { coll, spares, stable: stableNow() };
+  };
+  // Thẻ món trong Hành trang: mở / khoá (#bLock "🔓Mở khóa" khi đang khoá, "🔒Khóa" khi không)
+  const setLocked = async (uid, lock) => {
+    const it = $(`#t-inv [data-uid="${uid}"]`);
+    if (!it) return false;
+    it.click();
+    const btn = await waitFor(() => { const b = $('#bLock'); return b && isVisible(b) ? b : null; }, 2000);
+    let ok = false;
+    if (btn) {
+      const isLocked = /Mở khóa|Mở khoá/.test(btn.textContent);
+      if (isLocked === lock) ok = true;
+      else {
+        btn.click();
+        ok = !!(await waitFor(() => /Mở khóa|Mở khoá/.test((($('#bLock') || {}).textContent) || '') === lock, 2000));
+      }
+    }
+    await closeModalSure();
+    return ok;
+  };
+  // Gửi một con ngựa (đang ở Hành trang, không khoá) cho `to` qua thư tặng
+  const mailHorse = async (to, uid, name) => {
+    await closeModalSure();
+    $('#u20mail')?.click();
+    const toBox = await waitFor(() => $('#mBody #nmTo'), 3000);
+    if (!toBox) return 'no-mail';
+    setValue(toBox, to);
+    const trade = $('#nmGdOn');
+    if (trade && trade.checked) trade.click();
+    const gold = $('#nmGold');
+    if (gold && gold.value) setValue(gold, '');
+    const item = $(`#mBody [data-uid="${uid}"]`);
+    if (!item) return 'not-in-bag';
+    item.click();
+    if (!(await waitFor(() => new RegExp('Đang chọn:\\s*' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(($('#mBody') || {}).innerText), 2000))) return 'not-selected';
+    if ($('#nmGdOn')?.checked || ($('#nmTo') || {}).value !== to) return 'form-changed';
+    $('#nmSend')?.click();
+    const ok = await waitFor(() => {
+      const box = $('#askBox');
+      if (!box || !isVisible(box)) return null;
+      const t = box.innerText.replace(/\s+/g, ' ');
+      if (!t.includes('Gửi ') || !t.includes(' cho ' + to + '?') || /KNB|lượng/.test(t)) return 'bad';
+      return [...box.querySelectorAll('button')].find((b) => b.dataset.a === '1' || /^Gửi$/.test(b.textContent.trim()));
+    }, 2500);
+    if (!ok || ok === 'bad') {
+      const box = $('#askBox');
+      if (box && isVisible(box)) {
+        post({ t: 'log', msg: 'horse mail: unexpected dialog ' + box.innerText.replace(/\s+/g, ' ').slice(0, 120) });
+        [...box.querySelectorAll('button')].find((b) => /^Hủy$/.test(b.textContent.trim()))?.click();
+      }
+      return 'no-confirm';
+    }
+    ok.click();
+    return (await waitFor(() => !$(`#mBody [data-uid="${uid}"]`), 4000)) ? 'ok' : 'not-sent';
+  };
+  // arg.op: 'scan' (nhận thư ngựa, mở rương, cất loài mới, đọc bộ sưu tập + ngựa thừa) ·
+  // 'send' { to, uids, allowed } · 'take' { from } (nhận thư ngựa rồi cất loài mới)
+  const horseFlow = async (arg) => {
+    if (flowBusy || anyWindowOpen()) return { r: 'busy' };
+    if (inBossHk()) return { r: 'boss-hk' };
+    if (!$('#u20stb')) return { r: 'no-stable' };
+    // Chỉ gửi cho nhân vật của bạn
+    if (arg.op === 'send' && !(arg.to && (arg.allowed || []).includes(arg.to))) return { r: 'not-allowed' };
+    flowBusy = true;
+    const stop = watchMsgs();
+    const res = { r: 'ok', op: arg.op, opened: 0, stored: [], mails: 0, sent: [], failed: [] };
+    try {
+      const from = arg.from || [];
+      if (arg.op === 'scan' || arg.op === 'take') {
+        if (from.length) await takeHorseMails(from, res);
+        if (arg.op === 'scan' && arg.openChests) await openHorseChests(res);
+        await storeNewHorses(res);
+        if (await openStable()) Object.assign(res, horseScan());
+      } else if (arg.op === 'send') {
+        const to = arg.to;
+        // Con đang ở Hành trang gửi trước: mỗi con gửi đi trả lại một ô trống để lấy con trong Mã Trường ra
+        const queue = [...(arg.uids || [])];
+        if (await openStable()) {
+          const where = Object.fromEntries(horseRows().map((x) => [x.uid, x.where]));
+          queue.sort((a, b) => (where[a] === 'st') - (where[b] === 'st'));
+        }
+        const retry = [];
+        for (let qi = 0; qi < queue.length; qi++) {
+          const uid = queue[qi];
+          if (!(await openStable())) { res.failed.push(uid + ':no-stable'); continue; }
+          const h = horseRows().find((x) => x.uid === uid);
+          if (!h || !h.spare) { res.failed.push(uid + ':gone'); continue; }
+          if (h.where === 'st') {
+            horseMsgs.length = 0;
+            if (!(await moveHorse(uid, 'data-sout'))) {
+              const full = sawMsg(/Hành trang đầy/);
+              // Đầy: thử lại một lần sau khi các con khác đã gửi đi
+              if (full && !retry.includes(uid)) { retry.push(uid); queue.push(uid); continue; }
+              res.failed.push(uid + (full ? ':bag-full' : ':take-out')); continue;
+            }
+          }
+          await closeModalSure();
+          let unlocked = false;
+          if (h.locked) {
+            if (!(await openBag()) || !(await setLocked(uid, false))) { closeBag(); res.failed.push(uid + ':unlock'); continue; }
+            unlocked = true;
+            closeBag();
+          }
+          const r = await mailHorse(to, uid, h.name);
+          await closeModalSure();
+          if (r === 'ok') { res.sent.push(uid); continue; }
+          res.failed.push(uid + ':' + r);
+          // Không gửi được: khoá lại như cũ
+          if (unlocked && (await openBag())) { await setLocked(uid, true); closeBag(); }
+        }
+      }
+    } catch (err) {
+      res.r = 'error: ' + err.message;
+    } finally {
+      stop();
+      try { await closeModalSure(); closeBag(); } catch (_) {}
+      flowBusy = false;
+    }
+    res.stored = res.stored.join(',');
+    res.sent = res.sent.join(',');
+    res.failed = res.failed.join(',');
+    return res;
+  };
+
   // ---------- Tự nhận quà: 🎁 Phần thưởng › Điểm danh (mỗi ngày) và Mốc cấp ----------
   // Chạy đầu lượt bấm 📜 Nhiệm Vụ (trong buyLdtFlow). Nút còn nhận được thì không bị khoá (disabled);
   // đã nhận thì game đổi chữ thành "Đã nhận" và khoá lại.
@@ -1114,6 +1383,8 @@
       knbFlow().then((res) => post({ t: 'knbResult', ...res }), (err) => post({ t: 'knbResult', r: 'error: ' + err.message }));
     } else if (m.t === 'guild') {
       guildFlow(m.arg || {}).then((res) => post({ t: 'guildResult', ...res }), (err) => post({ t: 'guildResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'horse') {
+      horseFlow(m.arg || {}).then((res) => post({ t: 'horseResult', ...res }), (err) => post({ t: 'horseResult', r: 'error: ' + err.message }));
     } else if (m.t === 'buffs') {
       buffFlow(m.arg || {}).then((res) => post({ t: 'buffResult', ...res }), (err) => post({ t: 'buffResult', r: 'error: ' + err.message }));
     } else if (m.t === 'buyLdt') {

@@ -183,6 +183,11 @@ public sealed class AccountController
     public event Action<string, string>? LootFound;
     // Có dòng mới trong nhật ký hoạt động
     public event Action<ActivityEntry>? ActivityAdded;
+    // 🐴 Mã Trường: kết quả một bước (xem HorseCoordinator)
+    public event Action<JsonElement>? HorseResult;
+
+    // Gửi một bước 🐴 Mã Trường vào trang (bên gọi giữ khoá của acc như mọi lệnh khác)
+    public void PostRaw(object message) => Post(message);
 
     public string ScreenLabel => Screen switch
     {
@@ -496,6 +501,10 @@ public sealed class AccountController
                     break;
                 case "guildResult":
                     OnGuildResult(m, now);
+                    break;
+                case "horseResult":
+                    Log.Write($"[{Account.Id}] horse {Str(m, "op")}: {Str(m, "r")} stored={Str(m, "stored")} sent={Str(m, "sent")} failed={Str(m, "failed")}");
+                    HorseResult?.Invoke(m.Clone());
                     break;
                 case "unreadable":
                     OnUnreadable(Str(m, "what"), Str(m, "sample"), now);

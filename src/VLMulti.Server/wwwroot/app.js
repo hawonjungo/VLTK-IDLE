@@ -409,6 +409,59 @@ function openAccMenu(id) {
   ]));
 }
 
+// ---------- 🐴 Mã Trường: quét → xem danh sách chuyển → bấm Chuyển ----------
+// Quét: mỗi acc trong game nhận thư ngựa còn chờ, mở Rương Ngựa (tuỳ chọn), cất loài mới vào Mã Trường, đọc bộ sưu tập.
+// Chuyển chỉ chạy khi bạn bấm, chỉ giữa các nhân vật của bạn, thư tặng 0 KNB.
+let horseOpen = false, horseTimer = 0, horseChests = prefs.get('horseChests', true);
+async function openHorses() {
+  horseOpen = true;
+  await renderHorses();
+}
+async function renderHorses() {
+  clearTimeout(horseTimer);
+  if (!horseOpen) return;
+  let st;
+  try { st = await api('horses'); } catch (e) { if (e.message !== 'unauthorized') toast(e.message); return; }
+  // Bạn đã mở hộp thoại khác trong lúc chờ → thôi cập nhật
+  if (!horseOpen || (!$('#modal').classList.contains('hidden') && $('#modalTitle').textContent !== '🐴 Mã Trường')) { horseOpen = false; return; }
+  const busy =st.phase === 'scanning' || st.phase === 'sending';
+  const parts = [];
+  if (st.phase === 'idle' || st.phase === 'done') {
+    parts.push(h('p', { class: 'dim', text: 'Nhận thư ngựa còn chờ, cất loài mới vào Mã Trường, rồi tìm ngựa thừa ở acc này mà acc khác còn thiếu. Chưa gửi gì cho tới khi bạn bấm Chuyển.' }));
+    const cb = h('input', { type: 'checkbox', onchange: (e) => { horseChests = e.target.checked; prefs.set('horseChests', horseChests); } });
+    cb.checked = horseChests;
+    parts.push(h('label', { class: 'check-row' }, [cb, 'Mở hết Rương Ngựa trước']));
+  }
+  if (busy) parts.push(h('p', { text: st.phase === 'scanning' ? '⏳ Đang quét các acc…' : '⏳ Đang chuyển ngựa…' }));
+  if (st.lines?.length) parts.push(h('div', { class: 'horse-lines' }, st.lines.map((l) => h('div', { text: l }))));
+  if (st.phase === 'ready' && st.plan?.length) {
+    parts.push(h('h3', { text: `Danh sách chuyển (${st.plan.length} con)` }));
+    parts.push(h('div', { class: 'horse-plan' }, st.plan.map((p) => h('div', {
+      text: `${p.from} → ${p.to}: ${p.horse}` + (p.locked ? ' · 🔒 sẽ mở khoá' : '') + (p.inStable ? ' · lấy ra từ Mã Trường' : ''),
+    }))));
+  }
+  const actions = [];
+  if (st.phase === 'ready') {
+    actions.push(h('button', { class: 'btn primary', text: `Chuyển ${st.plan.length} con`, onclick: async () => {
+      if (!confirm(`Gửi ${st.plan.length} con ngựa qua thư tặng (0 KNB) giữa các nhân vật của bạn?`)) return;
+      try { await api('horses/send', {}); } catch (e) { toast(e.message); }
+      renderHorses();
+    } }));
+    actions.push(h('button', { class: 'btn', text: 'Bỏ', onclick: async () => { try { await api('horses/cancel', {}); } catch (_) {} renderHorses(); } }));
+  } else if (!busy) {
+    actions.push(h('button', { class: 'btn primary', text: st.phase === 'done' ? 'Quét lại' : 'Quét', onclick: async () => {
+      try { await api('horses/scan', { on: horseChests }); } catch (e) { toast(e.message); }
+      renderHorses();
+    } }));
+  }
+  if (actions.length) parts.push(h('div', { class: 'horse-actions' }, actions));
+  openModal('🐴 Mã Trường', parts);
+  if (busy) horseTimer = setTimeout(renderHorses, 2000);
+}
+$('#horseBtn').addEventListener('click', openHorses);
+$('#modalClose').addEventListener('click', () => { horseOpen = false; });
+$('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') horseOpen = false; });
+
 // ---------- Chọn nhiều acc → đổi chế độ ----------
 
 function setSelecting(on) {

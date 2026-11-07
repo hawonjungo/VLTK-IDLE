@@ -84,7 +84,9 @@
                             ToolTip="Vào phó bản cao nhất còn lượt (tắt vòng tự động)" />
                     <Button Style="{StaticResource BarButton}" Content="Luyện Công" Tag="farm" Click="Mode_Click"
                             ToolTip="Dịch chuyển tới bãi luyện công hợp cấp (tắt vòng tự động)" />
-                    <Button Style="{StaticResource BarButton}" Content="Chọn tất cả" Click="SelectAll_Click" Margin="10,0,3,0"
+                    <Button x:Name="HorseButton" Style="{StaticResource BarButton}" Content="🐴 Ngựa" Click="Horse_Click" Margin="10,0,3,0"
+                            ToolTip="Mã Trường: mở Rương Ngựa, cất loài mới, rồi chuyển ngựa thừa sang acc còn thiếu loài đó (bạn xem danh sách và xác nhận trước)" />
+                    <Button Style="{StaticResource BarButton}" Content="Chọn tất cả" Click="SelectAll_Click" Margin="3,0,3,0"
                             ToolTip="Chọn / bỏ chọn mọi acc đang bật" />
                     <TextBlock x:Name="CommandFeedback" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource TextDim}"
                                TextTrimming="CharacterEllipsis" />

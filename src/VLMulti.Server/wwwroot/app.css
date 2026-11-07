@@ -237,3 +237,11 @@ body.no-scroll { overflow: hidden; }
   .live-tools { grid-column: 3; grid-template-columns: 1fr; align-content: center; padding: 10px 8px; }
   .live-tools .btn { min-height: 48px; padding: 0; }
 }
+
+/* 🐴 Mã Trường */
+.listbar-actions { display: flex; gap: 8px; }
+.horse-lines { display: flex; flex-direction: column; gap: 4px; font-size: 13px; margin: 8px 0; max-height: 40vh; overflow-y: auto; }
+.horse-plan { display: flex; flex-direction: column; gap: 2px; font-size: 14px; margin: 8px 0; max-height: 40vh; overflow-y: auto; }
+.horse-plan div { padding: 6px 0; border-bottom: 1px solid var(--border); }
+.horse-actions { display: flex; gap: 8px; margin-top: 10px; }
+.horse-actions .btn { flex: 1; }

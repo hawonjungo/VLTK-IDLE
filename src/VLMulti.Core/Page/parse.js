@@ -161,6 +161,56 @@ var VLParse = (() => {
     return m ? +m[1] * ({ h: 3600, m: 60, s: 1 })[m[2].toLowerCase()] : null;
   };
 
-  return { num, knb, daTau, dungeons, boat, weekBoss, assassin, ldtShop, teacher, silver, knbShop, buffLeft, guildItem, guildPoints, guildDonate };
+  // ---------- 🐴 Mã Trường ----------
+  // Khoá so sánh loài: chữ thường (game viết lẫn "Tuyệt ảnh" / "Tuyệt Ảnh"), Thần Mã có tiền tố "✦ "
+  // vì Thần Mã tính riêng (cùng tên ngựa thường vẫn là 2 loài)
+  const horseKey = (name, than) => (than ? '✦ ' : '') + clean(name).replace(/\s*✦.*$/, '').toLowerCase();
+
+  // Phần "Bộ sưu tập Mã Trường 40/62 loài · …" tới hết: mỗi bậc một dòng "Thường 10/10 · mỗi loài …", rồi từng loài
+  // ("✓ Hoàng Mã" = đã có). Bậc "✦ Thần Mã 1/14 · …" là bộ riêng.
+  // → { have, total, thanHave, thanTotal, owned: [khoá], missing: [khoá] }
+  const horseCollection = (text) => {
+    const t = String(text || '');
+    const i = t.indexOf('Bộ sưu tập Mã Trường');
+    if (i < 0) return null;
+    const lines = t.slice(i).split('\n').map((l) => clean(l)).filter(Boolean);
+    const head = lines[0].match(/Bộ sưu tập Mã Trường\s+(\d+)\s*\/\s*(\d+)/);
+    if (!head) return null;
+    const res = { have: +head[1], total: +head[2], thanHave: null, thanTotal: null, owned: [], missing: [] };
+    let than = null; // null = chưa vào bậc nào
+    for (const l of lines.slice(1)) {
+      const tier = l.match(/^(.+?)\s+(\d+)\s*\/\s*(\d+)\s*·\s*mỗi/);
+      if (tier) {
+        than = /✦/.test(tier[1]);
+        if (than) { res.thanHave = +tier[2]; res.thanTotal = +tier[3]; }
+        continue;
+      }
+      if (than === null || /^(Mỗi loài|\+)/.test(l)) continue;
+      const own = l.startsWith('✓');
+      const key = horseKey(l.replace(/^✓\s*/, ''), than);
+      (own ? res.owned : res.missing).push(key);
+    }
+    return res;
+  };
+
+  // Một dòng ngựa (Hành trang hoặc trong Mã Trường): "Thanh Thông · trùng cấp yêu cầu 30 …" / "Hắc Mã · trùng, giữ lại (tốt nhất) …"
+  // / "Túc Sương · trùng (đang khóa) …". `name` là chữ trong thẻ <b>. Ngựa thừa (spare) = trùng mà game không chọn giữ lại.
+  const horseRow = (name, text) => {
+    const n = clean(name);
+    if (!n) return null;
+    const t = clean(text);
+    const than = /✦/.test(n);
+    const dup = /·\s*trùng/.test(t), keep = /giữ lại/.test(t);
+    return { name: n.replace(/\s*✦.*$/, ''), key: horseKey(n, than), than, dup, keep, locked: /đang khóa|đang khoá/.test(t), spare: dup && !keep };
+  };
+
+  // "Ngựa trong Mã Trường 47/60" → { used, cap }
+  const stableCount = (text) => {
+    const m = clean(text).match(/Ngựa trong Mã Trường\s*(\d+)\s*\/\s*(\d+)/);
+    return m ? { used: +m[1], cap: +m[2] } : null;
+  };
+
+  return { num, knb, daTau, dungeons, boat, weekBoss, assassin, ldtShop, teacher, silver, knbShop, buffLeft, guildItem, guildPoints, guildDonate,
+    horseKey, horseCollection, horseRow, stableCount };
 })();
 if (typeof module !== 'undefined') module.exports = VLParse;

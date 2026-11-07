@@ -30,6 +30,8 @@ public partial class MainWindow : Window
     private readonly CredentialStore _credentials = new(AppPaths.CredentialsFile, new DpapiProtector());
     private readonly AlertCenter _alerts = new(TimeSpan.FromMinutes(10));
     private readonly Dictionary<string, GameFrame> _frames = new();
+    // 🐴 Mã Trường: quét / chuyển ngựa giữa các acc (chỉ khi bạn bấm)
+    private readonly HorseCoordinator _horses = new();
     private readonly Dictionary<string, Button> _tabs = new();
     private readonly Dictionary<string, TextBlock[]> _dashRows = new();
     private readonly HashSet<string> _declinedPasswordSave = new();
@@ -124,6 +126,7 @@ public partial class MainWindow : Window
         };
         frame.KiteChanged += _ => SaveSettings();
         frame.LootFound += OnLootFound;
+        frame.Controller.HorseResult += m => _horses.OnResult(acc.Id, m);
         frame.SwapRequested += Swap;
         frame.BigRequested += f => ShowInBig(f.Account.Id);
         frame.InputCaptured += OnInputCaptured;
@@ -950,6 +953,63 @@ public partial class MainWindow : Window
             ? $"Đã bắt đầu vòng tự động cho {targets.Count} acc"
             : $"Đã chuyển {targets.Count} acc sang {button.Content} (tắt vòng tự động)";
         RefreshAll();
+    }
+
+    // 🐴 Mã Trường: quét các acc trong game → hiện danh sách chuyển → bạn xác nhận → gửi thư tặng (0 KNB) và nhận
+    private async void Horse_Click(object sender, RoutedEventArgs e)
+    {
+        if (_horses.Busy) return;
+        var members = _frames.Values
+            .Where(f => f.Controller.Screen == "game" && !string.IsNullOrWhiteSpace(f.Account.CharName))
+            .Select(f => new HorseMember(f.Account.Id, f.Account.CharName!,
+                msg => Dispatcher.Invoke(() => f.Controller.PostRaw(msg)),
+                text => Dispatcher.Invoke(() => f.Controller.Note(DateTime.Now, text, StatusLevel.Ok))))
+            .ToList();
+        if (members.Count == 0)
+        {
+            CommandFeedback.Text = "🐴 Không có acc nào đang trong game";
+            CommandFeedback.Foreground = Res("WarnFg");
+            return;
+        }
+        var names = _settings.Accounts.Select(a => a.CharName ?? "").Where(n => n.Length > 0).Distinct().ToList();
+        var chests = MessageBox.Show(this,
+            "Mở hết Rương Ngựa trước khi quét?\n\nQuét sẽ nhận thư ngựa còn chờ, cất loài mới vào Mã Trường rồi tìm ngựa thừa để chuyển. Chưa gửi gì cho tới khi bạn xác nhận.",
+            "🐴 Mã Trường", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        if (chests == MessageBoxResult.Cancel) return;
+
+        HorseButton.IsEnabled = false;
+        try
+        {
+            CommandFeedback.Foreground = Res("TextDim");
+            CommandFeedback.Text = $"🐴 Đang quét {members.Count} acc…";
+            await _horses.ScanAsync(members, names, chests == MessageBoxResult.Yes);
+            var lines = string.Join("\n", _horses.Lines);
+            var plan = _horses.Plan;
+            if (_horses.Phase != "ready" || plan.Count == 0)
+            {
+                CommandFeedback.Text = "🐴 Quét xong – không có ngựa nào để chuyển";
+                MessageBox.Show(this, lines, "🐴 Mã Trường", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var list = string.Join("\n", plan.Select(p => $"• {p.FromName} → {p.ToName}: {p.Horse.Name}"
+                + (p.Horse.Locked ? " (🔒 sẽ mở khoá)" : "") + (p.Horse.Where == "st" ? " (lấy ra từ Mã Trường)" : "")));
+            var ok = MessageBox.Show(this, $"{lines}\n\nChuyển {plan.Count} con qua thư tặng (0 KNB)?\n\n{list}",
+                "🐴 Mã Trường", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (ok != MessageBoxResult.Yes)
+            {
+                _horses.Cancel();
+                CommandFeedback.Text = "🐴 Đã bỏ danh sách chuyển";
+                return;
+            }
+            CommandFeedback.Text = $"🐴 Đang chuyển {plan.Count} con…";
+            await _horses.SendAsync(members, names);
+            CommandFeedback.Text = "🐴 Chuyển ngựa xong";
+            MessageBox.Show(this, string.Join("\n", _horses.Lines), "🐴 Mã Trường", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        finally
+        {
+            HorseButton.IsEnabled = true;
+        }
     }
 
     private void EnterAll_Click(object sender, RoutedEventArgs e)

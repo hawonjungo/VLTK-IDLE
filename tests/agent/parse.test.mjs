@@ -63,6 +63,38 @@ test('Bang hội: cửa hàng, điểm cống hiến, góp lượng (mẫu thậ
   assert.deepEqual(P.guildDonate(g.gop.replace('Hôm nay 0', 'Hôm nay 1.500')), { done: 1500, cap: 20000, can: 21400 });
 });
 
+test('Mã Trường: bộ sưu tập, dòng ngựa, số chỗ (mẫu thật)', () => {
+  const h = all.find(([f]) => f.startsWith('event-horse-'))[1];
+  const c = P.horseCollection(h.collection);
+  assert.equal(c.have, 40);
+  assert.equal(c.total, 62);
+  assert.equal(c.thanHave, 1);
+  assert.equal(c.thanTotal, 14);
+  // 62 loài của game đã gồm 14 Thần Mã (48 ngựa thường + 14)
+  assert.equal(c.owned.length + c.missing.length, 62);
+  assert.equal(c.owned.length, 40);
+  assert.ok(c.owned.includes('hoàng mã'));
+  assert.ok(c.missing.includes('sư tử'));
+  // Thần Mã là bộ riêng: cùng tên mà khoá khác
+  assert.ok(c.owned.includes('hãn huyết long câu'));
+  assert.ok(c.owned.includes('✦ hãn huyết long câu'));
+  assert.ok(c.missing.includes('✦ xích thố'));
+  assert.ok(!c.owned.some((k) => /mỗi loài|^\+/.test(k)));
+  assert.equal(P.horseCollection('Mã Trường'), null);
+
+  const row = (t) => P.horseRow(t.split('\n')[0], t);
+  assert.deepEqual(row(h.rows.spare), { name: 'Liệt Hồng Mã', key: 'liệt hồng mã', than: false, dup: true, keep: false, locked: false, spare: true });
+  assert.equal(row(h.rows.keep).spare, false);
+  assert.deepEqual(row(h.rows.locked), { name: 'Tuyệt ảnh', key: 'tuyệt ảnh', than: false, dup: true, keep: false, locked: true, spare: true });
+  assert.equal(row(h.rows.unique).dup, false);
+  assert.deepEqual(row(h.rows.than), { name: 'Xích Long Câu', key: '✦ xích long câu', than: true, dup: false, keep: false, locked: false, spare: false });
+  // "Tuyệt ảnh" (bộ sưu tập) và "Tuyệt Ảnh" (thẻ ngựa) là một loài
+  assert.equal(P.horseKey('Tuyệt Ảnh'), P.horseKey('Tuyệt ảnh'));
+
+  assert.deepEqual(P.stableCount(h.stableText), { used: 60, cap: 60 });
+  assert.equal(P.stableCount('Ngựa trong hành trang'), null);
+});
+
 test('số viết gọn của game', () => {
   assert.equal(P.num('17.2k'), 17200);
   assert.equal(P.num('11.2k'), 11200);
