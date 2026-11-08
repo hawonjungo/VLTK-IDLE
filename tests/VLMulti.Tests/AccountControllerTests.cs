@@ -163,6 +163,7 @@ public class AccountControllerTests
         cfg.KiteFleeHp = 40;
         ctl.Account.KiteDistance = 350;   // riêng acc này
         ctl.Account.KiteFleeHp = 30;
+        ctl.Account.KiteCrowd = 4;
         JsonElement? LastCfg() => page.Sent.LastOrDefault(m => m.GetProperty("t").GetString() == "kiteCfg") is { ValueKind: JsonValueKind.Object } m ? m.GetProperty("arg") : null;
         var t = Run(ctl, T0, 15, Status("game", mode: "tower", zone: "Thông Thiên Tháp · tầng 10"));
         Assert.Equal(JsonValueKind.Null, LastCfg()!.Value.ValueKind); // chưa bật
@@ -171,7 +172,8 @@ public class AccountControllerTests
         var c = LastCfg()!.Value;
         Assert.True(c.GetProperty("on").GetBoolean());
         Assert.Equal(350, c.GetProperty("step").GetInt32());
-        Assert.Equal(3, c.GetProperty("pause").GetInt32());
+        Assert.Equal(500, c.GetProperty("pauseMs").GetInt32());  // chung: dừng 0,5 giây giữa 2 bước
+        Assert.Equal(4, c.GetProperty("crowd").GetInt32());      // riêng: chạy khi hơn 4 con ở gần
         Assert.Equal(30, c.GetProperty("fleeHp").GetInt32());
         Assert.DoesNotContain("kite", page.Commands); // trang tự chạy, app không ra lệnh từng bước
         Run(ctl, t, 6, Status("game", mode: "farm"));

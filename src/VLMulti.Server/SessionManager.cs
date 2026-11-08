@@ -188,6 +188,7 @@ public sealed class SessionManager : IAsyncDisposable
                     selected = acc.Selected,
                     kite = acc.Kite,
                     kiteDir = acc.KiteDirection, kiteDist = acc.KiteDistance, kiteInterval = acc.KiteInterval, kiteFlee = acc.KiteFleeHp,
+                    kiteCrowd = acc.KiteCrowd, kitePause = acc.KitePauseMs,
                     autoMode = acc.AutoMode,
                     hasPassword = HasPassword(acc.Id),
                     savedUser = SavedUser(acc.Id),
@@ -255,6 +256,8 @@ public sealed class SessionManager : IAsyncDisposable
                     kiteDirection = _settings.KiteDirection,
                     kiteDistance = _settings.KiteDistance,
                     kiteFleeHp = _settings.KiteFleeHp,
+                    kiteCrowd = _settings.KiteCrowd,
+                    kitePause = _settings.KitePauseMs,
                     kiteInterval = _settings.KiteIntervalSeconds,
                     kiteDirections = KiteDirections.All.Select(d => new { id = d, label = KiteDirections.Label(d) }),
                     autoDungeon = _settings.AutoModeDungeon,
@@ -459,6 +462,8 @@ public sealed class SessionManager : IAsyncDisposable
             a.KiteDistance = req.Distance;
             a.KiteInterval = req.Interval;
             a.KiteFleeHp = req.FleeHp;
+            a.KiteCrowd = req.Crowd;
+            a.KitePauseMs = req.PauseMs;
             if (req.On is { } on && on != a.Kite) c.SetKite(on, DateTime.Now);
         });
         SaveSettings();
@@ -664,6 +669,8 @@ public sealed class SessionManager : IAsyncDisposable
             if (u.KiteDistance is { } dist) _settings.KiteDistance = dist;
             if (u.KiteInterval is { } iv) _settings.KiteIntervalSeconds = iv;
             if (u.KiteFleeHp is { } kf) _settings.KiteFleeHp = kf;
+            if (u.KiteCrowd is { } kc) _settings.KiteCrowd = kc;
+            if (u.KitePauseMs is { } kp) _settings.KitePauseMs = kp;
             if (u.AutoDungeon is { } ad) _settings.AutoModeDungeon = ad;
             if (u.AutoQuest is { } aq) _settings.AutoModeQuest = aq;
             if (u.AutoAssassin is { } aa) _settings.AutoModeAssassin = aa;
@@ -788,7 +795,8 @@ public sealed class SessionManager : IAsyncDisposable
     }
 }
 
-public sealed record KiteConfigRequest(bool? On, string? Direction, int? Distance, int? Interval, int? FleeHp);
+public sealed record KiteConfigRequest(bool? On, string? Direction, int? Distance, int? Interval, int? FleeHp,
+    int? Crowd = null, int? PauseMs = null);
 
 public sealed record SettingsUpdate(
     string? KiteDirection, int? KiteDistance, int? KiteInterval,
@@ -799,4 +807,4 @@ public sealed record SettingsUpdate(
     bool? AutoSellJunk = null, int? AutoSellFreeSlots = null,
     int? GuildDailyAmount = null, int? GuildDonateReserve = null, bool? GuildFurnace = null, bool? GuildApproveOwn = null,
     bool? GuildWeekAlert = null, string? KnbMainName = null, int? KnbKeep = null, bool? KnbSendOn = null, bool? KnbOpenBig = null,
-    int? KiteFleeHp = null);
+    int? KiteFleeHp = null, int? KiteCrowd = null, int? KitePauseMs = null);

@@ -223,6 +223,7 @@
   };
 
   // Màn chọn nhân vật có bảng "Nhân vật | <tên>" – lấy ô ngay sau nhãn đó
+  const gameCharName = () => { try { const S = window.H5.G('S'); return String((S && S.name) || '').trim().slice(0, 40); } catch (_) { return ''; } };
   const charSelectName = () => {
     const label = [...document.querySelectorAll('body *')].find((el) =>
       el.children.length === 0 && el.textContent.trim() === 'Nhân vật' && isVisible(el) && !el.closest('button'));
@@ -492,8 +493,10 @@
   // ---------- 🏃 Kéo quái kiểu "Hàng dọc" (chạy trong trang, nhịp 0,3 giây) ----------
   // Đọc trạng thái game qua cầu nối H5.G: nhân vật H (x, y), R.enemies, R.tower.floor, R.spawnT (đếm ngược quái ra),
   // R.life, WORLD (kích thước phòng), CAM (góc trái trên của camera) và AR (khung nhìn logic 640×360).
-  // Nhân vật chạy lên/xuống trên đường dọc ở giữa phòng: chạy `step` px → dừng `pause` giây cho Auto đánh → chạy tiếp,
-  // tới đầu đường thì quay lại. Quái đuổi theo xếp thành hàng dọc sau lưng.
+  // Quái gần (trong `near` px) nhiều hơn `crowd` con → chạy lên/xuống trên đường dọc giữa phòng, bước ngắn `step` px
+  // rồi dừng `pauseMs` ms cho nhân vật ra chiêu (vòng đánh của game vẫn chạy khi đi), tới đầu đường thì quay lại; quái
+  // đuổi theo xếp thành hàng dọc sau lưng. Chạy cả khi máu đầy (quái đánh gần như mất hết máu một lần). Ít quái thì đứng
+  // yên đánh hết tốc lực. crowd = 0: luôn chạy theo nhịp.
   // Reset về giữa phòng: sang tầng mới, lệch khỏi đường > 200 px, hoặc sát mép / góc phòng (tránh bị ép vào góc).
   // Né đợt quái mới: đếm ngược quái ra < 0,4 giây → chạy ngay. Máu < fleeHp% → chạy về đầu đường xa đám quái nhất.
   let kiteCfg = null;
@@ -527,7 +530,12 @@
     const yTop = cy - half, yBot = cy + half;
     const en = (R.enemies || []).filter((e) => e && !e.dead && e.hp > 0);
     const lifePct = R.P && R.P.life > 0 ? 100 * (R.life || 0) / R.P.life : null; // R.P.life = máu tối đa
-    const go = (tx, ty, why) => { kiteSt.target = { x: tx, y: ty }; kiteSt.phase = 'run'; kiteSt.until = now + 1800; kiteSt.last = why; clickWorld(tx, ty); };
+    // Hết giờ chạy theo quãng đường (tốc chạy ~150 px/giây), tối thiểu 0,8 giây
+    const go = (tx, ty, why) => {
+      const d = Math.hypot(tx - H.x, ty - H.y);
+      kiteSt.target = { x: tx, y: ty }; kiteSt.phase = 'run'; kiteSt.until = now + Math.max(800, Math.min(6000, d / 150 * 1000 + 500));
+      kiteSt.last = why; clickWorld(tx, ty);
+    };
     // Tầng mới → về giữa phòng
     if (R.tower.floor !== kiteSt.floor) { kiteSt.floor = R.tower.floor; go(cx, cy, 'floor'); return; }
     // Lệch khỏi đường / sát mép → reset về giữa
@@ -545,15 +553,21 @@
       if (R.spawnT > 0 && R.spawnT < 0.4 && kiteSt.last !== 'dodge') go(cx, Math.max(yTop, Math.min(yBot, H.y + kiteSt.dir * (c.step ?? 250))), 'dodge');
       return;
     }
+    const step = c.step ?? 150;
+    const pauseMs = c.pauseMs ?? (c.pause != null ? 1000 * c.pause : 500);
     if (kiteSt.phase === 'run') {
       const t = kiteSt.target;
-      const arrived = !t || Math.hypot(H.x - t.x, H.y - t.y) < 50;
-      if (arrived || now > kiteSt.until) { kiteSt.phase = 'pause'; kiteSt.until = now + 1000 * (c.pause ?? 3); }
+      const arrived = !t || Math.hypot(H.x - t.x, H.y - t.y) < 40;
+      if (arrived || now > kiteSt.until) { kiteSt.phase = 'pause'; kiteSt.until = now + pauseMs; }
       return;
     }
-    if (now < kiteSt.until) return; // đang dừng cho Auto đánh
-    let ty = H.y + kiteSt.dir * (c.step ?? 250);
-    if (ty > yBot || ty < yTop) { kiteSt.dir = -kiteSt.dir; ty = Math.max(yTop, Math.min(yBot, H.y + kiteSt.dir * (c.step ?? 250))); }
+    // Ít quái quanh nhân vật → đứng yên đánh (đông lên là bước ngay, không chờ hết nhịp dừng)
+    const crowd = c.crowd ?? 3;
+    const near = en.filter((e) => Math.hypot(e.x - H.x, e.y - H.y) <= (c.near ?? 250)).length;
+    if (crowd > 0 && near <= crowd) { kiteSt.phase = 'stand'; return; }
+    if (kiteSt.phase === 'pause' && now < kiteSt.until) return; // đang dừng cho ra chiêu
+    let ty = H.y + kiteSt.dir * step;
+    if (ty > yBot || ty < yTop) { kiteSt.dir = -kiteSt.dir; ty = Math.max(yTop, Math.min(yBot, H.y + kiteSt.dir * step)); }
     go(cx, ty, 'step');
   };
   setInterval(() => { try { kiteTick(); } catch (err) { post({ t: 'log', msg: 'kite: ' + err.message }); kiteCfg = null; } }, 300);
@@ -1737,7 +1751,7 @@
     } else if (m.t === 'guild') {
       guildFlow(m.arg || {}).then((res) => post({ t: 'guildResult', ...res }), (err) => post({ t: 'guildResult', r: 'error: ' + err.message }));
     } else if (m.t === 'kiteCfg') {
-      kiteCfg = m.arg || null; // {on, step, pause, span, margin, fleeHp}
+      kiteCfg = m.arg || null; // {on, step, pauseMs, crowd, near, span, margin, fleeHp}
     } else if (m.t === 'knbSend') {
       knbFlowSend(m.arg || {}).then((res) => post({ t: 'knbSendResult', ...res }), (err) => post({ t: 'knbSendResult', r: 'error: ' + err.message }));
     } else if (m.t === 'bossHk') {
@@ -2344,7 +2358,9 @@
     const s = {
       t: 'status',
       screen,
-      name: screen === 'charselect' ? charSelectName() : '',
+      // Tên nhân vật: trong game đọc thẳng S.name (màn chọn nhân vật đổi giao diện từ bản cập nhật 11/2026, đọc chữ
+      // "Nhân vật" ở đó không còn ra tên – acc mới thêm không có tên, 🐴 Ngựa / gửi KNB / duyệt bang không chạy)
+      name: screen === 'charselect' ? charSelectName() : screen === 'game' ? gameCharName() : '',
       loginMsg: screen === 'login' ? loginMessage() : '',
       lv: txt('#lvS'),
       zone: txt('#u20zn'), // ví dụ "Thông Thiên Tháp · tầng 632"

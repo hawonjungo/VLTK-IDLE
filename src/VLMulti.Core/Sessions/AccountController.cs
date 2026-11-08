@@ -2309,15 +2309,17 @@ public sealed class AccountController
     {
         if (SettingsProvider?.Invoke() is not { } s) return;
         var (dir, dist, interval, flee) = KiteParams(s);
+        var crowd = Account.KiteCrowd ?? s.KiteCrowd;
+        var pauseMs = Account.KitePauseMs ?? s.KitePauseMs;
         // Kiểu "Hàng dọc": trang tự chạy theo vị trí thật (agent.js kiteTick); app chỉ gửi cấu hình khi đổi / 30 giây một lần
         bool lineOn = dir == KiteDirections.Line && Account.Kite && Screen == "game" && ModeCode == "tower";
-        var cfg = lineOn ? $"{dist}|{interval}|{flee}" : "off";
+        var cfg = lineOn ? $"{dist}|{pauseMs}ms|{flee}|>{crowd}" : "off";
         if (cfg != _kiteCfgSent || (lineOn && now - _kiteCfgAt > TimeSpan.FromSeconds(30)))
         {
             if (cfg != _kiteCfgSent) Log.Write($"[{Account.Id}] kite line: {cfg}");
             _kiteCfgSent = cfg;
             _kiteCfgAt = now;
-            Post(new { t = "kiteCfg", arg = lineOn ? new { on = true, step = dist, pause = interval, fleeHp = flee, span = 700, margin = 260 } : null });
+            Post(new { t = "kiteCfg", arg = lineOn ? new { on = true, step = dist, pauseMs, crowd, near = 250, fleeHp = flee, span = 700, margin = 260 } : null });
             if (lineOn) SetStatus("🏃 Kéo quái: hàng dọc giữa phòng", StatusLevel.Ok);
         }
         if (dir == KiteDirections.Line) return;

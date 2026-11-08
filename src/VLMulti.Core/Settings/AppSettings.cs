@@ -43,6 +43,9 @@ public sealed class AppSettings
     public string KiteDirection { get; set; } = KiteDirections.Line;
     // Kiểu "Hàng dọc": máu dưới KiteFleeHp % thì chạy về đầu đường xa đám quái (0 = tắt)
     public int KiteFleeHp { get; set; } = 40;
+    // Kiểu "Hàng dọc": chạy khi có hơn KiteCrowd con quái ở gần (0 = luôn chạy theo nhịp); dừng KitePauseMs ms giữa 2 bước
+    public int KiteCrowd { get; set; } = 3;
+    public int KitePauseMs { get; set; } = 500;
 
     // Luật tự đổi chế độ (bật riêng từng acc bằng AccountSlot.AutoMode) – xem GameData.ModeRules
     public bool AutoModeDungeon { get; set; } = true;
@@ -134,8 +137,12 @@ public sealed class AppSettings
         KiteIntervalSeconds = Math.Clamp(KiteIntervalSeconds, 1, 120);
         if (!KiteDirections.All.Contains(KiteDirection)) KiteDirection = KiteDirections.Line;
         KiteFleeHp = Math.Clamp(KiteFleeHp, 0, 90);
+        KiteCrowd = Math.Clamp(KiteCrowd, 0, 20);
+        KitePauseMs = Math.Clamp(KitePauseMs, 100, 10000);
         foreach (var a in Accounts)
         {
+            if (a.KiteCrowd is { } kc) a.KiteCrowd = Math.Clamp(kc, 0, 20);
+            if (a.KitePauseMs is { } kp) a.KitePauseMs = Math.Clamp(kp, 100, 10000);
             if (a.KiteDirection is { } d && !KiteDirections.All.Contains(d)) a.KiteDirection = null;
             if (a.KiteDistance is { } kd) a.KiteDistance = Math.Clamp(kd, 80, 600);
             if (a.KiteInterval is { } ki) a.KiteInterval = Math.Clamp(ki, 1, 120);
@@ -191,6 +198,8 @@ public sealed class AccountSlot
     public int? KiteDistance { get; set; }
     public int? KiteInterval { get; set; }
     public int? KiteFleeHp { get; set; }
+    public int? KiteCrowd { get; set; }
+    public int? KitePauseMs { get; set; }
 
     // Tự đổi chế độ theo luật (mặc định tắt)
     public bool AutoMode { get; set; }

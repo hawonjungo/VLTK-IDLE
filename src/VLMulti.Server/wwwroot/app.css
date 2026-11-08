@@ -250,3 +250,6 @@ body.no-scroll { overflow: hidden; }
 .horse-plan div { padding: 6px 0; border-bottom: 1px solid var(--border); }
 .horse-actions { display: flex; gap: 8px; margin-top: 10px; }
 .horse-actions .btn { flex: 1; }
+
+/* Lỗi lần bấm gần nhất trong bảng 🐴 Ngựa */
+p.warn { color: var(--warn); font-weight: 600; }

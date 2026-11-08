@@ -400,7 +400,7 @@ function openAccMenu(id) {
   openModal(a.name, h('div', { class: 'sheet-list' }, [
     item('Ảnh nhanh', '', () => { closeModal(); openSnapshot(a.id, a.name); }),
     item('Nhật ký đầy đủ', '', () => { closeModal(); logAcc = a.id; showView('log'); }),
-    item('Kéo quái khi leo tháp', (a.kite ? 'đang BẬT' : 'đang tắt') + (a.kiteDir || a.kiteDist || a.kiteInterval || a.kiteFlee != null ? ' · cài riêng' : ' · theo cài đặt chung'), () => { closeModal(); openKiteSheet(a); }),
+    item('Kéo quái khi leo tháp', (a.kite ? 'đang BẬT' : 'đang tắt') + (a.kiteDir || a.kiteDist || a.kiteInterval || a.kiteFlee != null || a.kiteCrowd != null || a.kitePause ? ' · cài riêng' : ' · theo cài đặt chung'), () => { closeModal(); openKiteSheet(a); }),
     item('Vòng tự động (luật)', a.autoMode ? 'đang BẬT' : 'đang tắt', () => { closeModal(); act(`acc/${a.id}/automode`); }),
     item('Tải lại trang game', '', () => { closeModal(); act(`acc/${a.id}/reload`, {}, 'Đang tải lại…'); }),
     item('Tắt acc', 'đóng game, giải phóng RAM/CPU', () => {
@@ -412,7 +412,7 @@ function openAccMenu(id) {
 // ---------- 🐴 Mã Trường: quét → xem danh sách chuyển → bấm Chuyển ----------
 // Quét: mỗi acc trong game nhận thư ngựa còn chờ, mở Rương Ngựa (tuỳ chọn), cất loài mới vào Mã Trường, đọc bộ sưu tập.
 // Chuyển chỉ chạy khi bạn bấm, chỉ giữa các nhân vật của bạn, thư tặng 0 KNB.
-let horseOpen = false, horseTimer = 0, horseChests = prefs.get('horseChests', true);
+let horseOpen = false, horseTimer = 0, horseChests = prefs.get('horseChests', true), horseError = '';
 async function openHorses() {
   horseOpen = true;
   await renderHorses();
@@ -432,6 +432,8 @@ async function renderHorses() {
     cb.checked = horseChests;
     parts.push(h('label', { class: 'check-row' }, [cb, 'Mở hết Rương Ngựa trước']));
   }
+  // Lỗi lần bấm gần nhất: hiện ngay trong bảng (thông báo nhỏ dễ bị che, trông như "bấm mà không có gì")
+  if (horseError && !busy) parts.push(h('p', { class: 'warn', text: '⚠ ' + horseError }));
   if (busy) parts.push(h('p', { text: st.phase === 'scanning' ? '⏳ Đang quét các acc…' : '⏳ Đang chuyển ngựa…' }));
   if (st.lines?.length) parts.push(h('div', { class: 'horse-lines' }, st.lines.map((l) => h('div', { text: l }))));
   const nSell = (st.sales || []).reduce((n, x) => n + x.count, 0);
@@ -452,13 +454,15 @@ async function renderHorses() {
       if (!confirm(`${what}?
 
 Chuyển: thư tặng (0 KNB) giữa các nhân vật của bạn. Bán: ngựa thừa mà không acc nào còn thiếu loài đó.`)) return;
-      try { await api('horses/send', {}); } catch (e) { toast(e.message); }
+      horseError = '';
+      try { await api('horses/send', {}); } catch (e) { horseError = e.message; toast(e.message); }
       renderHorses();
     } }));
     actions.push(h('button', { class: 'btn', text: 'Bỏ', onclick: async () => { try { await api('horses/cancel', {}); } catch (_) {} renderHorses(); } }));
   } else if (!busy) {
     actions.push(h('button', { class: 'btn primary', text: st.phase === 'done' ? 'Quét lại' : 'Quét', onclick: async () => {
-      try { await api('horses/scan', { on: horseChests }); } catch (e) { toast(e.message); }
+      horseError = '';
+      try { await api('horses/scan', { on: horseChests }); } catch (e) { horseError = e.message; toast(e.message); }
       renderHorses();
     } }));
   }
@@ -481,21 +485,27 @@ function openKiteSheet(a) {
   const dirLabel = (dirs.find(([v]) => v === s.kiteDirection) || [, s.kiteDirection])[1];
   const on = h('input', { type: 'checkbox' }); on.checked = !!a.kite;
   const dir = sel(dirs, a.kiteDir, dirLabel);
-  const dist = sel([120, 180, 250, 350, 450, 600].map((n) => [n, `${n} px`]), a.kiteDist, `${s.kiteDistance} px`);
+  const dist = sel([100, 120, 150, 180, 250, 350, 450, 600].map((n) => [n, `${n} px`]), a.kiteDist, `${s.kiteDistance} px`);
+  const crowdOpts = [[0, 'Luôn chạy theo nhịp'], [2, 'Hơn 2 con'], [3, 'Hơn 3 con'], [4, 'Hơn 4 con'], [5, 'Hơn 5 con']];
+  const crowdLabel = (n) => (crowdOpts.find(([v]) => v === n) || [, `hơn ${n} con`])[1];
+  const crowd = sel(crowdOpts, a.kiteCrowd, crowdLabel(s.kiteCrowd));
+  const pause = sel([300, 500, 800, 1000, 1500, 2000, 3000].map((n) => [n, `${n / 1000} giây`]), a.kitePause, `${(s.kitePause || 500) / 1000} giây`);
   const interval = sel([1, 2, 3, 4, 6, 8, 10, 15].map((n) => [n, `${n} giây`]), a.kiteInterval, `${s.kiteInterval} giây`);
   const flee = sel([[0, 'Không chạy']].concat([25, 30, 40, 50, 60].map((n) => [n, `< ${n}% máu`])), a.kiteFlee, s.kiteFleeHp ? `< ${s.kiteFleeHp}% máu` : 'không');
   const num = (el) => (el.value === '' ? null : +el.value);
   openModal(`🏃 Kéo quái · ${a.name}`, [
-    h('p', { class: 'note', text: 'Chỉ chạy khi Leo Tháp và Auto đang bật. Kiểu "Hàng dọc": vừa đánh vừa chạy lên xuống đường giữa phòng, quái xếp thành hàng dọc sau lưng; sang tầng mới, bị đẩy lệch hay sát mép / góc phòng thì chạy về giữa; né lúc quái vừa ra; máu thấp thì chạy ra xa đám quái.' }),
+    h('p', { class: 'note', text: 'Chỉ chạy khi Leo Tháp và Auto đang bật. Kiểu "Hàng dọc": quái ở gần đông hơn mức chọn thì chạy bước ngắn lên xuống đường giữa phòng, mỗi bước dừng một chút để ra chiêu (vừa chạy vừa đánh), quái xếp thành hàng dọc sau lưng – chạy cả khi máu đầy; ít quái thì đứng đánh. Sang tầng mới, bị đẩy lệch hay sát mép / góc phòng thì chạy về giữa; né lúc quái vừa ra; máu thấp thì chạy ra xa.' }),
     h('label', { class: 'check-row' }, [on, 'Bật kéo quái cho acc này']),
     h('div', { class: 'form-grid' }, [
       h('label', { text: 'Kiểu kéo' }), dir,
-      h('label', { text: 'Mỗi lần chạy' }), dist,
-      h('label', { text: 'Dừng đánh giữa 2 lần chạy (kiểu cũ: chu kỳ)' }), interval,
+      h('label', { text: 'Chạy khi quái ở gần' }), crowd,
+      h('label', { text: 'Mỗi bước chạy' }), dist,
+      h('label', { text: 'Dừng ra chiêu giữa 2 bước' }), pause,
       h('label', { text: 'Máu thấp thì chạy xa' }), flee,
+      h('label', { text: 'Chu kỳ (kiểu cũ)' }), interval,
     ]),
     h('button', { class: 'btn primary', text: 'Lưu', onclick: async () => {
-      await act(`acc/${a.id}/kite-config`, { on: on.checked, direction: dir.value || null, distance: num(dist), interval: num(interval), fleeHp: num(flee) }, `Đã lưu kéo quái cho ${a.name}`);
+      await act(`acc/${a.id}/kite-config`, { on: on.checked, direction: dir.value || null, distance: num(dist), interval: num(interval), fleeHp: num(flee), crowd: num(crowd), pauseMs: num(pause) }, `Đã lưu kéo quái cho ${a.name}`);
       closeModal();
     } }),
   ]);
