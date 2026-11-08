@@ -892,7 +892,7 @@
     if (!menu) return { r: 'no-guild' };
     flowBusy = true;
     const res = { r: 'ok', bought: [], spent: 0, donated: 0, mails: 0, points: null,
-      daily: 0, redOpened: 0, burned: 0, burnPts: 0, kept: [], stashed: 0, approved: [], week: null };
+      daily: 0, redOpened: 0, burned: 0, burnPts: 0, kept: [], stashed: 0, week: null };
     try {
       await guildShop(arg, menu, res);
       if (res.r !== 'no-guild') await guildMail(res);
@@ -902,7 +902,6 @@
     }
     res.bought = res.bought.join(',');
     res.kept = res.kept.join(', ');
-    res.approved = res.approved.join(', ');
     return res;
   };
 
@@ -1023,18 +1022,7 @@
         for (const k of keepers) if (await stashItem(k.uid)) res.stashed++;
         closeBag();
       }
-      // 3. Duyệt đơn xin vào của nhân vật của bạn (chỉ khi acc này được duyệt: Bang Chủ / Phó / Trưởng Lão)
-      if ((arg.approve || []).length && (await openGuildTab('bang'))) {
-        for (let i = 0; i < 10; i++) {
-          const b = [...document.querySelectorAll('#mBody [data-bhok]')].find((x) => arg.approve.includes(x.dataset.bhok));
-          if (!b) break;
-          const name = b.dataset.bhok;
-          b.click();
-          if (await waitFor(() => ![...document.querySelectorAll('#mBody [data-bhok]')].some((x) => x.dataset.bhok === name), 4000)) res.approved.push(name);
-          else break;
-        }
-      }
-      // 4. Điều kiện tuần (game xét thứ Hai: ≥ 15 người vào game trong tuần, đủ điểm tuần, quỹ ≥ 20.000 vạn × cấp)
+      // 3. Điều kiện tuần (đơn xin vào bang: bạn tự duyệt, tool không bấm) (game xét thứ Hai: ≥ 15 người vào game trong tuần, đủ điểm tuần, quỹ ≥ 20.000 vạn × cấp)
       const d = (gameGet('BH') || {}).d;
       if (d && d.bang) {
         const vn = new Date(Date.now() + 7 * 3600000);

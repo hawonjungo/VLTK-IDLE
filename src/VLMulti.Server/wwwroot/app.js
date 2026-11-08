@@ -667,7 +667,7 @@ function renderSettings() {
   const gDonate = pick([0, 1500, 3000, 5000], s.guildDonateCap ?? 1500, vanLabel);
   const gDaily = pick([[0, 'Tắt'], [5000, '5.000 vạn'], [10000, '10.000 vạn'], [20000, '20.000 vạn (tối đa)']], s.guildDailyAmount ?? 0, vanLabel);
   const gReserve = pick([0, 1000, 3000, 5000, 10000], s.guildDonateReserve ?? 3000, vanLabel);
-  const gFurnace = box(!!s.guildFurnace), gApprove = box(s.guildApproveOwn !== false), gWeek = box(s.guildWeekAlert !== false);
+  const gFurnace = box(!!s.guildFurnace), gWeek = box(s.guildWeekAlert !== false);
   const knbOn = box(!!s.knbSendOn), knbBig = box(s.knbOpenBig !== false);
   const knbMain = h('select', {}, [h('option', { value: '', text: '— Chọn —' })].concat((s.charNames || []).map((n) => {
     const o = h('option', { value: n, text: n }); o.selected = n === s.knbMainName; return o;
@@ -774,12 +774,11 @@ function renderSettings() {
       h('p', { class: 'note', text: '💰 Cống hiến mỗi ngày: góp tới mức đã chọn (tính cả phần đã góp hôm nay); thiếu vạn thì mở Hồng Bao, hết Hồng Bao thì chừa lại số vạn bên dưới. Không bao giờ góp KNB.' }),
       h('div', { class: 'form-grid' }, [h('label', { text: 'Cống hiến mỗi ngày' }), gDaily, h('label', { text: 'Hết Hồng Bao thì chừa lại' }), gReserve]),
       h('label', { class: 'check-row' }, [gFurnace, '🔥 Lò Đốt Đồ mỗi ngày: góp Hoàng Kim bộ chung (trừ món khoá); giữ Động Sát May mắn max và Hồng Ảnh Kinh nghiệm max, cất vào Rương']),
-      h('label', { class: 'check-row' }, [gApprove, '🏯 Tự duyệt đơn xin vào bang của nhân vật trong danh sách acc']),
       h('label', { class: 'check-row' }, [gWeek, '⚠ Cảnh báo điều kiện tuần (điểm tuần, 15 người vào game, quỹ duy trì) vào thứ Bảy, Chủ Nhật']),
       h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', {
         guildShop: guild.checked, guildLdt: gLdt.checked, guildPhucDuyen: gFdl.checked, guildTtsp: gTtsp.checked, guildThbt: gThbt.checked,
         guildDonateCap: +gDonate.value, guildDailyAmount: +gDaily.value, guildDonateReserve: +gReserve.value,
-        guildFurnace: gFurnace.checked, guildApproveOwn: gApprove.checked, guildWeekAlert: gWeek.checked,
+        guildFurnace: gFurnace.checked, guildWeekAlert: gWeek.checked,
       }, 'Đã lưu cài đặt bang hội') }),
     ]),
     section('Mật khẩu acc game', [

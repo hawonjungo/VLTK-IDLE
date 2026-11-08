@@ -1741,7 +1741,7 @@ public sealed class AccountController
             if (cfg.GuildTtsp) items.Add("ttsp");
             if (cfg.GuildThbt) items.Add("thbt");
         }
-        if (items.Count == 0 && cfg.GuildDailyAmount <= 0 && !cfg.GuildFurnace && !cfg.GuildApproveOwn && !cfg.GuildWeekAlert) return;
+        if (items.Count == 0 && cfg.GuildDailyAmount <= 0 && !cfg.GuildFurnace && !cfg.GuildWeekAlert) return;
         var vn = now.ToUniversalTime().AddHours(7);
         if (_guildDoneDay == DateOnly.FromDateTime(vn) || vn.TimeOfDay < TimeSpan.FromMinutes(10)) return;
         if (_guildPending && now - _guildLastTry < TimeSpan.FromMinutes(3)) return;
@@ -1750,10 +1750,6 @@ public sealed class AccountController
             || now - _screenSince < TimeSpan.FromSeconds(150) || now - _guildLastTry < TeacherRetryGap) return;
         _guildLastTry = now;
         _guildPending = true;
-        // Nhân vật của bạn (cùng danh sách acc) được tự duyệt vào bang
-        var approve = cfg.GuildApproveOwn
-            ? cfg.Accounts.Select(a => a.CharName ?? "").Where(n => n.Length > 0 && n != Account.CharName).Distinct().ToArray()
-            : Array.Empty<string>();
         Post(new
         {
             t = "guild",
@@ -1761,7 +1757,7 @@ public sealed class AccountController
             {
                 items, donateCap = cfg.GuildShop ? cfg.GuildDonateCap : 0,
                 dailyAmount = cfg.GuildDailyAmount, reserve = cfg.GuildDonateReserve,
-                furnace = cfg.GuildFurnace, keep = GuildFurnaceKeep, approve,
+                furnace = cfg.GuildFurnace, keep = GuildFurnaceKeep,
             },
         });
     }
@@ -1817,15 +1813,13 @@ public sealed class AccountController
     private void OnGuildExtras(JsonElement m, DateTime now)
     {
         int Int(string name) => m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
-        Log.Write($"[{Account.Id}] guild extras: daily={Int("daily")} red={Int("redOpened")} burned={Int("burned")} kept={Str(m, "kept")} stashed={Int("stashed")} approved={Str(m, "approved")}");
+        Log.Write($"[{Account.Id}] guild extras: daily={Int("daily")} red={Int("redOpened")} burned={Int("burned")} kept={Str(m, "kept")} stashed={Int("stashed")}");
         if (Int("daily") > 0)
             Note(now, $"🏯 Cống hiến {Int("daily"):N0} vạn vào bang" + (Int("redOpened") > 0 ? $" (mở {Int("redOpened")} Hồng Bao)" : ""), StatusLevel.Ok);
         if (Int("burned") > 0)
             Note(now, $"🔥 Lò Đốt Đồ: góp {Int("burned")} món Hoàng Kim (+{Int("burnPts"):N0} cống hiến)", StatusLevel.Ok);
         if (Str(m, "kept").Length > 0)
             Note(now, $"🔥 Giữ lại (max %): {Str(m, "kept")}" + (Int("stashed") > 0 ? $" · cất {Int("stashed")} món vào Rương" : " · chưa cất được vào Rương"), Int("stashed") > 0 ? StatusLevel.Ok : StatusLevel.Warn);
-        if (Str(m, "approved").Length > 0)
-            Note(now, $"🏯 Duyệt vào bang: {Str(m, "approved")}", StatusLevel.Ok);
 
         if (!m.TryGetProperty("week", out var w) || w.ValueKind != JsonValueKind.Object) return;
         int W(string n) => w.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number ? (int)Math.Min(int.MaxValue, v.GetDouble()) : 0;

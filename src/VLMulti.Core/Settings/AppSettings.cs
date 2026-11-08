@@ -87,8 +87,6 @@ public sealed class AppSettings
     // 🔥 Lò Đốt Đồ: mỗi ngày góp Hoàng Kim bộ chung trong Hành trang (trừ món khoá); giữ lại và cất vào Rương:
     // bộ Động Sát có May mắn đạt mức cao nhất, bộ Hồng Ảnh có Kinh nghiệm nhận được đạt mức cao nhất
     public bool GuildFurnace { get; set; }
-    // Tự duyệt đơn xin vào bang của nhân vật trong danh sách acc (acc đang là Bang Chủ / Phó / Trưởng Lão)
-    public bool GuildApproveOwn { get; set; } = true;
     // Cảnh báo điều kiện tuần của bang (thứ Bảy, Chủ Nhật): điểm tuần, ≥ 15 người vào game, quỹ đủ phí duy trì
     public bool GuildWeekAlert { get; set; } = true;
     // 💰 Gửi KNB (thư tặng) về acc chính KnbMainName, mỗi acc chừa KnbKeep KNB; chỉ chạy khi KnbSendOn và đã chọn acc chính.

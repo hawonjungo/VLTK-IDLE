@@ -707,7 +707,7 @@ public partial class MainWindow : Window
         _setKnb = null!, _setBuffTtl = null!, _setBuffTtlSp = null!, _setBuffQht = null!,
         _setGuild = null!, _setGuildLdt = null!, _setGuildFdl = null!, _setGuildTtsp = null!, _setGuildThbt = null!;
     private TextBox _setGuildDonate = null!;
-    private CheckBox _setSellJunk = null!, _setGuildFurnace = null!, _setGuildApprove = null!, _setGuildWeek = null!, _setKnbOn = null!, _setKnbBig = null!;
+    private CheckBox _setSellJunk = null!, _setGuildFurnace = null!, _setGuildWeek = null!, _setKnbOn = null!, _setKnbBig = null!;
     private ComboBox _setGuildDaily = null!, _setGuildReserve = null!, _setKnbMain = null!, _setKnbKeep = null!;
     private TextBox _setSellFree = null!;
     private TextBox _setTeacherCap = null!;
@@ -815,7 +815,6 @@ public partial class MainWindow : Window
         body.Add(FormRow("Cống hiến mỗi ngày", _setGuildDaily = Pick((0, "Tắt"), (5000, "5.000 vạn"), (10000, "10.000 vạn"), (20000, "20.000 vạn (tối đa)"))));
         body.Add(FormRow("Hết Hồng Bao thì chừa lại", _setGuildReserve = Pick((0, "Không"), (1000, "1.000 vạn"), (3000, "3.000 vạn"), (5000, "5.000 vạn"), (10000, "10.000 vạn"))));
         body.Add(_setGuildFurnace = Box("🔥 Lò Đốt Đồ mỗi ngày: góp Hoàng Kim bộ chung (trừ món khoá); giữ Động Sát May mắn max và Hồng Ảnh Kinh nghiệm max, cất vào Rương"));
-        body.Add(_setGuildApprove = Box("🏯 Tự duyệt đơn xin vào bang của nhân vật trong danh sách acc"));
         body.Add(_setGuildWeek = Box("⚠ Cảnh báo điều kiện tuần (điểm tuần, 15 người vào game, quỹ duy trì) vào thứ Bảy, Chủ Nhật"));
 
         body.Add(Section("Kéo quái khi Leo Tháp"));
@@ -865,7 +864,6 @@ public partial class MainWindow : Window
         SelectValue(_setGuildDaily, _settings.GuildDailyAmount);
         SelectValue(_setGuildReserve, _settings.GuildDonateReserve);
         _setGuildFurnace.IsChecked = _settings.GuildFurnace;
-        _setGuildApprove.IsChecked = _settings.GuildApproveOwn;
         _setGuildWeek.IsChecked = _settings.GuildWeekAlert;
         _setKnbOn.IsChecked = _settings.KnbSendOn;
         _setKnbBig.IsChecked = _settings.KnbOpenBig;
@@ -913,7 +911,6 @@ public partial class MainWindow : Window
         if (_setGuildDaily.SelectedItem is ComboBoxItem { Tag: int daily }) _settings.GuildDailyAmount = daily;
         if (_setGuildReserve.SelectedItem is ComboBoxItem { Tag: int reserve }) _settings.GuildDonateReserve = reserve;
         _settings.GuildFurnace = _setGuildFurnace.IsChecked == true;
-        _settings.GuildApproveOwn = _setGuildApprove.IsChecked == true;
         _settings.GuildWeekAlert = _setGuildWeek.IsChecked == true;
         if (_setKnbMain.SelectedItem is ComboBoxItem { Tag: string main }) _settings.KnbMainName = main;
         if (_setKnbKeep.SelectedItem is ComboBoxItem { Tag: int knbKeep }) _settings.KnbKeep = knbKeep;

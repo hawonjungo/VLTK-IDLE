@@ -282,7 +282,6 @@ public sealed class SessionManager : IAsyncDisposable
                     guildDailyAmount = _settings.GuildDailyAmount,
                     guildDonateReserve = _settings.GuildDonateReserve,
                     guildFurnace = _settings.GuildFurnace,
-                    guildApproveOwn = _settings.GuildApproveOwn,
                     guildWeekAlert = _settings.GuildWeekAlert,
                     knbSendOn = _settings.KnbSendOn,
                     knbOpenBig = _settings.KnbOpenBig,
@@ -694,7 +693,6 @@ public sealed class SessionManager : IAsyncDisposable
             if (u.GuildDailyAmount is { } gda) _settings.GuildDailyAmount = gda;
             if (u.GuildDonateReserve is { } gdr) _settings.GuildDonateReserve = gdr;
             if (u.GuildFurnace is { } gf) _settings.GuildFurnace = gf;
-            if (u.GuildApproveOwn is { } ga) _settings.GuildApproveOwn = ga;
             if (u.GuildWeekAlert is { } gw) _settings.GuildWeekAlert = gw;
             if (u.KnbMainName is { } km) _settings.KnbMainName = km;
             if (u.KnbSendOn is { } ks) _settings.KnbSendOn = ks;
@@ -805,6 +803,6 @@ public sealed record SettingsUpdate(
     bool? EventTeacherExchange = null, bool? DailyKnb = null, bool? BuffTtl = null, bool? BuffTtlSpecial = null, bool? BuffQht = null,
     bool? GuildShop = null, bool? GuildLdt = null, bool? GuildPhucDuyen = null, bool? GuildTtsp = null, bool? GuildThbt = null, int? GuildDonateCap = null,
     bool? AutoSellJunk = null, int? AutoSellFreeSlots = null,
-    int? GuildDailyAmount = null, int? GuildDonateReserve = null, bool? GuildFurnace = null, bool? GuildApproveOwn = null,
+    int? GuildDailyAmount = null, int? GuildDonateReserve = null, bool? GuildFurnace = null,
     bool? GuildWeekAlert = null, string? KnbMainName = null, int? KnbKeep = null, bool? KnbSendOn = null, bool? KnbOpenBig = null,
     int? KiteFleeHp = null, int? KiteCrowd = null, int? KitePauseMs = null);

@@ -968,7 +968,8 @@ public class AccountControllerTests
         Assert.Contains("điểm tuần còn thiếu", alert.Msg);
         Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("🔥 Lò Đốt Đồ: góp 5 món"));
         Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("🔥 Giữ lại (max %): Hồng ảnh Kiếm Bài"));
-        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("🏯 Duyệt vào bang: B"));
+        // Đơn xin vào bang: bạn tự duyệt, tool không bấm
+        Assert.DoesNotContain(ctl.Activity.Items, e => e.Text.StartsWith("🏯 Duyệt vào bang"));
         // Bang mới còn được miễn xét tuần này → không báo
         var (ctl2, _, _) = Make();
         var p2 = new List<string>();
