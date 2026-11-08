@@ -1023,7 +1023,7 @@
         const gold = (S && S.inv || []).filter((i) => i && i.set && i.set.kind === 'gold');
         const keepers = gold.filter((i) => goldKeep(i, rules));
         res.kept = keepers.map((i) => i.n);
-        const burn = gold.filter((i) => !i.lock && !keepers.includes(i) && grp.includes(+i.set.grp));
+        const burn = gold.filter((i) => !i.lock && !hasInnate(i) && !keepers.includes(i) && grp.includes(+i.set.grp));
         if (burn.length && typeof gop === 'function') {
           const before = gold.length;
           const p = gop(burn.slice(0, 200));
@@ -1414,6 +1414,40 @@
     await closeModalSure();
     return ok;
   };
+  // 🔒 Đồ có "Kỹ năng võ công vốn có" (thuộc tính allskill_v, mã 139) cực hiếm → khoá ngay (không bị Bán thừa, không
+  // đốt Lò, không hợp Huyền Tinh). Chỉ đồ trong Hành trang của chính nhân vật.
+  const hasInnate = (it) => { const JX = window.JX; return !!(JX && it && (it.mag || []).some((x) => JX.attr[x.a] === 'allskill_v')); };
+  const innateUnlocked = () => { try { const S = window.H5.G('S'); return (S && S.inv || []).filter((i) => i && !i.lock && hasInnate(i)); } catch (_) { return []; } };
+  // Đồ đang mặc có kỹ năng vốn có chưa khoá: [{slot, it}] (cởi ra sau này vẫn an toàn)
+  const innateEquippedUnlocked = () => {
+    try { const S = window.H5.G('S'); return Object.entries(S && S.eq || {}).filter(([, i]) => i && !i.lock && hasInnate(i)).map(([slot, it]) => ({ slot, it })); } catch (_) { return []; }
+  };
+  const lockInnateFlow = async () => {
+    if (flowBusy || anyWindowOpen()) return { r: 'busy' };
+    if (inBossHk()) return { r: 'boss-hk' };
+    const todo = innateUnlocked(), worn = innateEquippedUnlocked();
+    if (!todo.length && !worn.length) return { r: 'ok', locked: '', failed: '' };
+    flowBusy = true;
+    const locked = [], failed = [];
+    try {
+      const desc = (it) => { const v = (it.mag || []).filter((x) => window.JX.attr[x.a] === 'allskill_v').map((x) => (x.p || [])[0]).join('+'); return `${it.n}${v ? ` (vốn có +${v})` : ''}`; };
+      // Đồ đang mặc: gọi đúng việc nút "🔒 Khóa" trên thẻ món làm (H5.lockItem → máy chủ khoá), rồi đóng thẻ
+      for (const { slot, it } of worn.slice(0, 10)) {
+        try { window.H5.lockItem(it, slot); } catch (_) {}
+        const ok = await waitFor(() => { const S = window.H5.G('S'); const cur = S && S.eq && S.eq[slot]; return cur && cur.lock; }, 4000);
+        (ok ? locked : failed).push(desc(it) + ' · đang mặc');
+        await closeModalSure();
+      }
+      if (todo.length && !(await openBag())) return { r: 'no-bag', locked: locked.join(', '), failed: failed.join(', ') };
+      for (const it of todo.slice(0, 10)) {
+        const lines = (it.mag || []).filter((x) => window.JX.attr[x.a] === 'allskill_v').map((x) => (x.p || [])[0]).join('+');
+        ((await setLocked(it.uid, true)) ? locked : failed).push(`${it.n}${lines ? ` (vốn có +${lines})` : ''}`);
+        await openBag();
+      }
+      if (todo.length) closeBag();
+    } finally { flowBusy = false; }
+    return { r: 'ok', locked: locked.join(', '), failed: failed.join(', ') };
+  };
   // Gửi một con ngựa (đang ở Hành trang, không khoá) cho `to` qua thư tặng
   const mailHorse = async (to, uid, name) => {
     await closeModalSure();
@@ -1769,6 +1803,8 @@
       knbFlowSend(m.arg || {}).then((res) => post({ t: 'knbSendResult', ...res }), (err) => post({ t: 'knbSendResult', r: 'error: ' + err.message }));
     } else if (m.t === 'bossHk') {
       bossHkFlow(m.arg || {}).then((res) => post({ t: 'bossHkResult', ...res }), (err) => post({ t: 'bossHkResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'lockInnate') {
+      lockInnateFlow().then((res) => post({ t: 'lockInnateResult', ...res }), (err) => post({ t: 'lockInnateResult', r: 'error: ' + err.message }));
     } else if (m.t === 'sellJunk') {
       sellJunkFlow().then((res) => post({ t: 'sellJunkResult', ...res }), (err) => post({ t: 'sellJunkResult', r: 'error: ' + err.message }));
     } else if (m.t === 'horse') {
@@ -1978,6 +2014,14 @@
   // 📜 Nhật ký game: mọi dòng đi qua hàm log của game (R.logs.unshift, giữ 150 dòng) → bắt ngay lúc ghi, không phụ
   // thuộc thẻ chat đang mở, không trôi. Mỗi dòng kèm nơi đang đứng ("Tầng N" trong tháp, hoặc tên bản đồ).
   const gameLogQ = [];
+  // Dòng về người chơi khác: thông báo chung của server ("📢 Chúc mừng X nhận được …"), kênh thế giới / bang / tổ đội…
+  // → không ghi. Riêng thông báo có tên chính nhân vật này thì giữ.
+  const OTHERS_RE = /Chúc mừng|📢|Hệ thống\s*:|Thế giới|tổ đội|Tổ đội|gia nhập bang|rời bang|\[Bang\]|\[Đội\]/;
+  const aboutOthers = (text) => {
+    if (!OTHERS_RE.test(text)) return false;
+    let me = ''; try { me = String(window.H5.G('S').name || ''); } catch (_) {}
+    return !(me && text.includes(me));
+  };
   let lastCleared = null;
   const logPlace = () => {
     try {
@@ -2005,6 +2049,7 @@
             const text = logText(it);
             if (!text) continue;
             // Qua tầng N: game tăng số tầng ngay, đồ của tầng N được nhặt sau đó vài giây → vẫn ghi là tầng N
+            if (aboutOthers(text)) continue; // chỉ ghi chuyện của chính nhân vật này
             const cleared = text.match(/qua tầng (\d+)/);
             if (cleared) lastCleared = { floor: +cleared[1], at: now };
             const place = /^Nhặt được/.test(text) && lastCleared && now - lastCleared.at < 4000 ? `Tầng ${lastCleared.floor}` : logPlace();
@@ -2476,6 +2521,7 @@
       hunt: screen === 'game' ? ((h) => (h ? `${h.n}|${Math.round(h.hpf * 100)}|${huntBossHere() ? 1 : 0}` : ''))(huntNow()) : '',
       // Boss Hoàng Kim đợt này của riêng acc (game S.gb, mỗi nhân vật một con boss): "<đợt>|<1 = đã hạ>|<% máu boss>"
       gbw: screen === 'game' ? goldBossNow() : '',
+      innate: screen === 'game' ? innateUnlocked().length + innateEquippedUnlocked().length : 0, // đồ có kỹ năng vốn có chưa khoá
       gold: txt('#gold'),
       knb: txt('#knbTop'),
       // Chế độ: theo nút đang sáng, nhưng nút lệch với trạng thái game quá 5 giây thì theo game (xem reportedMode)

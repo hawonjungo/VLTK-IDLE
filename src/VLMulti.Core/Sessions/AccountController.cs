@@ -510,6 +510,9 @@ public sealed class AccountController
                 case "knbSendResult":
                     OnKnbSendResult(m, now);
                     break;
+                case "lockInnateResult":
+                    OnLockInnateResult(m, now);
+                    break;
                 case "sellJunkResult":
                     OnSellJunkResult(m, now);
                     break;
@@ -650,6 +653,7 @@ public sealed class AccountController
             ApplyHunt(Str(s, "hunt"), now);
             ApplyGoldBoss(Str(s, "gbw"), now);
             InTower = s.TryGetProperty("inTower", out var it) && it.ValueKind == JsonValueKind.Number ? it.GetInt32() : -1;
+            InnateUnlocked = s.TryGetProperty("innate", out var inn) && inn.ValueKind == JsonValueKind.Number ? inn.GetInt32() : 0;
 
             var modeCode = Str(s, "mode");
             if (modeCode == "tower" && ModeCode != "tower")
@@ -955,7 +959,7 @@ public sealed class AccountController
         foreach (var l in arr.EnumerateArray())
         {
             var text = Str(l, "text");
-            if (GameLog.IsNoise(text)) continue;
+            if (GameLog.IsNoise(text) || GameLog.AboutOthers(text, Account.CharName)) continue;
             var at = l.TryGetProperty("at", out var a) && a.TryGetInt64(out var ms)
                 ? DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime.ToLocalTime() : now;
             var place = Str(l, "place");
@@ -964,7 +968,7 @@ public sealed class AccountController
             if (kind != "rare") continue;
             var where = place.Length > 0 ? $" ({place})" : "";
             if (text.Contains("Vô Danh", StringComparison.OrdinalIgnoreCase))
-                Raise("rare-item", $"💎 Đồ hiếm Vô Danh: {text}{where} – kiểm tra kỹ năng vốn có, đừng bán / đốt");
+                Raise("rare-item", $"💎 Đồ hiếm Vô Danh: {text}{where} – có kỹ năng vốn có thì app tự khoá, kiểm tra lại");
             else
                 Note(now, $"💎 {text}{where}", StatusLevel.Ok);
         }
@@ -1122,6 +1126,7 @@ public sealed class AccountController
         SuperviseKnbBuy(now);
         SuperviseBuffs(now);
         SuperviseGuild(now);
+        SuperviseLockInnate(now);
         SuperviseSellJunk(now);
         SuperviseKnbTransfer(now);
         SuperviseStuck(now);
@@ -1759,11 +1764,44 @@ public sealed class AccountController
     private bool _junkPending;
     private DateOnly _junkNoneNoted;
 
+    // 🔒 Đồ có kỹ năng vốn có trong Hành trang chưa khoá → khoá ngay (trang tự tìm món, bấm Khóa trên thẻ món)
+    public int InnateUnlocked { get; private set; }
+    private bool _innatePending;
+    private DateTime _innateLastTry;
+
+    private void SuperviseLockInnate(DateTime now)
+    {
+        if (InnateUnlocked <= 0 || Screen != "game" || Away) return;
+        if (_innatePending && now - _innateLastTry < TimeSpan.FromMinutes(1)) return;
+        _innatePending = false;
+        if (now - _innateLastTry < TimeSpan.FromSeconds(30) || _ldtBuyingSince is not null) return;
+        _innateLastTry = now;
+        _innatePending = true;
+        Post(new { t = "lockInnate" });
+    }
+
+    private void OnLockInnateResult(JsonElement m, DateTime now)
+    {
+        _innatePending = false;
+        var r = Str(m, "r");
+        var locked = Str(m, "locked");
+        var failed = Str(m, "failed");
+        Log.Write($"[{Account.Id}] lock innate: {r} locked={locked} failed={failed}");
+        if (r is "busy" or "boss-hk") { _innateLastTry = now - TimeSpan.FromSeconds(20); return; }
+        if (locked.Length > 0)
+        {
+            Note(now, $"🔒 Đã khoá đồ có kỹ năng vốn có: {locked}", StatusLevel.Ok);
+            GameLogSink?.Invoke(Account.Id, new[] { new GameLog.Entry(now, "rare", "", Account.CharName ?? "", $"🔒 Tự khoá đồ có kỹ năng vốn có: {locked}") });
+        }
+        if (failed.Length > 0) Raise("innate-lock", $"Không khoá được đồ có kỹ năng vốn có: {failed} – hãy khoá tay");
+    }
+
     private void SuperviseSellJunk(DateTime now)
     {
         var cfg = SettingsProvider?.Invoke();
         if (cfg is null || !cfg.AutoSellJunk || Screen != "game" || Away) return;
         if (BagUsed is not { } used || BagMax is not { } max || max - used > cfg.AutoSellFreeSlots) return;
+        if (InnateUnlocked > 0) return; // khoá đồ có kỹ năng vốn có trước, rồi mới Bán thừa
         if (_junkPending && now - _junkLastTry < TimeSpan.FromMinutes(2)) return;
         _junkPending = false;
         if (now - _junkLastTry < TimeSpan.FromMinutes(5) || _ldtBuyingSince is not null || EventRunning(now)) return;

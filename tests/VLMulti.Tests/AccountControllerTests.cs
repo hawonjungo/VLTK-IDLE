@@ -867,14 +867,38 @@ public class AccountControllerTests
                 new { at, text = "📢 Chúc mừng X nhận được Đồ phổ Y từ Boss Hoàng Kim!", place = "Tầng 901" },
             },
         }), t);
-        Assert.Equal(4, written.Count); // dòng kinh nghiệm bị bỏ
+        Assert.Equal(3, written.Count); // bỏ dòng kinh nghiệm và thông báo về người chơi khác
         Assert.Equal(("tower", "Tầng 900"), (written[0].Kind, written[0].Place));
         Assert.Equal("rare", written[1].Kind);
-        Assert.Equal("server-rare", written[3].Kind);
+        Assert.DoesNotContain(written, e => e.Text.Contains("Chúc mừng X"));
         Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("💎 Nhặt được Tỏa Tử Hoàng Kim giáp (Tầng 901)"));
         var alert = Assert.Single(problems, p => p.Key == "rare-item");
         Assert.Contains("Nhẫn Vô Danh", alert.Msg);
         Assert.Contains("Phong Lăng độ", alert.Msg);
+    }
+
+    [Fact]
+    public void Items_with_innate_skills_are_locked_before_selling_junk()
+    {
+        var (ctl, page, cfg) = Make();
+        cfg.AutoSellJunk = true;
+        cfg.AutoSellFreeSlots = 20;
+        var written = new List<GameLog.Entry>();
+        ctl.GameLogSink = (_, list) => written.AddRange(list);
+        string Bag(int innate) => JsonSerializer.Serialize(new
+        {
+            t = "status", screen = "game", lv = "139", gold = "1 vạn", knb = "1 🔒1", mode = "farm", modeText = "farm",
+            zone = "Hoa Sơn", dt = "200/200", pb = "0/4", ldtHave = "0", ldtUsed = "160/160", ldtBuy = "100/100", st = "0/60",
+            bag = "175/180", innate,
+        });
+        var t = Run(ctl, T0, 200, Bag(1));
+        Assert.True(Count(page, "lockInnate") >= 1);
+        Assert.Equal(0, Count(page, "sellJunk")); // chưa khoá xong thì chưa Bán thừa
+        ctl.OnPageMessage("""{"t":"lockInnateResult","r":"ok","locked":"Nhẫn Vô Danh (vốn có +1)","failed":""}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("🔒 Đã khoá đồ có kỹ năng vốn có: Nhẫn Vô Danh"));
+        Assert.Contains(written, e => e.Kind == "rare" && e.Text.Contains("Nhẫn Vô Danh"));
+        Run(ctl, t, 400, Bag(0));
+        Assert.True(Count(page, "sellJunk") >= 1);
     }
 
     private static string Hunt(string mode, string hunt) => JsonSerializer.Serialize(new

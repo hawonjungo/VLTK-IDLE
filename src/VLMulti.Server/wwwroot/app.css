@@ -261,5 +261,5 @@ p.warn { color: var(--warn); font-weight: 600; }
 .gl-place { opacity: .8; min-width: 6em; }
 .gl-char { font-weight: 600; }
 .gl-text { flex: 1 1 100%; overflow-wrap: anywhere; }
-.gl-rare .gl-text, .gl-server-rare .gl-text { color: var(--warn); font-weight: 600; }
+.gl-rare .gl-text { color: var(--warn); font-weight: 600; }
 .gl-death .gl-text { color: var(--error); }

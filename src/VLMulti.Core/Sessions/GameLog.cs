@@ -21,12 +21,17 @@ public static class GameLog
 
     public static bool IsNoise(string text) => text.Length == 0 || Noise.IsMatch(text);
 
+    // Chỉ ghi chuyện của chính nhân vật: bỏ thông báo chung của server ("📢 Chúc mừng X …"), kênh thế giới / bang / tổ
+    // đội – trừ khi có tên chính nhân vật này
+    private static readonly Regex Others = new(@"Chúc mừng|📢|Hệ thống\s*:|Thế giới|[Tt]ổ đội|gia nhập bang|rời bang|\[Bang\]|\[Đội\]", RegexOptions.Compiled);
+    public static bool AboutOthers(string text, string? ownName) =>
+        Others.IsMatch(text) && !(ownName is { Length: > 0 } && text.Contains(ownName));
+
     // Loại dòng (để lọc trên trang web)
     public static string Classify(string text)
     {
-        bool server = text.Contains("Chúc mừng") || text.StartsWith("📢");
         bool boss = text.Contains("Boss Hoàng Kim") || text.Contains("Boss tuần");
-        if (server) return Rare.IsMatch(text) ? "server-rare" : "server";
+        if (Rare.IsMatch(text) && (text.Contains("Chúc mừng") || text.StartsWith("📢"))) return "rare"; // thông báo về chính mình
         if (Rare.IsMatch(text) && !boss && Regex.IsMatch(text, @"Nhặt được|[Nn]hận|🎁|📕")) return "rare";
         if (boss) return Rare.IsMatch(text) && text.Contains("🎁") ? "rare" : "boss";
         if (text.Contains("Sát Thủ") || text.Contains("truy sát")) return "assassin";
@@ -87,7 +92,7 @@ public static class GameLog
             all.AddRange(Read(name[..^($"-{day:yyyy-MM-dd}.log".Length)], day, kinds, max));
         }
         return all
-            .GroupBy(e => e.Kind.StartsWith("server") ? e.Text : $"{e.Char}|{e.At:O}|{e.Text}")
+            .GroupBy(e => $"{e.Char}|{e.At:O}|{e.Text}")
             .Select(g => g.OrderBy(e => e.At).First())
             .OrderByDescending(e => e.At).Take(max).ToList();
     }

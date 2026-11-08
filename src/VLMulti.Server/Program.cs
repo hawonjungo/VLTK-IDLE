@@ -161,7 +161,7 @@ app.MapGet("/api/acc/{id}/gamelog", (string id, string? day, string? kinds) =>
         ? Results.Json(GameLog.Read(id, LogDay(day), LogKinds(kinds)).Select(LogJson))
         : Results.NotFound());
 app.MapGet("/api/gamelog/rare", (string? day) =>
-    Results.Json(GameLog.ReadAll(LogDay(day), new[] { "rare", "server-rare" }).Select(LogJson)));
+    Results.Json(GameLog.ReadAll(LogDay(day), new[] { "rare" }).Select(LogJson)));
 app.MapPost("/api/acc/{id}/click", (string id, ClickRequest req) => manager.Click(id, req.X, req.Y) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/reload", (string id) => manager.Reload(id) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/kite", (string id) => manager.ToggleKite(id) ? Results.Ok() : Results.NotFound());

@@ -473,15 +473,15 @@ Chuyển: thư tặng (0 KNB) giữa các nhân vật của bạn. Bán: ngựa 
 $('#horseBtn').addEventListener('click', openHorses);
 
 // ---------- 📜 Nhật ký game ----------
-// Mỗi dòng game ghi (kèm tầng / bản đồ), lọc theo nhân vật, loại, ngày; "💎 Đồ hiếm" gộp mọi nhân vật + thông báo server
-const GAMELOG_KINDS = [['', 'Mọi loại'], ['rare', '💎 Đồ hiếm (của mình)'], ['server-rare', '📢 Đồ hiếm toàn server'], ['boss', '👑 Boss'],
-  ['assassin', '🗡 Sát Thủ'], ['tower', '🗼 Tháp'], ['death', '💀 Gục ngã'], ['loot', '🎁 Nhặt / nhận đồ'], ['server', '📢 Thông báo server'], ['other', 'Khác']];
+// Mỗi dòng game ghi về chính nhân vật (kèm tầng / bản đồ), lọc theo nhân vật, loại, ngày; "💎 Đồ hiếm" gộp các nhân vật của bạn
+const GAMELOG_KINDS = [['', 'Mọi loại'], ['rare', '💎 Đồ hiếm'], ['boss', '👑 Boss'],
+  ['assassin', '🗡 Sát Thủ'], ['tower', '🗼 Tháp'], ['death', '💀 Gục ngã'], ['loot', '🎁 Nhặt / nhận đồ'], ['other', 'Khác']];
 const vnToday = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
 let logSel = { who: 'rare', kind: '', day: '' };
 async function openGameLog() {
   const accs = (state?.accounts || []).filter((a) => a.enabled);
   const opt = (v, t, cur) => { const o = h('option', { value: v, text: t }); o.selected = v === cur; return o; };
-  const who = h('select', {}, [opt('rare', '💎 Đồ hiếm – mọi nhân vật', logSel.who)].concat(accs.map((a) => opt(a.id, a.name || a.id, logSel.who))));
+  const who = h('select', {}, [opt('rare', '💎 Đồ hiếm – các nhân vật của bạn', logSel.who)].concat(accs.map((a) => opt(a.id, a.name || a.id, logSel.who))));
   const kind = h('select', {}, GAMELOG_KINDS.map(([v, t]) => opt(v, t, logSel.kind)));
   const day = h('input', { type: 'date', value: logSel.day || vnToday() });
   const list = h('div', { class: 'gamelog' }, [h('p', { class: 'dim', text: 'Đang tải…' })]);
