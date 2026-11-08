@@ -1978,6 +1978,7 @@
   // 📜 Nhật ký game: mọi dòng đi qua hàm log của game (R.logs.unshift, giữ 150 dòng) → bắt ngay lúc ghi, không phụ
   // thuộc thẻ chat đang mở, không trôi. Mỗi dòng kèm nơi đang đứng ("Tầng N" trong tháp, hoặc tên bản đồ).
   const gameLogQ = [];
+  let lastCleared = null;
   const logPlace = () => {
     try {
       const R = window.H5.G('R');
@@ -1999,8 +2000,16 @@
       Object.defineProperty(L, '__vlHook', { value: true });
       L.unshift = function (...items) {
         try {
-          const place = logPlace();
-          for (const it of items) { const text = logText(it); if (text) gameLogQ.push({ at: Date.now(), text, place }); }
+          const now = Date.now();
+          for (const it of items) {
+            const text = logText(it);
+            if (!text) continue;
+            // Qua tầng N: game tăng số tầng ngay, đồ của tầng N được nhặt sau đó vài giây → vẫn ghi là tầng N
+            const cleared = text.match(/qua tầng (\d+)/);
+            if (cleared) lastCleared = { floor: +cleared[1], at: now };
+            const place = /^Nhặt được/.test(text) && lastCleared && now - lastCleared.at < 4000 ? `Tầng ${lastCleared.floor}` : logPlace();
+            gameLogQ.push({ at: now, text, place });
+          }
           if (gameLogQ.length > 500) gameLogQ.splice(0, gameLogQ.length - 500);
         } catch (_) {}
         return orig.apply(this, items);
