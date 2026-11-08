@@ -263,3 +263,16 @@ p.warn { color: var(--warn); font-weight: 600; }
 .gl-text { flex: 1 1 100%; overflow-wrap: anywhere; }
 .gl-rare .gl-text { color: var(--warn); font-weight: 600; }
 .gl-death .gl-text { color: var(--error); }
+
+/* Thanh trên danh sách acc: dòng "cập nhật" + các nút; màn hẹp thì xuống dòng, không tràn / mất chữ */
+.listbar { flex-wrap: wrap; gap: 6px 8px; }
+.listbar > #updated { min-width: 0; }
+.listbar-actions { flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+.pill-btn { white-space: nowrap; flex: 0 0 auto; }
+@media (max-width: 420px) {
+  .pill-btn { height: 32px; padding: 0 10px; font-size: 13px; }
+  .listbar-actions { gap: 6px; }
+}
+/* Bảng Log: ô chọn và ngày luôn vừa khung */
+.gamelog-filter select, .gamelog-filter input { width: 100%; box-sizing: border-box; }
+.gl-place, .gl-char { white-space: nowrap; }

@@ -479,13 +479,15 @@ const GAMELOG_KINDS = [['', 'Mọi loại'], ['rare', '💎 Đồ hiếm'], ['bo
 const vnToday = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
 let logSel = { who: 'rare', kind: '', day: '' };
 async function openGameLog() {
-  const accs = (state?.accounts || []).filter((a) => a.enabled);
+  const accs = (state?.accounts || []);
   const opt = (v, t, cur) => { const o = h('option', { value: v, text: t }); o.selected = v === cur; return o; };
   const who = h('select', {}, [opt('rare', '💎 Đồ hiếm – các nhân vật của bạn', logSel.who)].concat(accs.map((a) => opt(a.id, a.name || a.id, logSel.who))));
   const kind = h('select', {}, GAMELOG_KINDS.map(([v, t]) => opt(v, t, logSel.kind)));
   const day = h('input', { type: 'date', value: logSel.day || vnToday() });
   const list = h('div', { class: 'gamelog' }, [h('p', { class: 'dim', text: 'Đang tải…' })]);
   const load = async () => {
+    if (!who.value) who.value = 'rare'; // nhân vật không còn trong danh sách → về Đồ hiếm
+    if (!day.value) day.value = vnToday();
     logSel = { who: who.value, kind: kind.value, day: day.value };
     kind.disabled = who.value === 'rare';
     list.replaceChildren(h('p', { class: 'dim', text: 'Đang tải…' }));
@@ -502,8 +504,8 @@ async function openGameLog() {
     } catch (e) { list.replaceChildren(h('p', { class: 'warn', text: '⚠ ' + e.message })); }
   };
   for (const el of [who, kind, day]) el.addEventListener('change', load);
-  openModal('📜 Nhật ký game', [
-    h('div', { class: 'form-grid' }, [h('label', { text: 'Nhân vật' }), who, h('label', { text: 'Loại' }), kind, h('label', { text: 'Ngày' }), day]),
+  openModal('📜 Log game', [
+    h('div', { class: 'form-grid gamelog-filter' }, [h('label', { text: 'Nhân vật' }), who, h('label', { text: 'Loại' }), kind, h('label', { text: 'Ngày' }), day]),
     list,
   ], true);
   load();

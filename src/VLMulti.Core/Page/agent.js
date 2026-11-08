@@ -537,8 +537,12 @@
     if (!H || !R || !W || !R.tower || R.dg || R.sat || R.deadT > 0 || (S && S.mode !== 'tower')) { kiteSt.floor = null; return; }
     const now = Date.now();
     const m = c.margin ?? 260;
-    const step = Math.min(c.step ?? 150, 200);
-    const pauseMs = c.pauseMs ?? 500;
+    // ⚔ Nhân vật cận chiến (kỹ năng chính tầm gần: R.P.main.melee, ví dụ Thiên Nhẫn Vân Long Kích tầm 90): không kéo
+    // hàng, không đi xa – chỉ nhích ngang một chút quanh quái gần nhất cho lệch đòn, vẫn đứng trong tầm đánh để hút
+    // sinh lực. Đánh xa: bước dọc đường giữa phòng như trên.
+    const melee = c.melee != null ? !!c.melee : !!(R.P && R.P.main && R.P.main.melee);
+    const step = melee ? (c.meleeStep ?? 45) : Math.min(c.step ?? 150, 200);
+    const pauseMs = melee ? (c.meleePauseMs ?? 900) : (c.pauseMs ?? 500);
     const cx = W.w / 2, cy = W.h / 2;
     const half = Math.max(150, Math.min(c.span ?? 700, W.h / 2 - m));
     const yTop = cy - half, yBot = cy + half;
@@ -577,6 +581,29 @@
       return;
     }
     if (kiteSt.phase === 'pause' && now < kiteSt.until) return; // đang dừng ra chiêu / hút sinh lực
+    if (melee) {
+      if (!en.length) return;
+      // Sát mép / góc phòng → nhích dần về phía giữa
+      if (H.x < m || H.x > W.w - m || H.y < m || H.y > W.h - m) { go(cx, cy, 'reset'); return; }
+      const nearM = en.filter((e) => Math.hypot(e.x - H.x, e.y - H.y) <= (c.meleeNear ?? 250));
+      const low = c.fleeHp && lifePct != null && lifePct < c.fleeHp;
+      const crowdM = c.crowd ?? 2;
+      // Quái vừa ra, đông quanh người hoặc máu thấp → nhích; còn lại đứng yên đánh
+      if (kiteSt.dodged && !low && crowdM > 0 && nearM.length <= crowdM) { kiteSt.phase = 'stand'; return; }
+      kiteSt.dodged = true;
+      const list = nearM.length ? nearM : en;
+      const t = list.reduce((a, e) => (Math.hypot(e.x - H.x, e.y - H.y) < Math.hypot(a.x - H.x, a.y - H.y) ? e : a));
+      const vx = t.x - H.x, vy = t.y - H.y, d = Math.hypot(vx, vy) || 1;
+      kiteSt.side = -(kiteSt.side || 1);
+      if (low) { // máu thấp: nhích lùi khỏi đám quái (vẫn gần, vẫn đánh được)
+        const ex = list.reduce((a, e) => a + e.x, 0) / list.length, ey = list.reduce((a, e) => a + e.y, 0) / list.length;
+        const bx = H.x - ex, by = H.y - ey, bd = Math.hypot(bx, by) || 1;
+        go(H.x + bx / bd * step, H.y + by / bd * step, 'nudge-back');
+      } else {
+        go(H.x - vy / d * step * kiteSt.side, H.y + vx / d * step * kiteSt.side, 'nudge'); // ngang, so với quái gần nhất
+      }
+      return;
+    }
     // Quái sắp ra (đếm ngược < 0,5 giây) hoặc vừa ra: một bước né ngay, rồi vào nhịp
     if (!kiteSt.dodged && ((!en.length && R.spawnT > 0 && R.spawnT < 0.5) || en.length)) { kiteSt.dodged = true; stepAlong('dodge', en); return; }
     if (!en.length) return;
