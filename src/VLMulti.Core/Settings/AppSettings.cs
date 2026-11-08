@@ -89,6 +89,11 @@ public sealed class AppSettings
     public bool GuildFurnace { get; set; }
     // Cảnh báo điều kiện tuần của bang (thứ Bảy, Chủ Nhật): điểm tuần, ≥ 15 người vào game, quỹ đủ phí duy trì
     public bool GuildWeekAlert { get; set; } = true;
+    // 💎 Tự góp KNB vào quỹ bang mỗi ngày (bạn bật / tắt; mặc định tắt). Mỗi acc trong bang góp tới GuildKnbAmount KNB
+    // mỗi ngày (tính cả phần đã góp tay hôm nay), vẫn chừa KnbKeep KNB. GuildKnbAmount cũng là mức "đủ" mỗi ngày của
+    // thành viên trong sổ KNB của bang.
+    public bool GuildKnbOn { get; set; }
+    public int GuildKnbAmount { get; set; } = 100;
     // 💰 Gửi KNB (thư tặng) về acc chính KnbMainName, mỗi acc chừa KnbKeep KNB; chỉ chạy khi KnbSendOn và đã chọn acc chính.
     // KnbOpenBig: mở hết Đại Hồng Bao trước khi gửi
     public bool KnbSendOn { get; set; }
@@ -158,6 +163,7 @@ public sealed class AppSettings
         GuildDailyAmount = Math.Clamp(GuildDailyAmount, 0, 20000);
         GuildDonateDaily = GuildDailyAmount > 0;
         KnbKeep = Math.Clamp(KnbKeep, 0, 1_000_000);
+        GuildKnbAmount = Math.Clamp(GuildKnbAmount, 10, 2000);
         KnbMainName = (KnbMainName ?? "").Trim();
         AutoSellFreeSlots = Math.Clamp(AutoSellFreeSlots, 1, 200);
     }

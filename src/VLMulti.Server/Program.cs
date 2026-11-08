@@ -160,6 +160,8 @@ app.MapGet("/api/acc/{id}/gamelog", (string id, string? day, string? kinds) =>
     id.All(c => char.IsLetterOrDigit(c) || c is '-' or '_')
         ? Results.Json(GameLog.Read(id, LogDay(day), LogKinds(kinds)).Select(LogJson))
         : Results.NotFound());
+// 🏯 Sổ KNB của bang theo tuần (thứ Hai → Chủ Nhật, giờ VN): ?week=2026-11-09 (ngày bất kỳ trong tuần)
+app.MapGet("/api/guild/knb", (string? week) => Results.Json(manager.GuildKnbWeek(LogDay(week))));
 app.MapGet("/api/gamelog/rare", (string? day) =>
     Results.Json(GameLog.ReadAll(LogDay(day), new[] { "rare" }).Select(LogJson)));
 app.MapPost("/api/acc/{id}/click", (string id, ClickRequest req) => manager.Click(id, req.X, req.Y) ? Results.Ok() : Results.NotFound());

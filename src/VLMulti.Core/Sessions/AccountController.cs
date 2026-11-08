@@ -510,6 +510,9 @@ public sealed class AccountController
                 case "knbSendResult":
                     OnKnbSendResult(m, now);
                     break;
+                case "guildLogResult":
+                    OnGuildLogResult(m, now);
+                    break;
                 case "lockInnateResult":
                     OnLockInnateResult(m, now);
                     break;
@@ -1127,6 +1130,7 @@ public sealed class AccountController
         SuperviseBuffs(now);
         SuperviseGuild(now);
         SuperviseLockInnate(now);
+        SuperviseGuildLedger(now);
         SuperviseSellJunk(now);
         SuperviseKnbTransfer(now);
         SuperviseStuck(now);
@@ -1764,6 +1768,31 @@ public sealed class AccountController
     private bool _junkPending;
     private DateOnly _junkNoneNoted;
 
+    // 🏯 Sổ KNB của bang: đọc Nhật ký bang (game chỉ giữ 30 dòng) + danh sách thành viên ~3 phút một lần (gọi thẳng
+    // dữ liệu bang, không mở bảng); acc không ở trong bang thì 60 phút mới thử lại. App (server) gom vào GuildLedger.
+    public event Action<JsonElement>? GuildLogResult;
+    private DateTime _guildLogAt, _guildLogOffUntil;
+    private bool _guildLogPending;
+
+    private void SuperviseGuildLedger(DateTime now)
+    {
+        if (GuildLogResult is null || Screen != "game" || Away || now < _guildLogOffUntil) return;
+        if (_guildLogPending && now - _guildLogAt < TimeSpan.FromMinutes(1)) return;
+        if (now - _guildLogAt < TimeSpan.FromMinutes(3) || now - _screenSince < TimeSpan.FromSeconds(60)) return;
+        _guildLogAt = now;
+        _guildLogPending = true;
+        Post(new { t = "guildLog" });
+    }
+
+    private void OnGuildLogResult(JsonElement m, DateTime now)
+    {
+        _guildLogPending = false;
+        var r = Str(m, "r");
+        if (r == "no-guild") { _guildLogOffUntil = now + TimeSpan.FromMinutes(60); return; }
+        if (r != "ok") { Log.Write($"[{Account.Id}] guild log: {r}"); return; }
+        GuildLogResult?.Invoke(m.Clone());
+    }
+
     // 🔒 Đồ có kỹ năng vốn có trong Hành trang chưa khoá → khoá ngay (trang tự tìm món, bấm Khóa trên thẻ món)
     public int InnateUnlocked { get; private set; }
     private bool _innatePending;
@@ -1858,7 +1887,7 @@ public sealed class AccountController
             if (cfg.GuildTtsp) items.Add("ttsp");
             if (cfg.GuildThbt) items.Add("thbt");
         }
-        if (items.Count == 0 && cfg.GuildDailyAmount <= 0 && !cfg.GuildFurnace && !cfg.GuildWeekAlert) return;
+        if (items.Count == 0 && cfg.GuildDailyAmount <= 0 && !cfg.GuildFurnace && !cfg.GuildWeekAlert && !cfg.GuildKnbOn) return;
         var vn = now.ToUniversalTime().AddHours(7);
         if (_guildDoneDay == DateOnly.FromDateTime(vn) || vn.TimeOfDay < TimeSpan.FromMinutes(10)) return;
         if (_guildPending && now - _guildLastTry < TimeSpan.FromMinutes(3)) return;
@@ -1875,6 +1904,7 @@ public sealed class AccountController
                 items, donateCap = cfg.GuildShop ? cfg.GuildDonateCap : 0,
                 dailyAmount = cfg.GuildDailyAmount, reserve = cfg.GuildDonateReserve,
                 furnace = cfg.GuildFurnace, keep = GuildFurnaceKeep,
+                knbAmount = cfg.GuildKnbOn ? cfg.GuildKnbAmount : 0, knbKeep = cfg.KnbKeep,
             },
         });
     }
@@ -1930,9 +1960,11 @@ public sealed class AccountController
     private void OnGuildExtras(JsonElement m, DateTime now)
     {
         int Int(string name) => m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
-        Log.Write($"[{Account.Id}] guild extras: daily={Int("daily")} red={Int("redOpened")} burned={Int("burned")} kept={Str(m, "kept")} stashed={Int("stashed")}");
+        Log.Write($"[{Account.Id}] guild extras: daily={Int("daily")} knb={Int("knbGiven")} red={Int("redOpened")} burned={Int("burned")} kept={Str(m, "kept")} stashed={Int("stashed")}");
         if (Int("daily") > 0)
             Note(now, $"🏯 Cống hiến {Int("daily"):N0} vạn vào bang" + (Int("redOpened") > 0 ? $" (mở {Int("redOpened")} Hồng Bao)" : ""), StatusLevel.Ok);
+        if (Int("knbGiven") > 0)
+            Note(now, $"💎 Góp {Int("knbGiven"):N0} KNB vào quỹ bang", StatusLevel.Ok);
         if (Int("burned") > 0)
             Note(now, $"🔥 Lò Đốt Đồ: góp {Int("burned")} món Hoàng Kim (+{Int("burnPts"):N0} cống hiến)", StatusLevel.Ok);
         if (Str(m, "kept").Length > 0)

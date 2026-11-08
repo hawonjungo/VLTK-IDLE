@@ -138,6 +138,7 @@ function showView(v) {
   if (v === 'log') loadLog();
   if (v === 'settings' && state) renderSettings();
   if (v === 'table' && state) renderTable();
+  if (v === 'table') renderGuildKnb();
   window.scrollTo(0, 0);
 }
 for (const b of document.querySelectorAll('.bottom-nav [data-view]')) b.addEventListener('click', () => showView(b.dataset.view));
@@ -511,6 +512,82 @@ async function openGameLog() {
   load();
 }
 $('#gameLogBtn').addEventListener('click', openGameLog);
+
+// ---------- 🏯 Sổ KNB của bang (dưới "Bảng chi tiết") ----------
+// Các acc trong bang đọc Nhật ký bang ~3 phút một lần; bảng tuần thứ Hai → Chủ Nhật: KNB từng ngày, tổng / mức tuần,
+// trạng thái theo tiến độ (mức mỗi ngày × số ngày đã qua), xuất CSV, lọc người chưa đủ.
+let gkWeek = '', gkOnlyShort = false, gkTimer = 0;
+const gkN = (n) => Number(n || 0).toLocaleString('vi-VN');
+const CHUC = { chu: 'Bang chủ', pho: 'Phó', lao: 'Trưởng lão', chung: '' };
+const addDays = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const gkAgo = (ms) => { if (!ms) return ''; const m = Math.round((Date.now() - ms) / 60000); return m < 60 ? `${Math.max(0, m)} phút` : m < 1440 ? `${Math.round(m / 60)} giờ` : `${Math.round(m / 1440)} ngày`; };
+async function renderGuildKnb() {
+  clearTimeout(gkTimer);
+  const box = $('#guildKnb');
+  if (!box || $('#view-table').classList.contains('hidden')) return;
+  let w;
+  try { w = await api(`guild/knb?week=${gkWeek || vnToday()}`); } catch (e) { box.replaceChildren(h('p', { class: 'warn', text: '⚠ ' + e.message })); return; }
+  gkWeek = w.week;
+  const dd = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
+  const dows = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+  const head = h('div', { class: 'gk-head' }, [
+    h('h2', { class: 'view-title', text: '🏯 Bang · KNB tuần' + (w.guild ? ` – ${w.guild}` : '') }),
+    h('div', { class: 'gk-nav' }, [
+      h('button', { class: 'pill-btn', text: '‹', title: 'Tuần trước', onclick: () => { gkWeek = addDays(gkWeek, -7); renderGuildKnb(); } }),
+      h('span', { class: 'gk-range', text: `${dd(w.days[0])} – ${dd(w.days[6])}` }),
+      h('button', { class: 'pill-btn', text: '›', title: 'Tuần sau', onclick: () => { gkWeek = addDays(gkWeek, 7); renderGuildKnb(); } }),
+    ]),
+  ]);
+  if (!w.guild) {
+    box.replaceChildren(head, h('p', { class: 'dim', text: 'Chưa có dữ liệu: các acc trong bang đọc nhật ký bang 3 phút một lần sau khi vào game.' }));
+    return;
+  }
+  const parts = [head];
+  if (w.fund && w.fund.needKnb) {
+    const pct = Math.min(100, Math.round(100 * w.fund.knb / w.fund.needKnb));
+    parts.push(h('div', { class: 'gk-fund' }, [
+      h('div', { text: `Quỹ KNB ${gkN(w.fund.knb)} / ${gkN(w.fund.needKnb)} để lên cấp ${(w.fund.cap || 0) + 1}` }),
+      h('div', { class: 'gk-bar' }, [h('i', { style: `width:${pct}%` })]),
+    ]));
+  }
+  const full = w.target * 7;
+  const rows = w.members.filter((m) => !gkOnlyShort || m.status === 'short' || m.status === 'none');
+  const order = { none: 0, short: 1, ok: 2, full: 3 };
+  rows.sort((a, b) => order[a.status] - order[b.status] || b.total - a.total || a.name.localeCompare(b.name));
+  const mark = { full: '✅', ok: '🟢', short: '⚠', none: '❌' };
+  const cnt = (st) => w.members.filter((m) => m.status === st).length;
+  parts.push(h('div', { class: 'gk-tools' }, [
+    h('span', { class: 'dim', text: `Mức ${gkN(w.target)}/ngày · ${gkN(full)}/tuần · ✅ ${cnt('full')} 🟢 ${cnt('ok')} ⚠ ${cnt('short')} ❌ ${cnt('none')}` }),
+    h('label', { class: 'check-row' }, [(() => { const c = h('input', { type: 'checkbox' }); c.checked = gkOnlyShort; c.onchange = () => { gkOnlyShort = c.checked; renderGuildKnb(); }; return c; })(), 'Chỉ người chưa đủ']),
+    h('button', { class: 'pill-btn', text: '⬇ CSV', onclick: () => {
+      const csv = [['Thành viên', 'Chức', 'Cấp', ...w.days.map(dd), 'Tổng KNB', 'Còn thiếu', 'Vạn tuần'].join(',')]
+        .concat(w.members.map((m) => [`"${m.name.replace(/"/g, '""')}"`, CHUC[m.chuc] ?? m.chuc, m.lvl, ...m.days, m.total, m.owed, m.van].join(','))).join('\n');
+      const a = h('a', { href: URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv' })), download: `knb-bang-${w.week}.csv` });
+      a.click();
+    } }),
+  ]));
+  const th = (t, cls) => h('th', { class: cls || '', text: t });
+  const table = h('table', { class: 'gk-table' }, [
+    h('thead', {}, [h('tr', {}, [th('Thành viên', 'gk-name'), ...w.days.map((d, i) => th(`${dows[i]} ${dd(d)}`)), th('Tổng'), th('')])]),
+    h('tbody', {}, rows.map((m) => h('tr', { class: 'gk-' + m.status }, [
+      h('td', { class: 'gk-name' }, [
+        h('b', { text: m.name }),
+        h('small', { class: 'dim', text: [CHUC[m.chuc] ?? m.chuc, m.lvl ? `cấp ${m.lvl}` : '', m.left ? 'đã rời bang' : '', m.on ? `on ${gkAgo(m.on)} trước` : ''].filter(Boolean).join(' · ') }),
+      ]),
+      ...m.days.map((n, i) => h('td', { class: (i < w.elapsed && n < w.target ? 'gk-miss ' : '') + 'gk-num', text: n ? gkN(n) : (i < w.elapsed ? '–' : '') })),
+      h('td', { class: 'gk-num', text: `${gkN(m.total)}` }),
+      h('td', { class: 'gk-st', title: m.owed ? `Còn thiếu ${gkN(m.owed)} KNB theo tiến độ` : '', text: mark[m.status] + (m.owed ? ` −${gkN(m.owed)}` : '') }),
+    ]))),
+  ]);
+  parts.push(h('div', { class: 'table-wrap gk-wrap' }, [table]));
+  if (w.gaps && w.gaps.length) {
+    const t = (ms) => new Date(ms + 7 * 3600e3).toISOString().slice(11, 16) + ' ' + dd(new Date(ms + 7 * 3600e3).toISOString().slice(0, 10));
+    parts.push(h('p', { class: 'note', text: '⚠ Có thể thiếu dòng (nhật ký bang trôi quá 30 dòng giữa 2 lần đọc): ' + w.gaps.map((g) => `${t(g.from)} → ${t(g.to)}`).join(', ') }));
+  }
+  parts.push(h('p', { class: 'dim small', text: `Đọc nhật ký bang lần cuối ${gkAgo(w.polledAt) || '—'} trước · ✅ đủ cả tuần · 🟢 đúng tiến độ · ⚠ còn thiếu · ❌ chưa góp` }));
+  box.replaceChildren(...parts);
+  gkTimer = setTimeout(renderGuildKnb, 60000);
+}
 $('#modalClose').addEventListener('click', () => { horseOpen = false; });
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') horseOpen = false; });
 
@@ -708,6 +785,8 @@ function renderSettings() {
   const gDaily = pick([[0, 'Tắt'], [5000, '5.000 vạn'], [10000, '10.000 vạn'], [20000, '20.000 vạn (tối đa)']], s.guildDailyAmount ?? 0, vanLabel);
   const gReserve = pick([0, 1000, 3000, 5000, 10000], s.guildDonateReserve ?? 3000, vanLabel);
   const gFurnace = box(!!s.guildFurnace), gWeek = box(s.guildWeekAlert !== false);
+  const gKnbOn = box(!!s.guildKnbOn);
+  const gKnbAmount = pick([50, 100, 200, 300, 500], s.guildKnbAmount ?? 100, (n) => `${n0(n)} KNB`);
   const knbOn = box(!!s.knbSendOn), knbBig = box(s.knbOpenBig !== false);
   const knbMain = h('select', {}, [h('option', { value: '', text: '— Chọn —' })].concat((s.charNames || []).map((n) => {
     const o = h('option', { value: n, text: n }); o.selected = n === s.knbMainName; return o;
@@ -811,14 +890,18 @@ function renderSettings() {
       h('label', { class: 'check-row' }, [gTtsp, 'Tiên Thảo Lộ Đặc Biệt (300 điểm · 5/tuần)']),
       h('label', { class: 'check-row' }, [gThbt, 'Tinh Hồng Bảo Thạch (60 điểm · 6/tuần)']),
       h('div', { class: 'form-grid' }, [h('label', { text: 'Thiếu điểm mua cửa hàng thì góp tối đa' }), gDonate]),
-      h('p', { class: 'note', text: '💰 Cống hiến mỗi ngày: góp tới mức đã chọn (tính cả phần đã góp hôm nay); thiếu vạn thì mở Hồng Bao, hết Hồng Bao thì chừa lại số vạn bên dưới. Không bao giờ góp KNB.' }),
+      h('p', { class: 'note', text: '💰 Cống hiến mỗi ngày: góp tới mức đã chọn (tính cả phần đã góp hôm nay); thiếu vạn thì mở Hồng Bao, hết Hồng Bao thì chừa lại số vạn bên dưới.' }),
       h('div', { class: 'form-grid' }, [h('label', { text: 'Cống hiến mỗi ngày' }), gDaily, h('label', { text: 'Hết Hồng Bao thì chừa lại' }), gReserve]),
+      h('label', { class: 'check-row' }, [gKnbOn, '💎 Tự góp KNB vào quỹ bang mỗi ngày (tắt = không bao giờ góp KNB)']),
+      h('div', { class: 'form-grid' }, [h('label', { text: 'KNB mỗi ngày (cũng là mức "đủ" của thành viên trong sổ KNB)' }), gKnbAmount]),
+      h('p', { class: 'note', text: 'Tính cả phần đã góp tay hôm nay; luôn chừa lại số KNB ở mục "Gửi KNB về acc chính › Mỗi acc giữ lại".' }),
       h('label', { class: 'check-row' }, [gFurnace, '🔥 Lò Đốt Đồ mỗi ngày: góp Hoàng Kim bộ chung (trừ món khoá); giữ Động Sát May mắn max và Hồng Ảnh Kinh nghiệm max, cất vào Rương']),
       h('label', { class: 'check-row' }, [gWeek, '⚠ Cảnh báo điều kiện tuần (điểm tuần, 15 người vào game, quỹ duy trì) vào thứ Bảy, Chủ Nhật']),
       h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', {
         guildShop: guild.checked, guildLdt: gLdt.checked, guildPhucDuyen: gFdl.checked, guildTtsp: gTtsp.checked, guildThbt: gThbt.checked,
         guildDonateCap: +gDonate.value, guildDailyAmount: +gDaily.value, guildDonateReserve: +gReserve.value,
         guildFurnace: gFurnace.checked, guildWeekAlert: gWeek.checked,
+        guildKnbOn: gKnbOn.checked, guildKnbAmount: +gKnbAmount.value,
       }, 'Đã lưu cài đặt bang hội') }),
     ]),
     section('Mật khẩu acc game', [

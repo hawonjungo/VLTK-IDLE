@@ -944,7 +944,7 @@
     if (!menu) return { r: 'no-guild' };
     flowBusy = true;
     const res = { r: 'ok', bought: [], spent: 0, donated: 0, mails: 0, points: null,
-      daily: 0, redOpened: 0, burned: 0, burnPts: 0, kept: [], stashed: 0, week: null };
+      daily: 0, knbGiven: 0, redOpened: 0, burned: 0, burnPts: 0, kept: [], stashed: 0, week: null };
     try {
       await guildShop(arg, menu, res);
       if (res.r !== 'no-guild') await guildMail(res);
@@ -1037,6 +1037,31 @@
             if (await pressAndAgree(btn, /góp|cống hiến/i)) {
               const after = await waitFor(() => { const p = guildPts(); return p != null && p > (before ?? 0) ? p : null; }, 4000);
               res.daily = after != null && before != null ? after - before : amount;
+            }
+          }
+        }
+      }
+      // 1b. 💎 Góp KNB (bạn bật trong Cài đặt): tới arg.knbAmount KNB trong ngày (tính cả phần đã góp tay), không quá mức
+      //     tối đa của game, luôn chừa arg.knbKeep KNB. Ô #bhGopK + nút #bhGopKb, game hỏi "Góp N KNB vào quỹ bang …?"
+      if (arg.knbAmount > 0) {
+        const load = gameGet('bhLoad');
+        try { if (typeof load === 'function') await load(); } catch (_) {}
+        const me = ((gameGet('BH') || {}).d || {}).toi;
+        if (me) {
+          const done = +me.gop_knb || 0;
+          const room = Math.max(0, (+me.max_knb || 0) - done);
+          const have = knbExact() ?? 0;
+          const amount = Math.max(0, Math.min(arg.knbAmount - done, room, have - (arg.knbKeep ?? 1000)));
+          if (amount > 0 && (await openGuildTab('gop'))) {
+            const input = await waitFor(() => $('#bhGopK'), 2000), btn = $('#bhGopKb');
+            if (input && btn && !btn.disabled) {
+              setValue(input, String(amount));
+              if (await pressAndAgree(btn, /KNB/i)) {
+                await sleep(800);
+                try { if (typeof load === 'function') await load(); } catch (_) {}
+                const after = (((gameGet('BH') || {}).d || {}).toi || {}).gop_knb;
+                res.knbGiven = after != null ? Math.max(0, after - done) : amount;
+              }
             }
           }
         }
@@ -1441,6 +1466,23 @@
     await closeModalSure();
     return ok;
   };
+  // 🏯 Sổ KNB của bang: tải dữ liệu bang bằng hàm của game (bhLoad → máy chủ "bh_get", không mở bảng nào) rồi gửi
+  // nhật ký bang (30 dòng gần nhất), danh sách thành viên và quỹ về app
+  const guildLogFlow = async () => {
+    const load = gameGet('bhLoad');
+    if (typeof load !== 'function') return { r: 'no-fn' };
+    let d;
+    try { d = await load(); } catch (e) { return { r: 'error: ' + (e && e.message || e) }; }
+    if (!d || !d.co || !d.bang) return { r: 'no-guild' };
+    const b = d.bang;
+    return {
+      r: 'ok',
+      guild: { id: +b.id || 0, name: String(b.ten || ''), cap: +b.cap || 0 },
+      fund: { knb: +b.quy_knb || 0, van: +b.quy_luong || 0, needKnb: +((b.nang_gia || {}).knb) || 0, needVan: +((b.nang_gia || {}).luong) || 0 },
+      members: (d.tv || []).map((x) => ({ name: String(x.ten || ''), chuc: String(x.chuc || ''), lvl: +x.lvl || 0, week: +x.ch_tuan || 0, total: +x.ch_tong || 0, on: +x.on || 0 })),
+      log: (d.log || []).map((x) => ({ at: +x.at || 0, msg: String(x.msg || '') })),
+    };
+  };
   // 🔒 Đồ có "Kỹ năng võ công vốn có" (thuộc tính allskill_v, mã 139) cực hiếm → khoá ngay (không bị Bán thừa, không
   // đốt Lò, không hợp Huyền Tinh). Chỉ đồ trong Hành trang của chính nhân vật.
   const hasInnate = (it) => { const JX = window.JX; return !!(JX && it && (it.mag || []).some((x) => JX.attr[x.a] === 'allskill_v')); };
@@ -1830,6 +1872,8 @@
       knbFlowSend(m.arg || {}).then((res) => post({ t: 'knbSendResult', ...res }), (err) => post({ t: 'knbSendResult', r: 'error: ' + err.message }));
     } else if (m.t === 'bossHk') {
       bossHkFlow(m.arg || {}).then((res) => post({ t: 'bossHkResult', ...res }), (err) => post({ t: 'bossHkResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'guildLog') {
+      guildLogFlow().then((res) => post({ t: 'guildLogResult', ...res }), (err) => post({ t: 'guildLogResult', r: 'error: ' + err.message }));
     } else if (m.t === 'lockInnate') {
       lockInnateFlow().then((res) => post({ t: 'lockInnateResult', ...res }), (err) => post({ t: 'lockInnateResult', r: 'error: ' + err.message }));
     } else if (m.t === 'sellJunk') {

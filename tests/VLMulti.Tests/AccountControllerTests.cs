@@ -618,6 +618,46 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Guild_knb_is_donated_only_when_switched_on_and_the_guild_log_is_polled()
+    {
+        // Tắt (mặc định): không bao giờ gửi lệnh góp KNB
+        var (ctl, page, cfg) = Make();
+        cfg.EventTeacher = false;
+        cfg.DailyKnbBuy = false;
+        cfg.GuildWeekAlert = true;
+        var st = Status("game", mode: "tower", zone: "Thông Thiên Tháp · tầng 900");
+        Run(ctl, T0, 170, st);
+        Assert.Equal(0, Assert.Single(Sent(page, "guild")).GetProperty("arg").GetProperty("knbAmount").GetInt32());
+
+        // Bật: góp tới mức chọn, chừa KnbKeep
+        var (ctl2, page2, cfg2) = Make();
+        cfg2.EventTeacher = false;
+        cfg2.DailyKnbBuy = false;
+        cfg2.GuildKnbOn = true;
+        cfg2.GuildKnbAmount = 100;
+        cfg2.KnbKeep = 1000;
+        var t = Run(ctl2, T0, 170, st);
+        var arg = Assert.Single(Sent(page2, "guild")).GetProperty("arg");
+        Assert.Equal(100, arg.GetProperty("knbAmount").GetInt32());
+        Assert.Equal(1000, arg.GetProperty("knbKeep").GetInt32());
+        ctl2.OnPageMessage("""{"t":"guildResult","r":"ok","bought":"","knbGiven":100}""", t);
+        Assert.Contains(ctl2.Activity.Items, e => e.Text == "💎 Góp 100 KNB vào quỹ bang");
+
+        // Sổ KNB: chỉ đọc nhật ký bang khi app nghe kết quả, 3 phút một lần; không ở trong bang → nghỉ 60 phút
+        var got = new List<JsonElement>();
+        ctl2.GuildLogResult += m => got.Add(m);
+        t = Run(ctl2, t, 7 * 60, st);
+        int polls = Sent(page2, "guildLog").Count();
+        Assert.InRange(polls, 1, 3);
+        ctl2.OnPageMessage("""{"t":"guildLogResult","r":"ok","guild":{"id":1,"name":"X","cap":1},"log":[]}""", t);
+        Assert.Single(got);
+        ctl2.OnPageMessage("""{"t":"guildLogResult","r":"no-guild"}""", t);
+        int before = Sent(page2, "guildLog").Count();
+        Run(ctl2, t, 30 * 60, st);
+        Assert.Equal(before, Sent(page2, "guildLog").Count());
+    }
+
+    [Fact]
     public void Guild_shop_runs_once_a_day_with_chosen_items_and_logs()
     {
         var (ctl, page, cfg) = Make();

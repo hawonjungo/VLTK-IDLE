@@ -92,6 +92,7 @@ public sealed class SessionManager : IAsyncDisposable
             lock (_gate) _settingsDirty = true;
         };
         c.LootFound += (src, text) => OnLoot(acc, src, text);
+        c.GuildLogResult += m => _guildLedger.Ingest(m, DateTime.Now);
         c.HorseResult += m => _horses.OnResult(acc.Id, m);
 
         lock (_gate) _sessions[acc.Id] = session;
@@ -283,6 +284,8 @@ public sealed class SessionManager : IAsyncDisposable
                     guildDonateReserve = _settings.GuildDonateReserve,
                     guildFurnace = _settings.GuildFurnace,
                     guildWeekAlert = _settings.GuildWeekAlert,
+                    guildKnbOn = _settings.GuildKnbOn,
+                    guildKnbAmount = _settings.GuildKnbAmount,
                     knbSendOn = _settings.KnbSendOn,
                     knbOpenBig = _settings.KnbOpenBig,
                     knbMainName = _settings.KnbMainName,
@@ -694,6 +697,8 @@ public sealed class SessionManager : IAsyncDisposable
             if (u.GuildDonateReserve is { } gdr) _settings.GuildDonateReserve = gdr;
             if (u.GuildFurnace is { } gf) _settings.GuildFurnace = gf;
             if (u.GuildWeekAlert is { } gw) _settings.GuildWeekAlert = gw;
+            if (u.GuildKnbOn is { } gko) _settings.GuildKnbOn = gko;
+            if (u.GuildKnbAmount is { } gka) _settings.GuildKnbAmount = gka;
             if (u.KnbMainName is { } km) _settings.KnbMainName = km;
             if (u.KnbSendOn is { } ks) _settings.KnbSendOn = ks;
             if (u.KnbOpenBig is { } kb) _settings.KnbOpenBig = kb;
@@ -711,6 +716,15 @@ public sealed class SessionManager : IAsyncDisposable
             _settings.Normalize();
             SettingsStore.Save(AppPaths.SettingsFile, _settings);
         }
+    }
+
+    // ---------- 🏯 Sổ KNB của bang ----------
+    private readonly GuildLedger _guildLedger = new();
+    public object GuildKnbWeek(DateOnly day)
+    {
+        int target;
+        lock (_gate) target = _settings.GuildKnbAmount;
+        return _guildLedger.Week(day, target, DateTime.Now);
     }
 
     // ---------- 🐴 Mã Trường ----------
@@ -805,4 +819,4 @@ public sealed record SettingsUpdate(
     bool? AutoSellJunk = null, int? AutoSellFreeSlots = null,
     int? GuildDailyAmount = null, int? GuildDonateReserve = null, bool? GuildFurnace = null,
     bool? GuildWeekAlert = null, string? KnbMainName = null, int? KnbKeep = null, bool? KnbSendOn = null, bool? KnbOpenBig = null,
-    int? KiteFleeHp = null, int? KiteCrowd = null, int? KitePauseMs = null);
+    int? KiteFleeHp = null, int? KiteCrowd = null, int? KitePauseMs = null, bool? GuildKnbOn = null, int? GuildKnbAmount = null);

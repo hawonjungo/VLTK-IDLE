@@ -276,3 +276,24 @@ p.warn { color: var(--warn); font-weight: 600; }
 /* Bảng Log: ô chọn và ngày luôn vừa khung */
 .gamelog-filter select, .gamelog-filter input { width: 100%; box-sizing: border-box; }
 .gl-place, .gl-char { white-space: nowrap; }
+
+/* 🏯 Sổ KNB của bang (dưới Bảng chi tiết) */
+.guild-knb { margin-top: 24px; }
+.gk-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.gk-head .view-title { margin: 0; }
+.gk-nav { display: flex; align-items: center; gap: 6px; }
+.gk-range { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gk-fund { margin: 10px 0; font-size: 14px; }
+.gk-bar { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; margin-top: 4px; }
+.gk-bar i { display: block; height: 100%; background: var(--accent); }
+.gk-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 8px 0; font-size: 13px; }
+.gk-wrap { overflow-x: auto; }
+.gk-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.gk-table th, .gk-table td { padding: 6px 6px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+.gk-table th { font-weight: 600; color: var(--dim); }
+.gk-table .gk-name { text-align: left; position: sticky; left: 0; background: var(--bg, var(--card)); min-width: 120px; max-width: 160px; white-space: normal; }
+.gk-table .gk-name b { display: block; overflow-wrap: anywhere; }
+.gk-table .gk-name small { display: block; font-size: 11px; }
+.gk-num { font-variant-numeric: tabular-nums; }
+.gk-miss { color: var(--warn); }
+.gk-none .gk-st, .gk-short .gk-st { color: var(--warn); font-weight: 600; }
