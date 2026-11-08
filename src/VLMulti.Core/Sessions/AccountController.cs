@@ -953,6 +953,8 @@ public sealed class AccountController
     // (game chọn bản đồ tới cấp nhân vật + 5 nhưng cổng đòi đủ cấp) – không bấm thêm được gì, báo ngay để bạn biết
     // 📜 Nhật ký game (agent.js móc vào hàm log của game): ghi file theo ngày, kèm tầng / bản đồ; đồ hiếm của chính
     // nhân vật → ghi hoạt động, riêng bộ Vô Danh (nhẫn Vô Danh có kỹ năng vốn có cực hiếm) → cảnh báo
+    private string? _daTauTask;
+    private DateTime _daTauTaskAt;
     public Action<string, IReadOnlyList<GameLog.Entry>>? GameLogSink { get; set; } = (id, list) => GameLog.Append(id, list);
 
     private void OnGameLog(JsonElement m, DateTime now)
@@ -962,7 +964,14 @@ public sealed class AccountController
         foreach (var l in arr.EnumerateArray())
         {
             var text = Str(l, "text");
+            // Dã Tẩu: nhớ nhiệm vụ đang làm, ghép vào dòng phần thưởng (dòng đi làm thì không ghi)
+            if (GameLog.DaTauTask(text) is { } task) { _daTauTask = task; _daTauTaskAt = now; }
             if (GameLog.IsNoise(text) || GameLog.AboutOthers(text, Account.CharName)) continue;
+            if (text.StartsWith("🎁 Dã Tẩu #"))
+            {
+                text = GameLog.WithDaTauTask(text, now - _daTauTaskAt < TimeSpan.FromMinutes(15) ? _daTauTask : null);
+                _daTauTask = null;
+            }
             var at = l.TryGetProperty("at", out var a) && a.TryGetInt64(out var ms)
                 ? DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime.ToLocalTime() : now;
             var place = Str(l, "place");

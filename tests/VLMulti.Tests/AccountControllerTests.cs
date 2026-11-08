@@ -903,11 +903,14 @@ public class AccountControllerTests
                 new { at, text = "Nhận được 1.234 điểm kinh nghiệm", place = "Tầng 900" },
                 new { at, text = "🗼 Tháp: qua tầng 900 · nhận 1 Huyền Tinh cấp 7", place = "Tầng 900" },
                 new { at, text = "Nhặt được Tỏa Tử Hoàng Kim giáp", place = "Tầng 901" },
+                new { at, text = "🗺 Dã Tẩu: Săn 30 Thủy Tặc ở Phong Lăng độ: tới Phong Lăng độ", place = "Phong Lăng độ" },
+                new { at, text = "🎁 Dã Tẩu #2491: 1 Rương Ngựa", place = "Phong Lăng độ" },
                 new { at, text = "Nhặt được Nhẫn Vô Danh", place = "Phong Lăng độ" },
                 new { at, text = "📢 Chúc mừng X nhận được Đồ phổ Y từ Boss Hoàng Kim!", place = "Tầng 901" },
             },
         }), t);
-        Assert.Equal(3, written.Count); // bỏ dòng kinh nghiệm và thông báo về người chơi khác
+        Assert.Equal(4, written.Count); // bỏ dòng kinh nghiệm, dòng đi làm Dã Tẩu và thông báo về người chơi khác
+        Assert.Contains(written, e => e.Kind == "datau" && e.Text == "🎁 Dã Tẩu #2491 (Săn 30 Thủy Tặc): 1 Rương Ngựa");
         Assert.Equal(("tower", "Tầng 900"), (written[0].Kind, written[0].Place));
         Assert.Equal("rare", written[1].Kind);
         Assert.DoesNotContain(written, e => e.Text.Contains("Chúc mừng X"));

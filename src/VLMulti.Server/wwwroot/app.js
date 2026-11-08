@@ -475,10 +475,12 @@ $('#horseBtn').addEventListener('click', openHorses);
 
 // ---------- 📜 Nhật ký game ----------
 // Mỗi dòng game ghi về chính nhân vật (kèm tầng / bản đồ), lọc theo nhân vật, loại, ngày; "💎 Đồ hiếm" gộp các nhân vật của bạn
-const GAMELOG_KINDS = [['', 'Mọi loại'], ['rare', '💎 Đồ hiếm'], ['boss', '👑 Boss'],
+const GAMELOG_KINDS = [['', 'Mọi loại'], ['rare', '💎 Đồ hiếm'], ['datau', '📜 Dã Tẩu'], ['boss', '👑 Boss'],
   ['assassin', '🗡 Sát Thủ'], ['tower', '🗼 Tháp'], ['death', '💀 Gục ngã'], ['loot', '🎁 Nhặt / nhận đồ'], ['other', 'Khác']];
 const vnToday = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
-let logSel = { who: 'rare', kind: '', day: '' };
+let logSel = { who: 'rare', kind: '', day: '', hideXp: true };
+// Thưởng Dã Tẩu chỉ có kinh nghiệm ("🎁 Dã Tẩu #2491 (…): 3% kinh nghiệm")
+const xpOnly = (r) => r.kind === 'datau' && /^🎁 Dã Tẩu #\d+[^:]*: [^,]*kinh nghiệm[^,]*$/.test(r.text);
 async function openGameLog() {
   const accs = (state?.accounts || []);
   const opt = (v, t, cur) => { const o = h('option', { value: v, text: t }); o.selected = v === cur; return o; };
@@ -486,16 +488,27 @@ async function openGameLog() {
   const kind = h('select', {}, GAMELOG_KINDS.map(([v, t]) => opt(v, t, logSel.kind)));
   const day = h('input', { type: 'date', value: logSel.day || vnToday() });
   const list = h('div', { class: 'gamelog' }, [h('p', { class: 'dim', text: 'Đang tải…' })]);
+  const hideXp = h('input', { type: 'checkbox' }); hideXp.checked = logSel.hideXp;
+  const sum = h('div', { class: 'gl-sum' });
   const load = async () => {
     if (!who.value) who.value = 'rare'; // nhân vật không còn trong danh sách → về Đồ hiếm
     if (!day.value) day.value = vnToday();
-    logSel = { who: who.value, kind: kind.value, day: day.value };
+    logSel = { who: who.value, kind: kind.value, day: day.value, hideXp: hideXp.checked };
     kind.disabled = who.value === 'rare';
     list.replaceChildren(h('p', { class: 'dim', text: 'Đang tải…' }));
+    sum.replaceChildren();
+    if (who.value !== 'rare' && (!kind.value || kind.value === 'datau')) {
+      api(`acc/${encodeURIComponent(who.value)}/gamelog/datau?day=${day.value}`).then((s) => {
+        if (!s.quests) return;
+        sum.replaceChildren(h('b', { text: `📜 Dã Tẩu hôm đó: ${s.quests} nhiệm vụ` }),
+          h('span', { text: s.items.length ? ' · ' + s.items.map((x) => `${x.n} ${x.name}`).join(' · ') : '' }));
+      }).catch(() => {});
+    }
     try {
-      const rows = who.value === 'rare'
+      const all = who.value === 'rare'
         ? await api(`gamelog/rare?day=${day.value}`)
         : await api(`acc/${encodeURIComponent(who.value)}/gamelog?day=${day.value}${kind.value ? '&kinds=' + kind.value : ''}`);
+      const rows = hideXp.checked ? all.filter((r) => !xpOnly(r)) : all;
       list.replaceChildren(...(rows.length ? rows.map((r) => h('div', { class: 'gl-row gl-' + r.kind }, [
         h('span', { class: 'gl-at', text: r.at }),
         h('span', { class: 'gl-place', text: r.place || '' }),
@@ -504,9 +517,11 @@ async function openGameLog() {
       ].filter(Boolean))) : [h('p', { class: 'dim', text: 'Chưa có dòng nào.' })]));
     } catch (e) { list.replaceChildren(h('p', { class: 'warn', text: '⚠ ' + e.message })); }
   };
-  for (const el of [who, kind, day]) el.addEventListener('change', load);
+  for (const el of [who, kind, day, hideXp]) el.addEventListener('change', load);
   openModal('📜 Log game', [
     h('div', { class: 'form-grid gamelog-filter' }, [h('label', { text: 'Nhân vật' }), who, h('label', { text: 'Loại' }), kind, h('label', { text: 'Ngày' }), day]),
+    h('label', { class: 'check-row' }, [hideXp, 'Ẩn thưởng Dã Tẩu chỉ có kinh nghiệm']),
+    sum,
     list,
   ], true);
   load();

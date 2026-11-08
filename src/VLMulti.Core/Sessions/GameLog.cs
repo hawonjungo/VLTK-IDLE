@@ -14,12 +14,23 @@ public static class GameLog
 
     // Dòng lặt vặt không ghi
     private static readonly Regex Noise = new(
-        @"^(Nhận được [\d.,]+ điểm kinh nghiệm|Nhặt được [\d.,]+ (vạn )?lượng|💰 \+\d+ KNB khóa|Tự mua |Tiếp tục hành tẩu)",
+        @"^(Nhận được [\d.,]+ điểm kinh nghiệm|Nhặt được [\d.,]+ (vạn )?lượng|💰 \+\d+ KNB khóa|Tự mua |Tiếp tục hành tẩu" +
+        // Dã Tẩu: dòng đi làm nhiệm vụ / dùng lệnh bài (chỉ giữ dòng phần thưởng, xem DaTauTask)
+        @"|🗺 (Dã Tẩu|Nhiệm vụ): |📜 Dùng Lệnh Bài Dã Tẩu|📜 Chế độ Nhiệm Vụ: dịch chuyển)",
         RegexOptions.Compiled);
     // Đồ hiếm: Hoàng Kim, Đồ phổ, Thần Mã, bộ Vô Danh, trang bị có kỹ năng vốn có
     private static readonly Regex Rare = new(@"Hoàng Kim|Đồ phổ|Thần Mã|Vô Danh|kỹ năng vốn có", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public static bool IsNoise(string text) => text.Length == 0 || Noise.IsMatch(text);
+
+    // 📜 Dã Tẩu: "🗺 Dã Tẩu: Săn 30 Thủy Tặc ở Phong Lăng độ: tới Phong Lăng độ" → nhiệm vụ "Săn 30 Thủy Tặc"; dòng
+    // thưởng sau đó "🎁 Dã Tẩu #2491: 1 Rương Ngựa" ghi thành "🎁 Dã Tẩu #2491 (Săn 30 Thủy Tặc): 1 Rương Ngựa"
+    private static readonly Regex DaTauTaskLine = new(@"^🗺 Dã Tẩu: (?!tới )(?<task>.+?)(?: ở [^:]+)?: tới ", RegexOptions.Compiled);
+    private static readonly Regex DaTauReward = new(@"^🎁 Dã Tẩu #(?<n>\d+): (?<reward>.+)$", RegexOptions.Compiled);
+    public static string? DaTauTask(string text) => DaTauTaskLine.Match(text) is { Success: true } m ? m.Groups["task"].Value.Trim() : null;
+    public static string WithDaTauTask(string text, string? task) =>
+        task is { Length: > 0 } && DaTauReward.Match(text) is { Success: true } m ? $"🎁 Dã Tẩu #{m.Groups["n"].Value} ({task}): {m.Groups["reward"].Value}" : text;
+    static bool IsDaTau(string text) => Regex.IsMatch(text, @"^(🎁 (Mốc )?Dã Tẩu|📜 Dã Tẩu \d)");
 
     // Chỉ ghi chuyện của chính nhân vật: bỏ thông báo chung của server ("📢 Chúc mừng X …"), kênh thế giới / bang / tổ
     // đội – trừ khi có tên chính nhân vật này
@@ -34,6 +45,7 @@ public static class GameLog
         if (Rare.IsMatch(text) && (text.Contains("Chúc mừng") || text.StartsWith("📢"))) return "rare"; // thông báo về chính mình
         if (Rare.IsMatch(text) && !boss && Regex.IsMatch(text, @"Nhặt được|[Nn]hận|🎁|📕")) return "rare";
         if (boss) return Rare.IsMatch(text) && text.Contains("🎁") ? "rare" : "boss";
+        if (IsDaTau(text)) return "datau";
         if (text.Contains("Sát Thủ") || text.Contains("truy sát")) return "assassin";
         if (Regex.IsMatch(text, @"Gục|trọng thương|gục ngã")) return "death";
         if (text.Contains("🗼") || text.Contains("Tháp")) return "tower";
@@ -95,6 +107,32 @@ public static class GameLog
             .GroupBy(e => $"{e.Char}|{e.At:O}|{e.Text}")
             .Select(g => g.OrderBy(e => e.At).First())
             .OrderByDescending(e => e.At).Take(max).ToList();
+    }
+
+    // Tổng kết Dã Tẩu trong ngày của một acc: số nhiệm vụ có thưởng và cộng dồn từng món (bỏ kinh nghiệm)
+    private static readonly Regex Item = new(@"^(?<n>\d+) (?<name>.+)$", RegexOptions.Compiled);
+    public static object DaTauSummary(string accId, DateOnly day) => DaTauSummary(Read(accId, day, new[] { "datau", "rare" }, 5000));
+    public static object DaTauSummary(IEnumerable<Entry> entries)
+    {
+        var rows = entries.Where(e => e.Text.StartsWith("🎁 Dã Tẩu #") || e.Text.StartsWith("🎁 Mốc Dã Tẩu")).ToList();
+        var items = new Dictionary<string, long>();
+        int quests = 0;
+        foreach (var e in rows)
+        {
+            if (e.Text.StartsWith("🎁 Dã Tẩu #")) quests++;
+            var i = e.Text.IndexOf("): ", StringComparison.Ordinal) is var p and >= 0 ? p + 3 : e.Text.IndexOf(": ", StringComparison.Ordinal) + 2;
+            if (i < 2) continue;
+            foreach (var part in e.Text[i..].Split(", ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (part.Contains("kinh nghiệm")) continue;
+                var m = Item.Match(part);
+                var (name, n) = m.Success ? (m.Groups["name"].Value, long.Parse(m.Groups["n"].Value)) : (part, 1L);
+                if (Regex.IsMatch(name, @"%|\(chờ")) name = Regex.Replace(name, @"\s*(\+?\d+%.*|\(chờ.*\))$", "").Trim(); // "Tiên Thảo Lộ +20% trong 30 phút" → "Tiên Thảo Lộ"
+                if (name.Length == 0) continue;
+                items[name] = items.GetValueOrDefault(name) + n;
+            }
+        }
+        return new { quests, items = items.OrderByDescending(x => x.Value).Select(x => new { name = x.Key, n = x.Value }) };
     }
 
     private static string Clean(string s) => s.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Trim();
