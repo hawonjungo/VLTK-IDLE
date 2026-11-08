@@ -1927,6 +1927,11 @@
   const huntNow = () => {
     try { const S = window.H5 && window.H5.G ? window.H5.G('S') : null; const c = S && S.st && S.st.cur; return c ? { n: String(c.n || ''), hpf: +c.hpf || 0 } : null; } catch (_) { return null; }
   };
+  // S.gb = {key: "2026-11-08#1" (null ngoài đợt), killed, hpf, n, zn, end, next}; đợt 08/11 15:30: acc hạ xong thì
+  // killed = true, acc chưa đánh thì hpf vẫn 1 dù acc khác đã hạ
+  const goldBossNow = () => {
+    try { const S = window.H5.G('S'); const g = S && S.gb; return g && g.key ? `${g.key}|${g.killed ? 1 : 0}|${Math.round(100 * (+g.hpf || 0))}` : ''; } catch (_) { return ''; }
+  };
   const assassinActive = () => !!huntNow() || /Sát Thủ/.test((($('#u20trk') || {}).textContent) || '');
   // Đang ở tháp / phó bản (game: "Rời phó bản / tháp trước" khi gọi Sát Thủ)
   const inTowerOrDungeon = () => { try { const R = window.H5.G('R'); return !!(R && (R.tower || R.dg)); } catch (_) { return /Tháp|Phó bản/.test(txt('#u20zone')); } };
@@ -2360,6 +2365,8 @@
       trk: screen === 'game' ? trackerText() : '',
       // Truy sát đang mở: "<tên>|<% máu còn>" ("Sát Thủ · Bảo Triệt Sơn|79")
       hunt: screen === 'game' ? ((h) => (h ? `${h.n}|${Math.round(h.hpf * 100)}` : ''))(huntNow()) : '',
+      // Boss Hoàng Kim đợt này của riêng acc (game S.gb, mỗi nhân vật một con boss): "<đợt>|<1 = đã hạ>|<% máu boss>"
+      gbw: screen === 'game' ? goldBossNow() : '',
       gold: txt('#gold'),
       knb: txt('#knbTop'),
       mode: on ? on.dataset.msw || '' : '',

@@ -642,6 +642,7 @@ public sealed class AccountController
             changed |= exp != Exp || tracker != Tracker;
             (Exp, Tracker) = (exp, tracker);
             ApplyHunt(Str(s, "hunt"), now);
+            ApplyGoldBoss(Str(s, "gbw"), now);
 
             var modeCode = Str(s, "mode");
             if (modeCode == "tower" && ModeCode != "tower")
@@ -758,9 +759,24 @@ public sealed class AccountController
     private DateTime _waveStart, _waveTowerAt, _waveGoAt, _bossAskAt;
     private int _waveTowerRetries, _waveGoTries;
     private string _waveInfo = "";
-    private bool _waveSeenDead, _waveInDungeon;
+    private bool _waveSeenDead, _waveInDungeon, _waveFarmed;
 
     private bool BossDoneThisWave => _waveCardDone || (_bossDoneAt is { } d && d >= _waveStart);
+
+    // Trạng thái boss của riêng acc từ game ("2026-11-08#1|1|0"): đã hạ = chắc chắn xong đợt (không phụ thuộc dòng
+    // kênh Hệ thống có thể bị lỡ, ví dụ lúc tải lại trang)
+    private string _goldBossKey = "";
+    private void ApplyGoldBoss(string gbw, DateTime now)
+    {
+        var p = gbw.Split('|');
+        if (p.Length < 2 || p[0].Length == 0) return;
+        bool killed = p[1] == "1";
+        if (killed && _goldBossKey != p[0])
+        {
+            _goldBossKey = p[0];
+            if (!(_bossDoneAt is { } d && d >= now - TimeSpan.FromMinutes(40))) _bossDoneAt = now;
+        }
+    }
 
     private void SuperviseBossWave(DateTime now)
     {
@@ -769,7 +785,7 @@ public sealed class AccountController
         {
             _waveOn = true;
             _waveStart = now;
-            _waveTracked = _waveCardDone = _waveCardChecked = _bossAskPending = _waveSeenDead = _waveInDungeon = false;
+            _waveTracked = _waveCardDone = _waveCardChecked = _bossAskPending = _waveSeenDead = _waveInDungeon = _waveFarmed = false;
             _waveTowerRetries = _waveGoTries = 0;
             _waveTowerAt = _waveGoAt = DateTime.MinValue;
             _waveInfo = "";
@@ -787,8 +803,20 @@ public sealed class AccountController
         bool engaged = Tracker.Contains("Hoàng Kim") || (_bossEngagedAt is { } e && e >= _waveStart && now - e < BossFightMax);
         var since = now - _waveStart;
 
-        // Trong đợt KHÔNG đổi chế độ: ngày 08/11 12:00 game kéo acc ra khỏi tháp để đi đánh boss mà kênh Hệ thống không
-        // báo gì, bước "vào lại tháp" (đã bỏ) tưởng bị đẩy ra và đưa ngược lại – cả 4 acc lỡ boss.
+        // Không vào lại tháp trong đợt: ngày 08/11 12:00 bước "vào lại tháp" (đã bỏ) đưa acc ngược khỏi boss.
+        // Đang Leo Tháp mà chưa hạ boss → đổi sang Luyện Công (mỗi đợt một lần): đợt 15:30 cùng ngày acc3 ở chế độ
+        // Leo Tháp bị chính game giật qua lại giữa bãi boss và tháp ~15 giây một lần suốt 30 phút, boss vẫn 100% máu;
+        // acc4 đang Luyện Công được đưa tới bãi boss, đứng yên và hạ trong 1,5 phút. Hạ xong vòng 🔁 tự về tháp.
+        if (ModeCode == ModeRules.Tower && !_waveFarmed && !_bossAskPending)
+        {
+            _waveFarmed = true;
+            _pendingAutoMode = ModeRules.Farm;
+            _lastAutoModeCmd = now;
+            Log.Write($"[{Account.Id}] boss HK wave: tower -> farm (chưa hạ boss)");
+            Note(now, "👑 Boss Hoàng Kim: chuyển Luyện Công để game giữ nhân vật ở bãi boss (hạ xong tự về tháp)");
+            RunCommand("mode", ModeRules.Farm);
+            return;
+        }
         if (_bossAskPending) return;
         // Dự phòng: "Đến ngay"
         var goAfter = _waveGoEarly ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(3);
@@ -851,16 +879,17 @@ public sealed class AccountController
         Raise("boss-hk", $"Không hạ được Boss Hoàng Kim đợt {wave} ({string.Join("; ", why)}). Dự phòng: {plan}");
     }
 
-    // Boss Hoàng Kim chỉ kéo nhân vật đang Leo Tháp đi đánh ("… xuất hiện — tạm rời Tháp tầng N đi săn Boss";
-    // ngày 07/11 các acc đang Nhiệm Vụ / Luyện Công không được kéo đi, cả 4 đợt không đánh). Vì vậy ngay trước đợt
-    // acc bật vòng 🔁 đang ở chế độ khác → vào Leo Tháp, mỗi đợt một lần (trong đợt: SuperviseBossWave).
+    // Ngay trước đợt, acc bật vòng 🔁 đang Leo Tháp / Nhiệm Vụ → Luyện Công, mỗi đợt một lần (trong đợt: SuperviseBossWave).
+    // Từ bản game có "Trợ Thủ tự đi" (08/11) game đưa cả acc đang Luyện Công tới bãi boss và để yên đánh tới khi hạ;
+    // acc đang Leo Tháp thì bị giật qua lại giữa bãi boss và tháp, không hạ được (đợt 15:30 ngày 08/11). Trước đó
+    // (07/11) chỉ acc đang Leo Tháp mới được kéo đi – nếu game đổi lại thì dự phòng "Đến ngay" vẫn đưa tới.
     // Không kéo ra khỏi Phó Bản (mất lượt), không chen khi đang Sát Thủ / đi thuyền / Boss tuần / mua lệnh bài.
     private static readonly TimeSpan BossPrepAhead = TimeSpan.FromMinutes(2);
     private DateTime _bossPrepAt = DateTime.MinValue;
 
     private void SuperviseBossPrep(DateTime now)
     {
-        if (!Account.AutoMode || Screen != "game" || ModeCode is "" or ModeRules.Tower or ModeRules.Dungeon) return;
+        if (!Account.AutoMode || Screen != "game" || ModeCode is "" or ModeRules.Farm or ModeRules.Dungeon) return;
         bool soon = !BossHkSchedule(now) && BossHkSchedule(now + BossPrepAhead);
         if (!soon) return;
         if (now - _bossPrepAt < TimeSpan.FromMinutes(40)) return; // mỗi đợt một lần
@@ -868,11 +897,11 @@ public sealed class AccountController
         // (07/11 23:37–23:40 cả 3 acc bị nghỉ tháp 2 giờ – nếu trùng giờ boss thì lỡ cả đợt)
         if (_ldtBuyingSince is not null || EventRunning(now)) return;
         _bossPrepAt = now;
-        _pendingAutoMode = ModeRules.Tower;
+        _pendingAutoMode = ModeRules.Farm;
         _lastAutoModeCmd = now;
-        Log.Write($"[{Account.Id}] boss HK prep: {ModeCode} -> tower");
-        Note(now, "👑 Sắp tới Boss Hoàng Kim: vào Leo Tháp để game đưa đi đánh");
-        RunCommand("mode", ModeRules.Tower);
+        Log.Write($"[{Account.Id}] boss HK prep: {ModeCode} -> farm");
+        Note(now, "👑 Sắp tới Boss Hoàng Kim: chuyển Luyện Công để game đưa đi đánh (hạ xong tự về tháp)");
+        RunCommand("mode", ModeRules.Farm);
     }
 
     // Dòng kênh Hệ thống về boss của chính acc (chép từ game):
@@ -1366,7 +1395,7 @@ public sealed class AccountController
     private void SuperviseAutoMode(DateTime now)
     {
         if (!Account.AutoMode || Screen != "game" || ModeCode == "" || _ldtBuyingSince is not null) return;
-        // Sắp tới đợt Boss Hoàng Kim: đứng ở tháp chờ game kéo đi (SuperviseBossPrep), không đổi sang việc khác
+        // Sắp tới đợt Boss Hoàng Kim: đứng ở Luyện Công chờ game đưa đi (SuperviseBossPrep), không đổi sang việc khác
         if (!BossHkSchedule(now) && BossHkSchedule(now + BossPrepAhead)) return;
 
         // Đã ra lệnh mà sau 60 giây game vẫn không chuyển → game không cho vào chế độ đó lúc này
