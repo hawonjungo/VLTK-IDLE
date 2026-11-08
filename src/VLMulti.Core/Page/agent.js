@@ -392,6 +392,7 @@
     assassin: async () => {
       if (assassinActive()) return 'already';
       if (flowBusy || anyWindowOpen()) return 'busy';
+      if (inTowerOrDungeon()) return 'need-farm';
       const btn = $('#u20menu > button[data-u="quest"]'), tab = $('#t-quest');
       if (!btn || !tab) return 'not-ready';
       const lv = parseInt(txt('#lvS'), 10) || 0;
@@ -424,6 +425,7 @@
     assassinGo: async () => {
       if (!assassinActive()) return 'none';
       if (flowBusy || anyWindowOpen()) return 'busy';
+      if (inTowerOrDungeon()) return 'need-farm';
       const btn = $('#u20menu > button[data-u="quest"]'), tab = $('#t-quest');
       if (!btn || !tab) return 'not-ready';
       btn.click();
@@ -1849,7 +1851,14 @@
   const closeQuestWindows = () => { const x = $('#u20wx'); if (x && isVisible($('#panel'))) x.click(); };
 
   // (đọc cả khi khung nhỏ ẩn góc nhiệm vụ)
-  const assassinActive = () => /Sát Thủ/.test((($('#u20trk') || {}).textContent) || '');
+  // Truy sát đang mở (Sát Thủ hoặc Boss Hoàng Kim từ Lệnh Bài): trạng thái game S.st.cur {n, hpf}; không đọc được thì
+  // dựa vào góc nhiệm vụ theo dấu. Còn truy sát thì game khoá mọi nút gọi mới ("Cấp 20…90").
+  const huntNow = () => {
+    try { const S = window.H5 && window.H5.G ? window.H5.G('S') : null; const c = S && S.st && S.st.cur; return c ? { n: String(c.n || ''), hpf: +c.hpf || 0 } : null; } catch (_) { return null; }
+  };
+  const assassinActive = () => !!huntNow() || /Sát Thủ/.test((($('#u20trk') || {}).textContent) || '');
+  // Đang ở tháp / phó bản (game: "Rời phó bản / tháp trước" khi gọi Sát Thủ)
+  const inTowerOrDungeon = () => { try { const R = window.H5.G('R'); return !!(R && (R.tower || R.dg)); } catch (_) { return /Tháp|Phó bản/.test(txt('#u20zone')); } };
 
   // Nhiệm vụ đang theo dấu ở góc màn hình: bỏ dòng tiêu đề "Nhiệm vụ Theo Dấu ▾", nối các dòng bằng " · "
   const trackerText = () => {
@@ -2278,6 +2287,8 @@
       dp: screen === 'game' && doPho ? doPho.join('\n') : undefined,
       xp: screen === 'game' ? txt('#xpTxt') : '',            // kinh nghiệm cấp hiện tại "92.5%"
       trk: screen === 'game' ? trackerText() : '',
+      // Truy sát đang mở: "<tên>|<% máu còn>" ("Sát Thủ · Bảo Triệt Sơn|79")
+      hunt: screen === 'game' ? ((h) => (h ? `${h.n}|${Math.round(h.hpf * 100)}` : ''))(huntNow()) : '',
       gold: txt('#gold'),
       knb: txt('#knbTop'),
       mode: on ? on.dataset.msw || '' : '',

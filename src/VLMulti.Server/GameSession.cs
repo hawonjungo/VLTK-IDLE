@@ -258,7 +258,8 @@ public sealed class GameSession : IGamePage, IAsyncDisposable
         }
         catch (Exception ex) when (ex is PlaywrightException or IOException or TimeoutException)
         {
-            Log.Write($"[{Account.Id}] save browser state failed: {ex.Message}");
+            if (!ex.Message.Contains("has been closed") && !ex.Message.Contains("Failed to find browser context") && !ex.Message.Contains("Not supported"))
+                Log.Write($"[{Account.Id}] save browser state failed: {ex.Message}");
         }
     }
 

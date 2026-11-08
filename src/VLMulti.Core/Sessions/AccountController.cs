@@ -35,6 +35,8 @@ public sealed class AccountController
     private static readonly TimeSpan ManualLoginWindow = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan StatsSettle = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan NetErrorRetryDelay = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan MaintenanceRetryDelay = TimeSpan.FromMinutes(5);
+    private DateTime _maintenanceNotedAt = DateTime.MinValue;
     // Thông báo của game cho thấy lỗi kết nối (không phải sai mật khẩu)
     private static readonly Regex NetErrorPattern = new(@"fetch|network|mạng|kết nối|time ?out|50[234]", RegexOptions.IgnoreCase);
     private static readonly Regex TowerFloorPattern = new(@"Tháp.*?tầng\s*(\d+)");
@@ -639,6 +641,7 @@ public sealed class AccountController
             var tracker = Str(s, "trk");
             changed |= exp != Exp || tracker != Tracker;
             (Exp, Tracker) = (exp, tracker);
+            ApplyHunt(Str(s, "hunt"), now);
 
             var modeCode = Str(s, "mode");
             if (modeCode == "tower" && ModeCode != "tower")
@@ -675,7 +678,9 @@ public sealed class AccountController
         if (used == BagUsed && max == BagMax) return false;
         bool wasFull = BagNearlyFull;
         (BagUsed, BagMax) = (used, max);
-        if (BagNearlyFull && !wasFull) Raise("bag", $"Hòm đồ gần đầy: {used}/{max}");
+        // Đã bật tự bán đồ thừa: không cảnh báo ở đây (bán xong là có chỗ); chỉ cảnh báo khi không còn gì để bán
+        // (OnSellJunkResult). Trước đây báo 65 lần/ngày dù hành trang tự được dọn.
+        if (BagNearlyFull && !wasFull && SettingsProvider?.Invoke() is not { AutoSellJunk: true }) Raise("bag", $"Hòm đồ gần đầy: {used}/{max}");
         return true;
     }
 
@@ -782,22 +787,8 @@ public sealed class AccountController
         bool engaged = Tracker.Contains("Hoàng Kim") || (_bossEngagedAt is { } e && e >= _waveStart && now - e < BossFightMax);
         var since = now - _waveStart;
 
-        // Chưa ở tháp (chết bị đẩy ra Luyện Công, hoặc lỡ bước chuẩn bị) khi chưa được đưa đi đánh → vào tháp
-        if (!engaged && ModeCode is not ("" or ModeRules.Tower) && since < BossTowerRetryWithin && now - _bossPrepAt > TimeSpan.FromSeconds(60)
-            && now - _waveTowerAt > TimeSpan.FromSeconds(90) && _waveTowerRetries < BossTowerRetries)
-        {
-            if (ModeCode == ModeRules.Farm) _waveSeenDead = true;
-            _waveTowerRetries++;
-            _waveTowerAt = now;
-            _pendingAutoMode = ModeRules.Tower;
-            _lastAutoModeCmd = now;
-            Log.Write($"[{Account.Id}] boss HK: {ModeCode} before the fight, into tower ({_waveTowerRetries}/{BossTowerRetries})");
-            Note(now, ModeCode == ModeRules.Farm
-                ? $"👑 Boss Hoàng Kim: bị đẩy ra khỏi tháp trước khi được đưa đi đánh – vào lại tháp ({_waveTowerRetries}/{BossTowerRetries})"
-                : $"👑 Boss Hoàng Kim đang ra mà acc chưa ở tháp – vào tháp để game đưa đi đánh ({_waveTowerRetries}/{BossTowerRetries})", StatusLevel.Warn);
-            RunCommand("mode", ModeRules.Tower);
-            return;
-        }
+        // Trong đợt KHÔNG đổi chế độ: ngày 08/11 12:00 game kéo acc ra khỏi tháp để đi đánh boss mà kênh Hệ thống không
+        // báo gì, bước "vào lại tháp" (đã bỏ) tưởng bị đẩy ra và đưa ngược lại – cả 4 acc lỡ boss.
         if (_bossAskPending) return;
         // Dự phòng: "Đến ngay"
         var goAfter = _waveGoEarly ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(3);
@@ -875,7 +866,7 @@ public sealed class AccountController
         if (now - _bossPrepAt < TimeSpan.FromMinutes(40)) return; // mỗi đợt một lần
         // Không xét "nghỉ tháp" (chết nhanh): Boss chỉ kéo nhân vật đang ở tháp đi đánh, game kéo đi gần như ngay
         // (07/11 23:37–23:40 cả 3 acc bị nghỉ tháp 2 giờ – nếu trùng giờ boss thì lỡ cả đợt)
-        if (_ldtBuyingSince is not null || EventRunning(now) || (AssassinActive && !AssassinStuck(now))) return;
+        if (_ldtBuyingSince is not null || EventRunning(now)) return;
         _bossPrepAt = now;
         _pendingAutoMode = ModeRules.Tower;
         _lastAutoModeCmd = now;
@@ -966,7 +957,8 @@ public sealed class AccountController
         if (name == "assassinGo")
         {
             Log.Write($"[{Account.Id}] assassin go: {result}");
-            if (result.StartsWith("ok")) Note(_lastNow == default ? DateTime.Now : _lastNow, "🗡 Đi đến Boss Sát Thủ");
+            if (result.StartsWith("ok")) Note(_lastNow == default ? DateTime.Now : _lastNow, $"🗡 Đi đến {(HuntName.Length > 0 ? HuntName : "Boss Sát Thủ")}");
+            if (result == "need-farm") { _lastGoAt = default; RunCommand("mode", ModeRules.Farm); }
             return;
         }
 
@@ -1216,6 +1208,21 @@ public sealed class AccountController
             if (now - sent < LoginTimeout) return; // đang chờ kết quả lần trước
             _loginSentAt = null;
 
+            if (_loginMsg.Contains("bảo trì", StringComparison.OrdinalIgnoreCase))
+            {
+                // Game đang bảo trì (07/11: 7 giờ liền thử mỗi phút → 123 lần lỗi, 56 cảnh báo "quá nhiều lần"):
+                // chờ yên 5 phút một lần, không tính vào giới hạn đăng nhập, chỉ ghi nhật ký một lần mỗi giờ
+                _loginNotBefore = now + MaintenanceRetryDelay;
+                _loginLimiter.Reset();
+                SetStatus("Game đang bảo trì – 5 phút thử đăng nhập lại một lần", StatusLevel.Warn);
+                if (now - _maintenanceNotedAt > TimeSpan.FromHours(1))
+                {
+                    _maintenanceNotedAt = now;
+                    Log.Write($"[{Account.Id}] auto login: game maintenance, retry every 5 min");
+                    Note(now, "🛠 Game đang bảo trì – tool chờ, 5 phút thử đăng nhập lại một lần");
+                }
+                return;
+            }
             if (NetErrorPattern.IsMatch(_loginMsg))
             {
                 // Máy chủ không phản hồi: không phải lỗi mật khẩu → chờ rồi thử lại, không tính thất bại
@@ -1379,9 +1386,9 @@ public sealed class AccountController
         if (now - _lastAutoModeCmd < AutoModeMinGap) return;
         if (SettingsProvider?.Invoke() is not { } s) return;
 
-        // Đang đánh Sát Thủ: để yên cho đánh xong, không đổi chế độ.
-        // Boss Hoàng Kim xuất hiện chỉ báo nhắc (🔔), vòng vẫn chạy bình thường.
-        if (AssassinActive && !AssassinStuck(now)) return;
+        // Đang có truy sát (kể cả dở dang từ trước): để yên cho SuperviseAssassinGo đưa ra Luyện Công và đi đánh tới khi hạ.
+        // Quá trâu (máu không giảm 15 phút) → bước Sát Thủ nghỉ 60 phút, vòng chạy tiếp, sau đó quay lại đánh.
+        if (AssassinActive && !AssassinStuck(now) && !IsModeBlocked(ModeRules.Assassin, now)) return;
         // Đang trên thuyền / đang đánh Boss tuần / chờ xem số lượt có giảm: để yên ở Luyện Công
         // (nút Nhận rương tuần chỉ sáng khi không ở tháp)
         if (EventRunning(now) || _eventCheck is not null) return;
@@ -1674,6 +1681,7 @@ public sealed class AccountController
         {
             _junkNoneNoted = VnDate(now);
             Note(now, "💰 Hành trang sắp đầy mà không có đồ thừa để bán – xem lại ⚙ Nhặt đồ (bộ lọc đang giữ quá nhiều)", StatusLevel.Warn);
+            if (BagUsed is { } u && BagMax is { } mx) Raise("bag", $"Hòm đồ gần đầy: {u}/{mx} – không có đồ thừa để tự bán");
         }
     }
 
@@ -1893,8 +1901,31 @@ public sealed class AccountController
     public int AssassinTokens => ModeRules.TryFraction(Assassin, out var have, out _) ? have
         : int.TryParse(Assassin.Split('/')[0], out var h) ? h : 0;
 
-    // Đang đánh Sát Thủ: góc nhiệm vụ theo dấu có dòng "Sát Thủ · Truy sát mục tiêu"
-    public bool AssassinActive => Tracker.Contains("Sát Thủ");
+    // Đang có truy sát (Sát Thủ hoặc Boss Hoàng Kim từ Lệnh Bài): trạng thái game "tên|%máu" hoặc góc nhiệm vụ theo dấu
+    public bool AssassinActive => HuntName.Length > 0 || Tracker.Contains("Sát Thủ");
+    public string HuntName { get; private set; } = "";
+    public int? HuntHp { get; private set; }
+    // % máu thấp nhất đã thấy của truy sát hiện tại và lúc nó giảm lần cuối (đánh mãi không giảm → quá trâu)
+    private int? _huntBestHp;
+    private DateTime _huntProgressAt;
+
+    private void ApplyHunt(string hunt, DateTime now)
+    {
+        var parts = hunt.Split('|');
+        var name = hunt.Length > 0 ? parts[0] : "";
+        int? hp = parts.Length > 1 && int.TryParse(parts[1], out var h) ? h : null;
+        if (name != HuntName)
+        {
+            if (name.Length > 0) Note(now, $"🗡 Truy sát: {name}" + (hp is { } p0 ? $" (còn {p0}% máu) – đi đánh tiếp" : ""));
+            else if (HuntName.Length > 0) Note(now, $"🗡 Xong truy sát: {HuntName}", StatusLevel.Ok);
+            HuntName = name;
+            _huntBestHp = hp;
+            _huntProgressAt = now;
+            _assassinStuckNoted = false;
+        }
+        HuntHp = hp;
+        if (hp is { } v && (_huntBestHp is null || v < _huntBestHp)) { _huntBestHp = v; _huntProgressAt = now; }
+    }
 
     // Nhiệm vụ Sát Thủ đang mở mà nhân vật không tự tới (vd. sau khi đăng nhập lại) → bấm "Đi đến" vài phút một lần.
     // Quá AssassinStuckAfter vẫn chưa hạ → thôi chờ, cho vòng chạy tiếp (boss vẫn được game giữ lại).
@@ -1905,7 +1936,9 @@ public sealed class AccountController
     private DateTime _lastGoAt;
     private bool _assassinStuckNoted;
 
-    private bool AssassinStuck(DateTime now) => _assassinActiveSince is { } since && now - since > AssassinStuckAfter;
+    private bool AssassinStuck(DateTime now) => HuntName.Length > 0
+        ? now - _huntProgressAt > AssassinStuckAfter
+        : _assassinActiveSince is { } since && now - since > AssassinStuckAfter;
 
     private void SuperviseAssassinGo(DateTime now)
     {
@@ -1918,7 +1951,19 @@ public sealed class AccountController
             _assassinStuckNoted = true;
             _assassinPhase = false;
             _modeBlockedUntil[ModeRules.Assassin] = now + ModeBlockDefault;
-            Raise("assassin-stuck", $"Sát Thủ chưa hạ sau {AssassinStuckAfter.TotalMinutes:0} phút – tạm bỏ qua, vòng chạy tiếp");
+            Raise("assassin-stuck", $"{(HuntName.Length > 0 ? HuntName : "Sát Thủ")}: {AssassinStuckAfter.TotalMinutes:0} phút máu không giảm"
+                + (HuntHp is { } hp ? $" (còn {hp}%)" : "") + " – quá trâu cho 1 người, nghỉ 60 phút rồi đánh tiếp (không bỏ truy sát)");
+            return;
+        }
+        // Truy sát dở mà đang ở tháp / Nhiệm Vụ: ra Luyện Công trước (game không cho đi từ tháp / phó bản)
+        if (HuntName.Length > 0 && ModeCode != ModeRules.Farm && !IsModeBlocked(ModeRules.Assassin, now))
+        {
+            if (ModeCode == ModeRules.Dungeon || now - _lastAutoModeCmd < TimeSpan.FromSeconds(60)) return;
+            _assassinPhase = true;
+            _pendingAutoMode = ModeRules.Farm;
+            _lastAutoModeCmd = now;
+            Log.Write($"[{Account.Id}] hunt pending ({HuntName}) → farm");
+            RunCommand("mode", ModeRules.Farm);
             return;
         }
         if (now - _assassinActiveSince < AssassinGoFirst || now - _lastGoAt < AssassinGoEvery) return;

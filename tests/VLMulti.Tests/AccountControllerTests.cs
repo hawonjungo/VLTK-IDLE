@@ -224,7 +224,8 @@ public class AccountControllerTests
     [Fact]
     public void Bag_nearly_full_alerts_once()
     {
-        var (ctl, _, _) = Make();
+        var (ctl, _, cfg) = Make();
+        cfg.AutoSellJunk = false; // có tự bán đồ thừa thì chỉ báo khi không còn gì để bán
         var problems = new List<string>();
         ctl.Problem += (key, _) => problems.Add(key);
         var t = Run(ctl, T0, 15, Status("game", bag: "50/120"));
@@ -662,21 +663,19 @@ public class AccountControllerTests
     });
 
     [Fact]
-    public void Account_not_in_tower_when_boss_wave_starts_goes_to_tower_once_to_be_pulled()
+    public void Boss_wave_never_changes_mode_even_when_the_account_leaves_the_tower()
     {
         var (ctl, page, _) = Make();
         bool boss = false;
         ctl.BossHkSchedule = _ => boss;
-        // Vừa chết trong tháp ra Luyện Công thì đợt boss bắt đầu: game chỉ kéo nhân vật đang Leo Tháp đi đánh
-        var t = Run(ctl, T0, 15, St("farm"));
+        // 08/11 12:00: game kéo acc ra khỏi tháp để đi đánh boss (không có dòng báo) – tool không được đưa ngược lại
+        var t = Run(ctl, T0, 15, St("tower"));
         ctl.SetAutoMode(true, t);
+        t = Run(ctl, t, 70, St("tower"));
         boss = true;
-        t = Run(ctl, t, 10, St("farm"));
-        Assert.Equal(new[] { "tower" }, ModeCommands(page));
-        Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("vào lại tháp (1/2)"));
-        // Vẫn bị đẩy ra: vào lại tối đa 2 lần trong 10 phút đầu, sau đó không ra lệnh nữa (không giành giật với game)
+        t = Run(ctl, t, 30, St("tower"));
         t = Run(ctl, t, 25 * 60, St("farm"));
-        Assert.Equal(new[] { "tower", "tower" }, ModeCommands(page));
+        Assert.Empty(ModeCommands(page));
         // Hết đợt → vòng chạy lại bình thường
         boss = false;
         RunUntilMode(ctl, page, t, St("farm"), "tower", 5 * 60);
@@ -705,7 +704,7 @@ public class AccountControllerTests
     private static int Count(FakePage page, string t) => page.Sent.Count(m => m.GetProperty("t").GetString() == t);
 
     [Fact]
-    public void Boss_wave_retries_tower_after_death_then_uses_go_now_and_warns_when_boss_not_killed()
+    public void Boss_wave_uses_go_now_and_warns_when_boss_not_killed()
     {
         var (ctl, page, _) = Make();
         var problems = new List<(string Key, string Msg)>();
@@ -717,10 +716,8 @@ public class AccountControllerTests
         t = Run(ctl, t, 70, St("tower"));
         boss = true;
         t = Run(ctl, t, 30, St("tower"));
-        // Chết trong tháp trước khi được kéo đi → vào lại tháp, tối đa 2 lần
         t = Run(ctl, t, 4 * 60, St("farm"));
-        Assert.Equal(2, ModeCommands(page).Count(m => m == "tower"));
-        Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("vào lại tháp (2/2)"));
+        Assert.DoesNotContain("tower", ModeCommands(page));
         // Dự phòng: đọc thẻ boss, bấm "Đến ngay"
         Assert.True(Count(page, "bossHk") >= 1);
         Assert.True(page.Sent.Last(m => m.GetProperty("t").GetString() == "bossHk").GetProperty("arg").GetProperty("go").GetBoolean());
@@ -734,6 +731,50 @@ public class AccountControllerTests
         var alert = Assert.Single(problems, p => p.Key == "boss-hk");
         Assert.Contains("Không hạ được Boss Hoàng Kim", alert.Msg);
         Assert.Contains("Dự phòng", alert.Msg);
+    }
+
+    private static string Hunt(string mode, string hunt) => JsonSerializer.Serialize(new
+    {
+        t = "status", screen = "game", lv = "139", gold = "1 vạn", knb = "1 🔒1", mode, modeText = mode,
+        zone = mode == "tower" ? "Thông Thiên Tháp · tầng 900" : "Hoa Sơn",
+        dt = "200/200", pb = "0/4", ldtHave = "0", ldtUsed = "160/160", ldtBuy = "100/100", st = "20/0", hunt,
+    });
+
+    [Fact]
+    public void Pending_hunt_leaves_the_tower_and_keeps_going_until_killed()
+    {
+        var (ctl, page, _) = Make();
+        var problems = new List<string>();
+        ctl.Problem += (k, _) => problems.Add(k);
+        var t = Run(ctl, T0, 15, Hunt("tower", "Boss Hoàng Kim (Lệnh Bài)|93"));
+        ctl.SetAutoMode(true, t);
+        // Truy sát dở ở tháp → ra Luyện Công trước, rồi "Đến chỗ Sát Thủ"
+        t = Run(ctl, t, 90, Hunt("tower", "Boss Hoàng Kim (Lệnh Bài)|93"));
+        Assert.Equal("farm", ModeCommands(page).Last());
+        t = Run(ctl, t, 4 * 60, Hunt("farm", "Boss Hoàng Kim (Lệnh Bài)|80"));
+        Assert.Contains(page.Sent, m => m.GetProperty("t").GetString() == "cmd" && m.GetProperty("name").GetString() == "assassinGo");
+        // Không bao giờ gọi Sát Thủ mới khi còn truy sát dở
+        Assert.DoesNotContain(page.Sent, m => m.GetProperty("t").GetString() == "cmd" && m.GetProperty("name").GetString() == "assassin");
+        // Máu vẫn giảm → không báo kẹt
+        for (int hp = 79; hp > 40; hp -= 3) t = Run(ctl, t, 60, Hunt("farm", $"Boss Hoàng Kim (Lệnh Bài)|{hp}"));
+        Assert.DoesNotContain("assassin-stuck", problems);
+        // Hạ xong → ghi nhật ký
+        Run(ctl, t, 6, Hunt("farm", ""));
+        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("🗡 Xong truy sát: Boss Hoàng Kim (Lệnh Bài)"));
+    }
+
+    [Fact]
+    public void Hunt_whose_health_does_not_drop_is_paused_and_alerted_but_never_dropped()
+    {
+        var (ctl, page, _) = Make();
+        var problems = new List<(string Key, string Msg)>();
+        ctl.Problem += (k, m) => problems.Add((k, m));
+        var t = Run(ctl, T0, 15, Hunt("farm", "Sát Thủ · Bảo Triệt Sơn|79"));
+        ctl.SetAutoMode(true, t);
+        Run(ctl, t, 17 * 60, Hunt("farm", "Sát Thủ · Bảo Triệt Sơn|79"));
+        var alert = Assert.Single(problems, p => p.Key == "assassin-stuck");
+        Assert.Contains("không bỏ truy sát", alert.Msg);
+        Assert.DoesNotContain(page.Sent, m => m.ToString().Contains("stDrop") || m.ToString().Contains("Bỏ truy sát"));
     }
 
     [Fact]
