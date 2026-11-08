@@ -788,6 +788,63 @@ public class AccountControllerTests
         Assert.Contains("Dự phòng", alert.Msg);
     }
 
+    private static string Tw(string mode, int inTower) => JsonSerializer.Serialize(new
+    {
+        t = "status", screen = "game", lv = "139", gold = "1 vạn", knb = "1 🔒1", mode, modeText = mode, inTower,
+        zone = inTower == 1 ? "Thông Thiên Tháp · tầng 900" : "Hoa Sơn",
+        dt = "200/200", pb = "0/4", ldtHave = "0", ldtUsed = "160/160", ldtBuy = "100/100", st = "0/60",
+    });
+
+    [Fact]
+    public void Tower_mode_but_not_in_the_tower_is_fixed_after_two_minutes()
+    {
+        // 08/11 22:07: chết trong tháp, game ra Luyện Công nhưng app vẫn thấy chế độ Leo Tháp
+        var (ctl, page, _) = Make();
+        ctl.BossHkSchedule = _ => false;
+        var t = Run(ctl, T0, 15, Tw("tower", 1));
+        ctl.SetAutoMode(true, t);
+        t = Run(ctl, t, 70, Tw("tower", 1));
+        int n = ModeCommands(page).Count;
+        t = Run(ctl, t, 90, Tw("tower", 0));
+        Assert.Equal(n, ModeCommands(page).Count); // chưa đủ 2 phút: chờ
+        t = Run(ctl, t, 60, Tw("tower", 0));
+        Assert.Equal("tower", ModeCommands(page).Last());
+        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("🗼 Chế độ Leo Tháp mà nhân vật không ở trong tháp"));
+        // Vào lại được → thôi
+        int m = ModeCommands(page).Count;
+        Run(ctl, t, 5 * 60, Tw("tower", 1));
+        Assert.Equal(m, ModeCommands(page).Count);
+    }
+
+    [Fact]
+    public void Boss_wave_presses_go_when_the_boss_does_not_appear_and_alerts_on_level_gate()
+    {
+        // 08/11 22:00 một nhân vật: "tới Phong Lăng độ" nhưng nhân vật cấp 118 không vào được bản đồ cấp 120
+        var (ctl, page, _) = Make();
+        var problems = new List<(string Key, string Msg)>();
+        ctl.Problem += (k, msg) => problems.Add((k, msg));
+        bool boss = false;
+        ctl.BossHkSchedule = _ => boss;
+        var t = Run(ctl, T0, 15, St("farm"));
+        ctl.SetAutoMode(true, t);
+        t = Run(ctl, t, 70, St("farm"));
+        boss = true;
+        t = Run(ctl, t, 6, St("farm"));
+        ctl.OnPageMessage("""{"t":"sysNote","text":"🗺 Boss Hoàng Kim Huyền Nan Đại Sư: tới Phong Lăng độ","boss":true}""", t);
+        t = Run(ctl, t, 45, St("farm"));
+        Assert.Equal(0, Count(page, "bossHk")); // 1 phút đầu: chờ boss hiện
+        t = Run(ctl, t, 30, St("farm"));
+        Assert.Equal(1, Count(page, "bossHk")); // không thấy "ở ngay gần" → bấm "Đến ngay" ngay, không chờ 15 phút
+        Assert.True(page.Sent.Last(m => m.GetProperty("t").GetString() == "bossHk").GetProperty("arg").GetProperty("go").GetBoolean());
+        ctl.OnPageMessage("""{"t":"bossHkResult","r":"ok","done":false,"alive":true,"went":true,"info":"Huyền Nan Đại Sư cấp 135 tại Phong Lăng độ"}""", t);
+        ctl.OnPageMessage("""{"t":"gameToast","text":"Cần đạt cấp 120 để vào Phong Lăng độ"}""", t);
+        var alert = Assert.Single(problems, p => p.Key == "boss-level");
+        Assert.Contains("Cần đạt cấp 120", alert.Msg);
+        // Không bấm thêm vô ích
+        Run(ctl, t, 10 * 60, St("farm"));
+        Assert.True(Count(page, "bossHk") <= 2);
+    }
+
     private static string Hunt(string mode, string hunt) => JsonSerializer.Serialize(new
     {
         t = "status", screen = "game", lv = "139", gold = "1 vạn", knb = "1 🔒1", mode, modeText = mode,
@@ -879,8 +936,10 @@ public class AccountControllerTests
         boss = true;
         t = Run(ctl, t, 30, St("tower"));
         ctl.OnPageMessage("""{"t":"sysNote","text":"👑 Boss Hoàng Kim Hà Linh Phiêu xuất hiện — tạm rời Tháp tầng 900 đi săn Boss.","boss":true}""", t);
+        t = Run(ctl, t, 3, St("farm"));
+        ctl.OnPageMessage("""{"t":"sysNote","text":"👑 Boss Hoàng Kim · Hà Linh Phiêu (cấp 125) ở ngay gần!","boss":true}""", t);
         t = Run(ctl, t, 5 * 60, St("farm"));
-        Assert.Equal(0, Count(page, "bossHk")); // đang đánh: không cần dự phòng
+        Assert.Equal(0, Count(page, "bossHk")); // boss đã hiện, đang đánh: không cần dự phòng
         ctl.OnPageMessage("""{"t":"sysNote","text":"🎁 Hạ Boss Hoàng Kim: 15.00M kinh nghiệm, 1 Lam Thủy Tinh","boss":true}""", t);
         t = Run(ctl, t, 30 * 60, St("tower"));
         boss = false;

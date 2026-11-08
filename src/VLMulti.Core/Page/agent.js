@@ -352,10 +352,21 @@
 
   // ---------- Lệnh từ app ----------
   const commands = {
-    mode: (code) => {
+    mode: async (code) => {
       const opt = $(`#mswMenu button[data-msw="${CSS.escape(code)}"]`);
       if (!opt) return 'not-in-game';
-      if (opt.classList.contains('on')) return 'already';
+      if (opt.classList.contains('on')) {
+        // Nút "Leo Tháp" vẫn sáng nhưng nhân vật đã bị đưa ra Luyện Công (chết trong tháp, bản game 08/11 không làm
+        // mới nút) → bấm Luyện Công rồi Leo Tháp lại để game thật sự vào tháp
+        const gm = gameModeNow();
+        if (code === 'tower' && gm && !gm.tower && gm.m !== 'tower') {
+          const farm = $('#mswMenu button[data-msw="farm"]');
+          if (farm && farm !== opt) { farm.click(); await sleep(600); }
+          opt.click();
+          return 'ok-reset';
+        }
+        return 'already';
+      }
       opt.click();
       return 'ok';
     },
@@ -1931,6 +1942,34 @@
   };
   // S.gb = {key: "2026-11-08#1" (null ngoài đợt), killed, hpf, n, zn, end, next}; đợt 08/11 15:30: acc hạ xong thì
   // killed = true, acc chưa đánh thì hpf vẫn 1 dù acc khác đã hạ
+  // Chế độ thật trong game: S.mode ("farm" / "tower" / …), đang trong tháp (R.tower), phó bản (R.dg)
+  const gameModeNow = () => {
+    try { const S = window.H5.G('S'), R = window.H5.G('R'); return S ? { m: String(S.mode || ''), tower: !!(R && R.tower), dg: !!(R && R.dg) } : null; } catch (_) { return null; }
+  };
+  // 08/11 22:07: 2 nhân vật chết trong tháp, game đưa ra Luyện Công (S.mode = farm) nhưng nút "🗼 Leo Tháp"
+  // vẫn sáng → app tưởng đang leo tháp, không đưa vào lại suốt 25 phút. Nút "Leo Tháp" sáng mà game không ở tháp
+  // (hoặc ngược lại) quá 5 giây → báo theo game.
+  let modeMismatchSince = 0;
+  const reportedMode = (btn) => {
+    const gm = gameModeNow();
+    let real = null;
+    if (gm && !gm.dg) {
+      if (btn === 'tower' && !gm.tower && gm.m && gm.m !== 'tower') real = gm.m;
+      else if (btn && btn !== 'tower' && gm.tower) real = 'tower';
+    }
+    if (!real) { modeMismatchSince = 0; return btn; }
+    if (!modeMismatchSince) modeMismatchSince = Date.now();
+    return Date.now() - modeMismatchSince > 5000 ? real : btn;
+  };
+  // Thông báo nhỏ của game (#toast): báo về app những câu cần biết, ví dụ "Cần đạt cấp 120 để vào Phong Lăng độ"
+  // (08/11 22:00: boss Hoàng Kim của một nhân vật ở bản đồ cấp 120, nhân vật cấp 118 – không vào được)
+  let toastSeen = '';
+  setInterval(() => {
+    const el = $('#toast');
+    const text = el && el.classList.contains('on') ? el.textContent.trim() : '';
+    if (text && text !== toastSeen && /Cần đạt cấp \d+/.test(text)) post({ t: 'gameToast', text: text.slice(0, 160) });
+    toastSeen = text;
+  }, 400);
   const goldBossNow = () => {
     try { const S = window.H5.G('S'); const g = S && S.gb; return g && g.key ? `${g.key}|${g.killed ? 1 : 0}|${Math.round(100 * (+g.hpf || 0))}` : ''; } catch (_) { return ''; }
   };
@@ -2343,6 +2382,8 @@
       try { refreshBag(); } catch (err) { post({ t: 'log', msg: 'read bag failed: ' + err.message }); }
     }
     const on = $('#mswMenu button.on');
+    const btnMode = on ? on.dataset.msw || '' : '';
+    const realMode = screen === 'game' ? reportedMode(btnMode) : btnMode;
     const s = {
       t: 'status',
       screen,
@@ -2378,8 +2419,10 @@
       gbw: screen === 'game' ? goldBossNow() : '',
       gold: txt('#gold'),
       knb: txt('#knbTop'),
-      mode: on ? on.dataset.msw || '' : '',
-      modeText: on ? on.textContent.trim() : '',
+      // Chế độ: theo nút đang sáng, nhưng nút lệch với trạng thái game quá 5 giây thì theo game (xem reportedMode)
+      mode: realMode,
+      modeText: realMode !== btnMode ? `${realMode} (nút: ${btnMode})` : on ? on.textContent.trim() : '',
+      inTower: screen === 'game' ? ((gm) => (gm ? (gm.tower ? 1 : 0) : -1))(gameModeNow()) : -1,
     };
     const json = JSON.stringify(s);
     if (json !== last || Date.now() - lastAt > 10000) {

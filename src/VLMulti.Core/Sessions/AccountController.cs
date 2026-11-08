@@ -520,6 +520,9 @@ public sealed class AccountController
                 case "unreadable":
                     OnUnreadable(Str(m, "what"), Str(m, "sample"), now);
                     break;
+                case "gameToast":
+                    OnGameToast(Str(m, "text"), now);
+                    break;
                 case "sysNote":
                     OnSysNote(Str(m, "text"), m.TryGetProperty("boss", out var bossFlag) && bossFlag.ValueKind == JsonValueKind.True, now);
                     break;
@@ -643,6 +646,7 @@ public sealed class AccountController
             (Exp, Tracker) = (exp, tracker);
             ApplyHunt(Str(s, "hunt"), now);
             ApplyGoldBoss(Str(s, "gbw"), now);
+            InTower = s.TryGetProperty("inTower", out var it) && it.ValueKind == JsonValueKind.Number ? it.GetInt32() : -1;
 
             var modeCode = Str(s, "mode");
             if (modeCode == "tower" && ModeCode != "tower")
@@ -804,7 +808,11 @@ public sealed class AccountController
         if (_bossAskPending && now - _bossAskAt > TimeSpan.FromMinutes(2)) _bossAskPending = false;
         if (BossDoneThisWave) return;
         if (ModeCode == ModeRules.Dungeon) { _waveInDungeon = true; return; } // không bỏ dở Phó Bản
-        bool engaged = WaveBossTracked || (_bossEngagedAt is { } e && e >= _waveStart && now - e < BossFightMax);
+        // "tới <bản đồ>" mà sau 1 phút boss vẫn chưa "ở ngay gần" → không tính là đang đánh (08/11 22:00 một nhân vật:
+        // game báo "tới Phong Lăng độ" nhưng không vào được bản đồ, app đứng chờ 15 phút mới bấm "Đến ngay")
+        bool engaged = WaveBossTracked || (_bossEngagedAt is { } e && e >= _waveStart && now - e < BossFightMax
+            && (now - e < BossNearWait || (_bossNearAt is { } nr && nr >= e)));
+        bool wentNoBoss = _bossEngagedAt is { } e2 && e2 >= _waveStart && now - e2 >= BossNearWait && !(_bossNearAt is { } nr2 && nr2 >= e2);
         var since = now - _waveStart;
 
         // Không vào lại tháp trong đợt: ngày 08/11 12:00 bước "vào lại tháp" (đã bỏ) đưa acc ngược khỏi boss.
@@ -823,7 +831,7 @@ public sealed class AccountController
         }
         if (_bossAskPending) return;
         // Dự phòng: "Đến ngay"
-        var goAfter = _waveGoEarly ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(3);
+        var goAfter = _waveGoEarly || wentNoBoss ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(3);
         if (!engaged && since >= goAfter && _waveGoTries < BossGoTries && now - _waveGoAt > TimeSpan.FromMinutes(2))
         {
             _waveGoTries++;
@@ -920,7 +928,28 @@ public sealed class AccountController
     {
         if (text.Contains("Chúc mừng")) return; // thông báo chung của server
         if (BossDonePattern.IsMatch(text)) _bossDoneAt = now;
-        else if (BossEngagedPattern.IsMatch(text) && HuntName.Length == 0) _bossEngagedAt = now; // Lệnh Bài: là truy sát
+        else if (BossEngagedPattern.IsMatch(text) && HuntName.Length == 0) // Lệnh Bài: là truy sát
+        {
+            _bossEngagedAt = now;
+            if (text.Contains("ở ngay gần")) _bossNearAt = now;
+        }
+    }
+
+    private static readonly TimeSpan BossNearWait = TimeSpan.FromMinutes(1);
+    private DateTime? _bossNearAt;
+    private DateTime _levelGateAlertAt;
+
+    // Game báo "Cần đạt cấp N để vào <bản đồ>" lúc đi boss Hoàng Kim / truy sát: boss ở bản đồ nhân vật chưa vào được
+    // (game chọn bản đồ tới cấp nhân vật + 5 nhưng cổng đòi đủ cấp) – không bấm thêm được gì, báo ngay để bạn biết
+    private void OnGameToast(string text, DateTime now)
+    {
+        Log.Write($"[{Account.Id}] game toast: {text}");
+        bool boss = BossHkSchedule(now) || HuntName.Length > 0;
+        if (!boss || now - _levelGateAlertAt < TimeSpan.FromMinutes(20)) return;
+        _levelGateAlertAt = now;
+        var what = HuntName.Length > 0 && !BossHkSchedule(now) ? HuntName : "Boss Hoàng Kim đợt này";
+        _waveGoTries = BossGoTries; // bấm "Đến ngay" thêm cũng không vào được
+        Raise("boss-level", $"{what}: game báo \"{text}\" – nhân vật chưa đủ cấp vào bản đồ có boss, lượt này không đánh được");
     }
     // Lịch đợt boss (test thay bằng hàm khác để không phụ thuộc múi giờ máy chạy test)
     public Func<DateTime, bool> BossHkSchedule { get; set; } = now => GameData.BossHkSchedule.IsActive(now.ToUniversalTime());
@@ -1056,6 +1085,7 @@ public sealed class AccountController
         SuperviseAutoMode(now);
         HintDungeonDone(now);
         SuperviseTowerReturn(now);
+        SuperviseTowerPresence(now);
         SuperviseAssassin(now);
         SuperviseEvents(now);
         SuperviseTeacher(now);
@@ -1384,6 +1414,25 @@ public sealed class AccountController
 
     // Acc bạn đã chọn Leo Tháp (không bật luật 🔁): đang Luyện Công vì chết/nghỉ tháp → hết giờ chờ thì vào lại tháp.
     // Acc bật luật 🔁 thì luật tự đưa vào lại (tháp đứng trước Luyện Công).
+    // Đang trong game có biết ở tháp hay không (-1 = trang không đọc được)
+    public int InTower { get; private set; } = -1;
+    private DateTime? _towerAbsentSince;
+    private DateTime _towerAbsentFixAt;
+
+    // Lưới an toàn: chế độ là Leo Tháp mà game báo không ở trong tháp quá 2 phút (không phải lúc boss / truy sát)
+    // → bấm lại Leo Tháp (trang tự bấm Luyện Công rồi Leo Tháp nếu nút đã sáng)
+    private void SuperviseTowerPresence(DateTime now)
+    {
+        bool absent = Screen == "game" && ModeCode == ModeRules.Tower && InTower == 0 && !AssassinActive;
+        if (!absent) { _towerAbsentSince = null; return; }
+        _towerAbsentSince ??= now;
+        if (now - _towerAbsentSince < TimeSpan.FromMinutes(2) || now - _towerAbsentFixAt < TimeSpan.FromMinutes(3)) return;
+        _towerAbsentFixAt = now;
+        Log.Write($"[{Account.Id}] tower stuck: chế độ Leo Tháp nhưng không ở trong tháp {(now - _towerAbsentSince.Value).TotalMinutes:0} phút → vào lại");
+        Note(now, "🗼 Chế độ Leo Tháp mà nhân vật không ở trong tháp – vào lại tháp", StatusLevel.Warn);
+        RunCommand("mode", ModeRules.Tower);
+    }
+
     private void SuperviseTowerReturn(DateTime now)
     {
         if (!Account.StayInTower || Account.AutoMode || Screen != "game" || ModeCode != ModeRules.Farm) return;
