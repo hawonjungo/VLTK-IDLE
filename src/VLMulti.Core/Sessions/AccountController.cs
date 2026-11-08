@@ -520,6 +520,9 @@ public sealed class AccountController
                 case "unreadable":
                     OnUnreadable(Str(m, "what"), Str(m, "sample"), now);
                     break;
+                case "gameLog":
+                    OnGameLog(m, now);
+                    break;
                 case "gameToast":
                     OnGameToast(Str(m, "text"), now);
                     break;
@@ -941,6 +944,33 @@ public sealed class AccountController
 
     // Game báo "Cần đạt cấp N để vào <bản đồ>" lúc đi boss Hoàng Kim / truy sát: boss ở bản đồ nhân vật chưa vào được
     // (game chọn bản đồ tới cấp nhân vật + 5 nhưng cổng đòi đủ cấp) – không bấm thêm được gì, báo ngay để bạn biết
+    // 📜 Nhật ký game (agent.js móc vào hàm log của game): ghi file theo ngày, kèm tầng / bản đồ; đồ hiếm của chính
+    // nhân vật → ghi hoạt động, riêng bộ Vô Danh (nhẫn Vô Danh có kỹ năng vốn có cực hiếm) → cảnh báo
+    public Action<string, IReadOnlyList<GameLog.Entry>>? GameLogSink { get; set; } = (id, list) => GameLog.Append(id, list);
+
+    private void OnGameLog(JsonElement m, DateTime now)
+    {
+        if (!m.TryGetProperty("lines", out var arr) || arr.ValueKind != JsonValueKind.Array) return;
+        var list = new List<GameLog.Entry>();
+        foreach (var l in arr.EnumerateArray())
+        {
+            var text = Str(l, "text");
+            if (GameLog.IsNoise(text)) continue;
+            var at = l.TryGetProperty("at", out var a) && a.TryGetInt64(out var ms)
+                ? DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime.ToLocalTime() : now;
+            var place = Str(l, "place");
+            var kind = GameLog.Classify(text);
+            list.Add(new GameLog.Entry(at, kind, place, Account.CharName ?? "", text));
+            if (kind != "rare") continue;
+            var where = place.Length > 0 ? $" ({place})" : "";
+            if (text.Contains("Vô Danh", StringComparison.OrdinalIgnoreCase))
+                Raise("rare-item", $"💎 Đồ hiếm Vô Danh: {text}{where} – kiểm tra kỹ năng vốn có, đừng bán / đốt");
+            else
+                Note(now, $"💎 {text}{where}", StatusLevel.Ok);
+        }
+        if (list.Count > 0) GameLogSink?.Invoke(Account.Id, list);
+    }
+
     private void OnGameToast(string text, DateTime now)
     {
         Log.Write($"[{Account.Id}] game toast: {text}");
@@ -2362,7 +2392,7 @@ public sealed class AccountController
             if (cfg != _kiteCfgSent) Log.Write($"[{Account.Id}] kite line: {cfg}");
             _kiteCfgSent = cfg;
             _kiteCfgAt = now;
-            Post(new { t = "kiteCfg", arg = lineOn ? new { on = true, step = dist, pauseMs, crowd, near = 250, fleeHp = flee, span = 700, margin = 260 } : null });
+            Post(new { t = "kiteCfg", arg = lineOn ? new { on = true, step = dist, pauseMs, crowd, near = 400, fleeHp = flee, span = 700, margin = 260 } : null });
             if (lineOn) SetStatus("🏃 Kéo quái: hàng dọc giữa phòng", StatusLevel.Ok);
         }
         if (dir == KiteDirections.Line) return;

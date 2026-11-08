@@ -44,7 +44,7 @@ public sealed class AppSettings
     // Kiểu "Hàng dọc": máu dưới KiteFleeHp % thì chạy về đầu đường xa đám quái (0 = tắt)
     public int KiteFleeHp { get; set; } = 40;
     // Kiểu "Hàng dọc": chạy khi có hơn KiteCrowd con quái ở gần (0 = luôn chạy theo nhịp); dừng KitePauseMs ms giữa 2 bước
-    public int KiteCrowd { get; set; } = 3;
+    public int KiteCrowd { get; set; } = 2; // "hơn 2 con" = từ 3 con trở lên
     public int KitePauseMs { get; set; } = 500;
 
     // Luật tự đổi chế độ (bật riêng từng acc bằng AccountSlot.AutoMode) – xem GameData.ModeRules

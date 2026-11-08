@@ -253,3 +253,13 @@ body.no-scroll { overflow: hidden; }
 
 /* Lỗi lần bấm gần nhất trong bảng 🐴 Ngựa */
 p.warn { color: var(--warn); font-weight: 600; }
+
+/* 📜 Nhật ký game */
+.gamelog { max-height: 60vh; overflow-y: auto; margin-top: 8px; font-size: 13px; }
+.gl-row { display: flex; flex-wrap: wrap; gap: 4px 8px; padding: 4px 0; border-bottom: 1px solid var(--border, rgba(127,127,127,.2)); }
+.gl-at { font-variant-numeric: tabular-nums; opacity: .7; }
+.gl-place { opacity: .8; min-width: 6em; }
+.gl-char { font-weight: 600; }
+.gl-text { flex: 1 1 100%; overflow-wrap: anywhere; }
+.gl-rare .gl-text, .gl-server-rare .gl-text { color: var(--warn); font-weight: 600; }
+.gl-death .gl-text { color: var(--error); }

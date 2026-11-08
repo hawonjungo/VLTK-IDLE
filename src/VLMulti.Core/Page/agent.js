@@ -504,14 +504,15 @@
   // ---------- 🏃 Kéo quái kiểu "Hàng dọc" (chạy trong trang, nhịp 0,3 giây) ----------
   // Đọc trạng thái game qua cầu nối H5.G: nhân vật H (x, y), R.enemies, R.tower.floor, R.spawnT (đếm ngược quái ra),
   // R.life, WORLD (kích thước phòng), CAM (góc trái trên của camera) và AR (khung nhìn logic 640×360).
-  // Quái gần (trong `near` px) nhiều hơn `crowd` con → chạy lên/xuống trên đường dọc giữa phòng, bước ngắn `step` px
-  // rồi dừng `pauseMs` ms cho nhân vật ra chiêu (vòng đánh của game vẫn chạy khi đi), tới đầu đường thì quay lại; quái
-  // đuổi theo xếp thành hàng dọc sau lưng. Chạy cả khi máu đầy (quái đánh gần như mất hết máu một lần). Ít quái thì đứng
-  // yên đánh hết tốc lực. crowd = 0: luôn chạy theo nhịp.
-  // Reset về giữa phòng: sang tầng mới, lệch khỏi đường > 200 px, hoặc sát mép / góc phòng (tránh bị ép vào góc).
-  // Né đợt quái mới: đếm ngược quái ra < 0,4 giây → chạy ngay. Máu < fleeHp% → chạy về đầu đường xa đám quái nhất.
+  // Luôn VỪA ĐÁNH VỪA ĐI: mọi lần di chuyển là một bước ngắn (tối đa `step` px – đi xa game tự lên ngựa, không đánh
+  // được), giữa 2 bước dừng `pauseMs` ms để ra chiêu và hút sinh lực. Bước dọc theo đường thẳng đứng giữa phòng, ngược
+  // phía đám quái → quái đuổi theo thành một hàng, đòn đánh của quái bị lệch.
+  //  - Quái ở gần (trong `near` px, mặc định 400) nhiều hơn `crowd` con → bước theo nhịp; ít hơn thì đứng yên đánh.
+  //  - Quái tầng mới sắp ra / vừa ra (ra quanh nhân vật ±260 px, 08/11 chết trong 2 giây) → một bước né ngay.
+  //  - Lệch khỏi đường / sát mép: bước ngắn dần về phía giữa (không chạy một mạch). Máu thấp: bước ra xa đám quái.
+  //  - Đã bấm đi mà nhân vật không nhúc nhích (08/11: đứng yên lúc chuyển tầng) → bấm lại, ghi log.
   let kiteCfg = null;
-  const kiteSt = { floor: null, dir: 1, phase: 'run', until: 0, target: null, last: '' };
+  const kiteSt = { floor: null, dir: 1, phase: 'stand', until: 0, target: null, from: null, at: 0, retry: 0, last: '', dodged: false, stuckLog: 0 };
   const g = (n) => { try { return window.H5.G(n); } catch (_) { return undefined; } };
   const clickWorld = (tx, ty) => {
     const arena = $('#arena'), CAM = g('CAM'), AR = g('AR');
@@ -536,50 +537,63 @@
     if (!H || !R || !W || !R.tower || R.dg || R.sat || R.deadT > 0 || (S && S.mode !== 'tower')) { kiteSt.floor = null; return; }
     const now = Date.now();
     const m = c.margin ?? 260;
+    const step = Math.min(c.step ?? 150, 200);
+    const pauseMs = c.pauseMs ?? 500;
     const cx = W.w / 2, cy = W.h / 2;
     const half = Math.max(150, Math.min(c.span ?? 700, W.h / 2 - m));
     const yTop = cy - half, yBot = cy + half;
     const en = (R.enemies || []).filter((e) => e && !e.dead && e.hp > 0);
     const lifePct = R.P && R.P.life > 0 ? 100 * (R.life || 0) / R.P.life : null; // R.P.life = máu tối đa
-    // Hết giờ chạy theo quãng đường (tốc chạy ~150 px/giây), tối thiểu 0,8 giây
+    // Một bước ngắn về phía (tx, ty): cắt còn tối đa `step` px
     const go = (tx, ty, why) => {
-      const d = Math.hypot(tx - H.x, ty - H.y);
-      kiteSt.target = { x: tx, y: ty }; kiteSt.phase = 'run'; kiteSt.until = now + Math.max(800, Math.min(6000, d / 150 * 1000 + 500));
-      kiteSt.last = why; clickWorld(tx, ty);
+      let dx = tx - H.x, dy = ty - H.y; const d = Math.hypot(dx, dy);
+      if (d > step) { dx *= step / d; dy *= step / d; }
+      const x = H.x + dx, y = H.y + dy;
+      kiteSt.target = { x, y }; kiteSt.from = { x: H.x, y: H.y }; kiteSt.at = now; kiteSt.retry = 0;
+      kiteSt.phase = 'run'; kiteSt.until = now + Math.min(d, step) / 150 * 1000 + 450; kiteSt.last = why;
+      clickWorld(x, y);
     };
-    // Tầng mới → về giữa phòng
-    if (R.tower.floor !== kiteSt.floor) { kiteSt.floor = R.tower.floor; go(cx, cy, 'floor'); return; }
-    // Lệch khỏi đường / sát mép → reset về giữa
-    const nearEdge = H.x < m || H.x > W.w - m || H.y < m || H.y > W.h - m;
-    if ((Math.abs(H.x - cx) > 200 || nearEdge) && kiteSt.last !== 'reset') { go(cx, cy, 'reset'); return; }
-    // Máu thấp → chạy về đầu đường xa đám quái
-    if (c.fleeHp && lifePct != null && lifePct < c.fleeHp && en.length) {
-      const ey = en.reduce((a, e) => a + e.y, 0) / en.length;
-      const ty = ey > H.y ? yTop : yBot;
-      if (kiteSt.last !== 'flee' || now > kiteSt.until) { kiteSt.dir = ty > H.y ? 1 : -1; go(cx, ty, 'flee'); }
-      return;
-    }
-    // Chưa có quái: đứng giữa đường; quái sắp ra (đếm ngược < 0,4 giây) → chạy ngay để không bị vây lúc ra
-    if (!en.length) {
-      if (R.spawnT > 0 && R.spawnT < 0.4 && kiteSt.last !== 'dodge') go(cx, Math.max(yTop, Math.min(yBot, H.y + kiteSt.dir * (c.step ?? 250))), 'dodge');
-      return;
-    }
-    const step = c.step ?? 150;
-    const pauseMs = c.pauseMs ?? (c.pause != null ? 1000 * c.pause : 500);
+    // Hướng bước dọc đường: ngược phía đám quái (nếu có), tới đầu đường thì quay lại
+    const stepAlong = (why, list) => {
+      if (list && list.length) { const ey = list.reduce((a, e) => a + e.y, 0) / list.length; kiteSt.dir = ey > H.y ? -1 : 1; }
+      let ty = H.y + kiteSt.dir * step;
+      if (ty > yBot || ty < yTop) { kiteSt.dir = -kiteSt.dir; ty = H.y + kiteSt.dir * step; }
+      go(cx, Math.max(yTop, Math.min(yBot, ty)), why);
+    };
+    // Tầng mới: không chạy về giữa một mạch (đi xa là lên ngựa) – chỉ ghi nhận, chờ né lúc quái ra
+    if (R.tower.floor !== kiteSt.floor) { kiteSt.floor = R.tower.floor; kiteSt.dodged = false; kiteSt.phase = 'stand'; kiteSt.target = null; }
+    // Đang đi một bước
     if (kiteSt.phase === 'run') {
-      const t = kiteSt.target;
-      const arrived = !t || Math.hypot(H.x - t.x, H.y - t.y) < 40;
+      const t = kiteSt.target, f = kiteSt.from;
+      const moved = f ? Math.hypot(H.x - f.x, H.y - f.y) : 99;
+      // Bấm rồi mà không nhúc nhích sau 0,7 giây → bấm lại (tối đa 2 lần), ghi log
+      if (moved < 12 && now - kiteSt.at > 700 && kiteSt.retry < 2) {
+        kiteSt.retry++; kiteSt.at = now; clickWorld(t.x, t.y);
+        if (now - kiteSt.stuckLog > 30000) { kiteSt.stuckLog = now; post({ t: 'log', msg: `kite: không nhúc nhích sau khi bấm (${kiteSt.last}, tầng ${R.tower.floor}, quái ${en.length}) → bấm lại` }); }
+        return;
+      }
+      const arrived = !t || Math.hypot(H.x - t.x, H.y - t.y) < 30;
       if (arrived || now > kiteSt.until) { kiteSt.phase = 'pause'; kiteSt.until = now + pauseMs; }
       return;
     }
-    // Ít quái quanh nhân vật → đứng yên đánh (đông lên là bước ngay, không chờ hết nhịp dừng)
-    const crowd = c.crowd ?? 3;
-    const near = en.filter((e) => Math.hypot(e.x - H.x, e.y - H.y) <= (c.near ?? 250)).length;
-    if (crowd > 0 && near <= crowd) { kiteSt.phase = 'stand'; return; }
-    if (kiteSt.phase === 'pause' && now < kiteSt.until) return; // đang dừng cho ra chiêu
-    let ty = H.y + kiteSt.dir * step;
-    if (ty > yBot || ty < yTop) { kiteSt.dir = -kiteSt.dir; ty = Math.max(yTop, Math.min(yBot, H.y + kiteSt.dir * step)); }
-    go(cx, ty, 'step');
+    if (kiteSt.phase === 'pause' && now < kiteSt.until) return; // đang dừng ra chiêu / hút sinh lực
+    // Quái sắp ra (đếm ngược < 0,5 giây) hoặc vừa ra: một bước né ngay, rồi vào nhịp
+    if (!kiteSt.dodged && ((!en.length && R.spawnT > 0 && R.spawnT < 0.5) || en.length)) { kiteSt.dodged = true; stepAlong('dodge', en); return; }
+    if (!en.length) return;
+    // Lệch khỏi đường / sát mép → bước ngắn về phía giữa
+    const nearEdge = H.x < m || H.x > W.w - m || H.y < m || H.y > W.h - m;
+    if (Math.abs(H.x - cx) > 200 || nearEdge) {
+      const ty = H.y < m || H.y > W.h - m ? cy : Math.max(yTop, Math.min(yBot, H.y));
+      go(cx, ty, 'reset');
+      return;
+    }
+    const nearList = en.filter((e) => Math.hypot(e.x - H.x, e.y - H.y) <= (c.near ?? 400));
+    // Máu thấp → bước ra xa đám quái (vẫn từng bước, vẫn đánh giữa các bước)
+    if (c.fleeHp && lifePct != null && lifePct < c.fleeHp) { stepAlong('flee', nearList.length ? nearList : en); return; }
+    // Ít quái quanh nhân vật → đứng yên đánh hết tốc lực
+    const crowd = c.crowd ?? 2;
+    if (crowd > 0 && nearList.length <= crowd) { kiteSt.phase = 'stand'; return; }
+    stepAlong('step', nearList);
   };
   setInterval(() => { try { kiteTick(); } catch (err) { post({ t: 'log', msg: 'kite: ' + err.message }); kiteCfg = null; } }, 300);
 
@@ -1961,6 +1975,42 @@
     if (!modeMismatchSince) modeMismatchSince = Date.now();
     return Date.now() - modeMismatchSince > 5000 ? real : btn;
   };
+  // 📜 Nhật ký game: mọi dòng đi qua hàm log của game (R.logs.unshift, giữ 150 dòng) → bắt ngay lúc ghi, không phụ
+  // thuộc thẻ chat đang mở, không trôi. Mỗi dòng kèm nơi đang đứng ("Tầng N" trong tháp, hoặc tên bản đồ).
+  const gameLogQ = [];
+  const logPlace = () => {
+    try {
+      const R = window.H5.G('R');
+      if (R && R.tower && R.tower.floor) return `Tầng ${R.tower.floor}`;
+      if (R && R.dg) return 'Phó bản';
+    } catch (_) {}
+    return (txt('#u20zone') || '').replace(/[▾\s]+$/, '').trim();
+  };
+  const logText = (it) => {
+    const raw = typeof it === 'string' ? it : it && (it.html || it.t || it.text) || '';
+    return String(raw).replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim().slice(0, 300);
+  };
+  const hookGameLog = () => {
+    try {
+      const R = window.H5 && window.H5.G && window.H5.G('R');
+      const L = R && R.logs;
+      if (!Array.isArray(L) || L.__vlHook) return;
+      const orig = L.unshift;
+      Object.defineProperty(L, '__vlHook', { value: true });
+      L.unshift = function (...items) {
+        try {
+          const place = logPlace();
+          for (const it of items) { const text = logText(it); if (text) gameLogQ.push({ at: Date.now(), text, place }); }
+          if (gameLogQ.length > 500) gameLogQ.splice(0, gameLogQ.length - 500);
+        } catch (_) {}
+        return orig.apply(this, items);
+      };
+    } catch (_) {}
+  };
+  setInterval(() => {
+    hookGameLog(); // R.logs có thể được tạo lại (vào game, đổi nhân vật) → móc lại
+    if (gameLogQ.length) post({ t: 'gameLog', lines: gameLogQ.splice(0, 120) });
+  }, 1500);
   // Thông báo nhỏ của game (#toast): báo về app những câu cần biết, ví dụ "Cần đạt cấp 120 để vào Phong Lăng độ"
   // (08/11 22:00: boss Hoàng Kim của một nhân vật ở bản đồ cấp 120, nhân vật cấp 118 – không vào được)
   let toastSeen = '';

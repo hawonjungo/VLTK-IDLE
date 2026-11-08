@@ -845,6 +845,38 @@ public class AccountControllerTests
         Assert.True(Count(page, "bossHk") <= 2);
     }
 
+    [Fact]
+    public void Game_log_lines_are_kept_with_floor_and_rare_items_are_flagged()
+    {
+        var (ctl, _, _) = Make();
+        var problems = new List<(string Key, string Msg)>();
+        ctl.Problem += (k, msg) => problems.Add((k, msg));
+        var written = new List<GameLog.Entry>();
+        ctl.GameLogSink = (_, list) => written.AddRange(list);
+        var t = Run(ctl, T0, 6, St("tower"));
+        var at = new DateTimeOffset(T0).ToUnixTimeMilliseconds();
+        ctl.OnPageMessage(JsonSerializer.Serialize(new
+        {
+            t = "gameLog",
+            lines = new object[]
+            {
+                new { at, text = "Nhận được 1.234 điểm kinh nghiệm", place = "Tầng 900" },
+                new { at, text = "🗼 Tháp: qua tầng 900 · nhận 1 Huyền Tinh cấp 7", place = "Tầng 900" },
+                new { at, text = "Nhặt được Tỏa Tử Hoàng Kim giáp", place = "Tầng 901" },
+                new { at, text = "Nhặt được Nhẫn Vô Danh", place = "Phong Lăng độ" },
+                new { at, text = "📢 Chúc mừng X nhận được Đồ phổ Y từ Boss Hoàng Kim!", place = "Tầng 901" },
+            },
+        }), t);
+        Assert.Equal(4, written.Count); // dòng kinh nghiệm bị bỏ
+        Assert.Equal(("tower", "Tầng 900"), (written[0].Kind, written[0].Place));
+        Assert.Equal("rare", written[1].Kind);
+        Assert.Equal("server-rare", written[3].Kind);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("💎 Nhặt được Tỏa Tử Hoàng Kim giáp (Tầng 901)"));
+        var alert = Assert.Single(problems, p => p.Key == "rare-item");
+        Assert.Contains("Nhẫn Vô Danh", alert.Msg);
+        Assert.Contains("Phong Lăng độ", alert.Msg);
+    }
+
     private static string Hunt(string mode, string hunt) => JsonSerializer.Serialize(new
     {
         t = "status", screen = "game", lv = "139", gold = "1 vạn", knb = "1 🔒1", mode, modeText = mode,

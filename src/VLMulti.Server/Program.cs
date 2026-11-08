@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using VLMulti.Core;
+using VLMulti.Core.Sessions;
 using VLMulti.Server;
 
 // VLMulti.Server – chạy các acc bằng Chromium ẩn (Linux hoặc Windows) và mở trang web điều khiển.
@@ -151,6 +152,16 @@ app.Map("/api/acc/{id}/live", async (string id, HttpContext ctx) =>
     await manager.RunLiveAsync(id, ws, ctx.RequestAborted);
 });
 
+// 📜 Nhật ký game theo ngày (giờ VN), lọc theo loại: ?day=2026-11-08&kinds=boss,rare
+static DateOnly LogDay(string? day) => DateOnly.TryParse(day, out var d) ? d : GameLog.VnDay(DateTime.Now);
+static string[] LogKinds(string? kinds) => (kinds ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+static object LogJson(GameLog.Entry e) => new { at = e.At.ToUniversalTime().AddHours(7).ToString("HH:mm:ss"), kind = e.Kind, place = e.Place, @char = e.Char, text = e.Text };
+app.MapGet("/api/acc/{id}/gamelog", (string id, string? day, string? kinds) =>
+    id.All(c => char.IsLetterOrDigit(c) || c is '-' or '_')
+        ? Results.Json(GameLog.Read(id, LogDay(day), LogKinds(kinds)).Select(LogJson))
+        : Results.NotFound());
+app.MapGet("/api/gamelog/rare", (string? day) =>
+    Results.Json(GameLog.ReadAll(LogDay(day), new[] { "rare", "server-rare" }).Select(LogJson)));
 app.MapPost("/api/acc/{id}/click", (string id, ClickRequest req) => manager.Click(id, req.X, req.Y) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/reload", (string id) => manager.Reload(id) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/kite", (string id) => manager.ToggleKite(id) ? Results.Ok() : Results.NotFound());

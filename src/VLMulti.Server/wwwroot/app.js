@@ -471,6 +471,44 @@ Chuyển: thư tặng (0 KNB) giữa các nhân vật của bạn. Bán: ngựa 
   if (busy) horseTimer = setTimeout(renderHorses, 2000);
 }
 $('#horseBtn').addEventListener('click', openHorses);
+
+// ---------- 📜 Nhật ký game ----------
+// Mỗi dòng game ghi (kèm tầng / bản đồ), lọc theo nhân vật, loại, ngày; "💎 Đồ hiếm" gộp mọi nhân vật + thông báo server
+const GAMELOG_KINDS = [['', 'Mọi loại'], ['rare', '💎 Đồ hiếm (của mình)'], ['server-rare', '📢 Đồ hiếm toàn server'], ['boss', '👑 Boss'],
+  ['assassin', '🗡 Sát Thủ'], ['tower', '🗼 Tháp'], ['death', '💀 Gục ngã'], ['loot', '🎁 Nhặt / nhận đồ'], ['server', '📢 Thông báo server'], ['other', 'Khác']];
+const vnToday = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+let logSel = { who: 'rare', kind: '', day: '' };
+async function openGameLog() {
+  const accs = (state?.accounts || []).filter((a) => a.enabled);
+  const opt = (v, t, cur) => { const o = h('option', { value: v, text: t }); o.selected = v === cur; return o; };
+  const who = h('select', {}, [opt('rare', '💎 Đồ hiếm – mọi nhân vật', logSel.who)].concat(accs.map((a) => opt(a.id, a.name || a.id, logSel.who))));
+  const kind = h('select', {}, GAMELOG_KINDS.map(([v, t]) => opt(v, t, logSel.kind)));
+  const day = h('input', { type: 'date', value: logSel.day || vnToday() });
+  const list = h('div', { class: 'gamelog' }, [h('p', { class: 'dim', text: 'Đang tải…' })]);
+  const load = async () => {
+    logSel = { who: who.value, kind: kind.value, day: day.value };
+    kind.disabled = who.value === 'rare';
+    list.replaceChildren(h('p', { class: 'dim', text: 'Đang tải…' }));
+    try {
+      const rows = who.value === 'rare'
+        ? await api(`gamelog/rare?day=${day.value}`)
+        : await api(`acc/${encodeURIComponent(who.value)}/gamelog?day=${day.value}${kind.value ? '&kinds=' + kind.value : ''}`);
+      list.replaceChildren(...(rows.length ? rows.map((r) => h('div', { class: 'gl-row gl-' + r.kind }, [
+        h('span', { class: 'gl-at', text: r.at }),
+        h('span', { class: 'gl-place', text: r.place || '' }),
+        who.value === 'rare' ? h('span', { class: 'gl-char', text: r.char || '' }) : null,
+        h('span', { class: 'gl-text', text: r.text }),
+      ].filter(Boolean))) : [h('p', { class: 'dim', text: 'Chưa có dòng nào.' })]));
+    } catch (e) { list.replaceChildren(h('p', { class: 'warn', text: '⚠ ' + e.message })); }
+  };
+  for (const el of [who, kind, day]) el.addEventListener('change', load);
+  openModal('📜 Nhật ký game', [
+    h('div', { class: 'form-grid' }, [h('label', { text: 'Nhân vật' }), who, h('label', { text: 'Loại' }), kind, h('label', { text: 'Ngày' }), day]),
+    list,
+  ], true);
+  load();
+}
+$('#gameLogBtn').addEventListener('click', openGameLog);
 $('#modalClose').addEventListener('click', () => { horseOpen = false; });
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') horseOpen = false; });
 
