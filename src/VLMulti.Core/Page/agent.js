@@ -1932,6 +1932,10 @@
   const goldBossNow = () => {
     try { const S = window.H5.G('S'); const g = S && S.gb; return g && g.key ? `${g.key}|${g.killed ? 1 : 0}|${Math.round(100 * (+g.hpf || 0))}` : ''; } catch (_) { return ''; }
   };
+  // Boss truy sát đã xuất hiện: bản H5 tạo boss phía trình duyệt với fbK (khoá lượt đánh trên server); bản cũ: sat / ve
+  const huntBossHere = () => {
+    try { const R = window.H5.G('R'); return (R.enemies || []).some((e) => e && !e.dead && (e.fbK || e.sat || e.ve)); } catch (_) { return false; }
+  };
   const assassinActive = () => !!huntNow() || /Sát Thủ/.test((($('#u20trk') || {}).textContent) || '');
   // Đang ở tháp / phó bản (game: "Rời phó bản / tháp trước" khi gọi Sát Thủ)
   const inTowerOrDungeon = () => { try { const R = window.H5.G('R'); return !!(R && (R.tower || R.dg)); } catch (_) { return /Tháp|Phó bản/.test(txt('#u20zone')); } };
@@ -2364,7 +2368,8 @@
       xp: screen === 'game' ? txt('#xpTxt') : '',            // kinh nghiệm cấp hiện tại "92.5%"
       trk: screen === 'game' ? trackerText() : '',
       // Truy sát đang mở: "<tên>|<% máu còn>" ("Sát Thủ · Bảo Triệt Sơn|79")
-      hunt: screen === 'game' ? ((h) => (h ? `${h.n}|${Math.round(h.hpf * 100)}` : ''))(huntNow()) : '',
+      // + "|1" khi boss của truy sát đang ở bên cạnh (game đã cho xuất hiện)
+      hunt: screen === 'game' ? ((h) => (h ? `${h.n}|${Math.round(h.hpf * 100)}|${huntBossHere() ? 1 : 0}` : ''))(huntNow()) : '',
       // Boss Hoàng Kim đợt này của riêng acc (game S.gb, mỗi nhân vật một con boss): "<đợt>|<1 = đã hạ>|<% máu boss>"
       gbw: screen === 'game' ? goldBossNow() : '',
       gold: txt('#gold'),

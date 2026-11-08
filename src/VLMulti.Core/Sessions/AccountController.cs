@@ -720,7 +720,11 @@ public sealed class AccountController
     // Đang trong đợt Boss Hoàng Kim (theo lịch giờ Việt Nam, hoặc đang đánh Boss Hoàng Kim do Sát Thủ gọi ra).
     // Trong lúc này game tự đổi chế độ để đưa nhân vật đi / về: không tính là chết, không khoá gì (OnModeChanged).
     private bool _bossTime;
-    public bool BossHkTime(DateTime now) => BossHkSchedule(now) || Tracker.Contains("Hoàng Kim");
+    public bool BossHkTime(DateTime now) => BossHkSchedule(now) || WaveBossTracked;
+    // Góc nhiệm vụ đang theo dấu Boss Hoàng Kim của đợt. Boss Hoàng Kim gọi ra từ Lệnh Bài là một truy sát (HuntName):
+    // tool tự lo như Sát Thủ, không "đứng yên chờ game" – 08/11 16:23 acc1 đứng yên 15 phút với nhật ký "tới Phong
+    // Lăng độ" trong khi boss chưa hề xuất hiện.
+    private bool WaveBossTracked => HuntName.Length == 0 && Tracker.Contains("Hoàng Kim");
 
     // App có nên đứng yên vì Boss Hoàng Kim không:
     //  - đang đánh: góc nhiệm vụ có "Hoàng Kim", hoặc kênh Hệ thống vừa báo boss xuất hiện / đưa tới mà chưa báo hạ xong
@@ -739,7 +743,7 @@ public sealed class AccountController
         bool window = BossHkSchedule(now);
         if (window && !_inBossWindow) _bossWindowSince = now;
         _inBossWindow = window;
-        if (Tracker.Contains("Hoàng Kim")) return true;
+        if (WaveBossTracked) return true;
         bool engaged = _bossEngagedAt is { } e && now - e < BossFightMax && !(_bossDoneAt is { } d && d >= e);
         if (engaged) return true;
         if (!window) return false;
@@ -800,7 +804,7 @@ public sealed class AccountController
         if (_bossAskPending && now - _bossAskAt > TimeSpan.FromMinutes(2)) _bossAskPending = false;
         if (BossDoneThisWave) return;
         if (ModeCode == ModeRules.Dungeon) { _waveInDungeon = true; return; } // không bỏ dở Phó Bản
-        bool engaged = Tracker.Contains("Hoàng Kim") || (_bossEngagedAt is { } e && e >= _waveStart && now - e < BossFightMax);
+        bool engaged = WaveBossTracked || (_bossEngagedAt is { } e && e >= _waveStart && now - e < BossFightMax);
         var since = now - _waveStart;
 
         // Không vào lại tháp trong đợt: ngày 08/11 12:00 bước "vào lại tháp" (đã bỏ) đưa acc ngược khỏi boss.
@@ -916,7 +920,7 @@ public sealed class AccountController
     {
         if (text.Contains("Chúc mừng")) return; // thông báo chung của server
         if (BossDonePattern.IsMatch(text)) _bossDoneAt = now;
-        else if (BossEngagedPattern.IsMatch(text)) _bossEngagedAt = now;
+        else if (BossEngagedPattern.IsMatch(text) && HuntName.Length == 0) _bossEngagedAt = now; // Lệnh Bài: là truy sát
     }
     // Lịch đợt boss (test thay bằng hàm khác để không phụ thuộc múi giờ máy chạy test)
     public Func<DateTime, bool> BossHkSchedule { get; set; } = now => GameData.BossHkSchedule.IsActive(now.ToUniversalTime());
@@ -1937,12 +1941,19 @@ public sealed class AccountController
     // % máu thấp nhất đã thấy của truy sát hiện tại và lúc nó giảm lần cuối (đánh mãi không giảm → quá trâu)
     private int? _huntBestHp;
     private DateTime _huntProgressAt;
+    // Boss của truy sát đang ở bên cạnh (game đã cho xuất hiện); chưa xuất hiện từ lúc nào
+    public bool HuntHere { get; private set; }
+    private DateTime? _huntAbsentSince;
+    private bool _huntAbsentNoted;
+    private static readonly TimeSpan HuntGoRetry = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan HuntAbsentAlert = TimeSpan.FromMinutes(6);
 
     private void ApplyHunt(string hunt, DateTime now)
     {
         var parts = hunt.Split('|');
         var name = hunt.Length > 0 ? parts[0] : "";
         int? hp = parts.Length > 1 && int.TryParse(parts[1], out var h) ? h : null;
+        bool here = parts.Length > 2 && parts[2] == "1";
         if (name != HuntName)
         {
             if (name.Length > 0) Note(now, $"🗡 Truy sát: {name}" + (hp is { } p0 ? $" (còn {p0}% máu) – đi đánh tiếp" : ""));
@@ -1950,10 +1961,16 @@ public sealed class AccountController
             HuntName = name;
             _huntBestHp = hp;
             _huntProgressAt = now;
-            _assassinStuckNoted = false;
+            _assassinStuckNoted = _huntAbsentNoted = false;
+            _huntAbsentSince = null;
         }
         HuntHp = hp;
         if (hp is { } v && (_huntBestHp is null || v < _huntBestHp)) { _huntBestHp = v; _huntProgressAt = now; }
+        // "15 phút máu không giảm" chỉ tính lúc boss thật sự ở bên cạnh; chưa xuất hiện là chuyện khác (bấm "Đến chỗ" lại)
+        if (name.Length == 0) { HuntHere = false; _huntAbsentSince = null; return; }
+        if (!here) { _huntProgressAt = now; _huntAbsentSince ??= now; }
+        else if (!HuntHere) { _huntAbsentSince = null; _huntAbsentNoted = false; }
+        HuntHere = here;
     }
 
     // Nhiệm vụ Sát Thủ đang mở mà nhân vật không tự tới (vd. sau khi đăng nhập lại) → bấm "Đi đến" vài phút một lần.
@@ -1995,7 +2012,17 @@ public sealed class AccountController
             RunCommand("mode", ModeRules.Farm);
             return;
         }
-        if (now - _assassinActiveSince < AssassinGoFirst || now - _lastGoAt < AssassinGoEvery) return;
+        // Boss chưa xuất hiện: bấm "Đến chỗ" lại mỗi phút. Game (v1041h5.43) lần bấm đầu chỉ đổi bản đồ; boss chỉ ra
+        // khi bãi luyện công khớp đúng tầng / bản đồ của boss, bấm lại lúc đã ở trong bản đồ thì game chỉnh cho khớp.
+        var absent = HuntName.Length > 0 && !HuntHere;
+        if (absent && _huntAbsentSince is { } gone && now - gone > HuntAbsentAlert && !_huntAbsentNoted)
+        {
+            _huntAbsentNoted = true;
+            Raise("hunt-absent", $"{HuntName}: đã bấm \"Đến chỗ\" nhiều lần trong {HuntAbsentAlert.TotalMinutes:0} phút mà boss không xuất hiện"
+                + " – vẫn bấm tiếp (không bỏ truy sát); nếu kéo dài hãy ▶ Chơi acc này xem tận mắt");
+        }
+        var every = absent ? HuntGoRetry : AssassinGoEvery;
+        if (now - _assassinActiveSince < AssassinGoFirst || now - _lastGoAt < every) return;
         _lastGoAt = now;
         RunCommand("assassinGo");
     }

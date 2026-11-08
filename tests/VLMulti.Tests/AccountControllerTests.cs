@@ -822,12 +822,45 @@ public class AccountControllerTests
         var (ctl, page, _) = Make();
         var problems = new List<(string Key, string Msg)>();
         ctl.Problem += (k, m) => problems.Add((k, m));
-        var t = Run(ctl, T0, 15, Hunt("farm", "Sát Thủ · Bảo Triệt Sơn|79"));
+        var t = Run(ctl, T0, 15, Hunt("farm", "Sát Thủ · Bảo Triệt Sơn|79|1"));
         ctl.SetAutoMode(true, t);
-        Run(ctl, t, 17 * 60, Hunt("farm", "Sát Thủ · Bảo Triệt Sơn|79"));
+        Run(ctl, t, 17 * 60, Hunt("farm", "Sát Thủ · Bảo Triệt Sơn|79|1"));
         var alert = Assert.Single(problems, p => p.Key == "assassin-stuck");
         Assert.Contains("không bỏ truy sát", alert.Msg);
         Assert.DoesNotContain(page.Sent, m => m.ToString().Contains("stDrop") || m.ToString().Contains("Bỏ truy sát"));
+    }
+
+    [Fact]
+    public void Token_gold_boss_that_does_not_appear_is_not_mistaken_for_the_wave_boss()
+    {
+        // 08/11 16:23: Boss Hoàng Kim từ Lệnh Bài, "tới Phong Lăng độ" nhưng boss không xuất hiện; app tưởng game đang
+        // đánh boss đợt nên đứng yên 15 phút rồi báo "quá trâu"
+        var (ctl, page, _) = Make();
+        ctl.BossHkSchedule = _ => false;
+        var problems = new List<(string Key, string Msg)>();
+        ctl.Problem += (k, m) => problems.Add((k, m));
+        const string H = "Boss Hoàng Kim (Lệnh Bài)|100|0";
+        var t = Run(ctl, T0, 15, Hunt("farm", H));
+        ctl.SetAutoMode(true, t);
+        t = Run(ctl, t, 40, Hunt("farm", H));
+        ctl.OnPageMessage("""{"t":"sysNote","text":"🗺 Boss Hoàng Kim Đường Phi Yến: tới Phong Lăng độ","boss":true}""", t);
+        int Go() => page.Sent.Count(m => m.GetProperty("t").GetString() == "cmd" && m.GetProperty("name").GetString() == "assassinGo");
+        int before = Go();
+        t = Run(ctl, t, 5 * 60, Hunt("farm", H));
+        Assert.True(Go() - before >= 4, $"bấm lại {Go() - before} lần");      // mỗi phút một lần
+        Assert.DoesNotContain(ctl.Activity.Items, e => e.Text.StartsWith("👑 Boss Hoàng Kim: để game tự đi đánh"));
+        t = Run(ctl, t, 3 * 60, Hunt("farm", H));
+        var alert = Assert.Single(problems, p => p.Key == "hunt-absent");
+        Assert.Contains("không xuất hiện", alert.Msg);
+        // Chưa xuất hiện thì không tính là "quá trâu"
+        t = Run(ctl, t, 10 * 60, Hunt("farm", H));
+        Assert.DoesNotContain(problems, p => p.Key == "assassin-stuck");
+        // Boss ra, máu giảm → bấm thưa lại (3 phút)
+        t = Run(ctl, t, 30, Hunt("farm", "Boss Hoàng Kim (Lệnh Bài)|90|1"));
+        before = Go();
+        Run(ctl, t, 150, Hunt("farm", "Boss Hoàng Kim (Lệnh Bài)|60|1"));
+        Assert.True(Go() - before <= 1);
+        Assert.DoesNotContain(page.Sent, m => m.ToString().Contains("stDrop"));
     }
 
     [Fact]
