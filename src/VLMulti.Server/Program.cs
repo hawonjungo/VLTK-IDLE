@@ -154,6 +154,7 @@ app.Map("/api/acc/{id}/live", async (string id, HttpContext ctx) =>
 app.MapPost("/api/acc/{id}/click", (string id, ClickRequest req) => manager.Click(id, req.X, req.Y) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/reload", (string id) => manager.Reload(id) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/kite", (string id) => manager.ToggleKite(id) ? Results.Ok() : Results.NotFound());
+app.MapPost("/api/acc/{id}/kite-config", (string id, KiteConfigRequest req) => manager.SetKiteConfig(id, req) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/automode", (string id) => manager.ToggleAutoMode(id) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/select", (string id, ToggleRequest req) => manager.SetSelected(id, req.On) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/enabled", async (string id, ToggleRequest req) =>

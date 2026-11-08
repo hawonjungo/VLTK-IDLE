@@ -400,7 +400,7 @@ function openAccMenu(id) {
   openModal(a.name, h('div', { class: 'sheet-list' }, [
     item('Ảnh nhanh', '', () => { closeModal(); openSnapshot(a.id, a.name); }),
     item('Nhật ký đầy đủ', '', () => { closeModal(); logAcc = a.id; showView('log'); }),
-    item('Kéo quái khi leo tháp', a.kite ? 'đang BẬT' : 'đang tắt', () => { closeModal(); act(`acc/${a.id}/kite`); }),
+    item('Kéo quái khi leo tháp', (a.kite ? 'đang BẬT' : 'đang tắt') + (a.kiteDir || a.kiteDist || a.kiteInterval || a.kiteFlee != null ? ' · cài riêng' : ' · theo cài đặt chung'), () => { closeModal(); openKiteSheet(a); }),
     item('Vòng tự động (luật)', a.autoMode ? 'đang BẬT' : 'đang tắt', () => { closeModal(); act(`acc/${a.id}/automode`); }),
     item('Tải lại trang game', '', () => { closeModal(); act(`acc/${a.id}/reload`, {}, 'Đang tải lại…'); }),
     item('Tắt acc', 'đóng game, giải phóng RAM/CPU', () => {
@@ -469,6 +469,37 @@ Chuyển: thư tặng (0 KNB) giữa các nhân vật của bạn. Bán: ngựa 
 $('#horseBtn').addEventListener('click', openHorses);
 $('#modalClose').addEventListener('click', () => { horseOpen = false; });
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') horseOpen = false; });
+
+// ---------- 🏃 Kéo quái riêng từng acc ----------
+// Mỗi ô có lựa chọn "Theo cài đặt chung" (giá trị rỗng = null ở server)
+function openKiteSheet(a) {
+  const s = state.settings || {};
+  const sel = (opts, cur, commonLabel) => h('select', {}, [[ '', `Theo cài đặt chung (${commonLabel})` ]].concat(opts).map(([v, t]) => {
+    const o = h('option', { value: v, text: t }); o.selected = String(cur ?? '') === String(v); return o;
+  }));
+  const dirs = (s.kiteDirections || []).map((d) => [d.id, d.label]);
+  const dirLabel = (dirs.find(([v]) => v === s.kiteDirection) || [, s.kiteDirection])[1];
+  const on = h('input', { type: 'checkbox' }); on.checked = !!a.kite;
+  const dir = sel(dirs, a.kiteDir, dirLabel);
+  const dist = sel([120, 180, 250, 350, 450, 600].map((n) => [n, `${n} px`]), a.kiteDist, `${s.kiteDistance} px`);
+  const interval = sel([1, 2, 3, 4, 6, 8, 10, 15].map((n) => [n, `${n} giây`]), a.kiteInterval, `${s.kiteInterval} giây`);
+  const flee = sel([[0, 'Không chạy']].concat([25, 30, 40, 50, 60].map((n) => [n, `< ${n}% máu`])), a.kiteFlee, s.kiteFleeHp ? `< ${s.kiteFleeHp}% máu` : 'không');
+  const num = (el) => (el.value === '' ? null : +el.value);
+  openModal(`🏃 Kéo quái · ${a.name}`, [
+    h('p', { class: 'note', text: 'Chỉ chạy khi Leo Tháp và Auto đang bật. Kiểu "Hàng dọc": vừa đánh vừa chạy lên xuống đường giữa phòng, quái xếp thành hàng dọc sau lưng; sang tầng mới, bị đẩy lệch hay sát mép / góc phòng thì chạy về giữa; né lúc quái vừa ra; máu thấp thì chạy ra xa đám quái.' }),
+    h('label', { class: 'check-row' }, [on, 'Bật kéo quái cho acc này']),
+    h('div', { class: 'form-grid' }, [
+      h('label', { text: 'Kiểu kéo' }), dir,
+      h('label', { text: 'Mỗi lần chạy' }), dist,
+      h('label', { text: 'Dừng đánh giữa 2 lần chạy (kiểu cũ: chu kỳ)' }), interval,
+      h('label', { text: 'Máu thấp thì chạy xa' }), flee,
+    ]),
+    h('button', { class: 'btn primary', text: 'Lưu', onclick: async () => {
+      await act(`acc/${a.id}/kite-config`, { on: on.checked, direction: dir.value || null, distance: num(dist), interval: num(interval), fleeHp: num(flee) }, `Đã lưu kéo quái cho ${a.name}`);
+      closeModal();
+    } }),
+  ]);
+}
 
 // ---------- Chọn nhiều acc → đổi chế độ ----------
 
@@ -609,7 +640,8 @@ function renderSettings() {
   // Kéo quái & luật đổi chế độ
   const dir = h('select', {}, s.kiteDirections.map((d) => { const o = h('option', { value: d.id, text: d.label }); o.selected = d.id === s.kiteDirection; return o; }));
   const dist = pick([120, 180, 250, 350, 450, 600], s.kiteDistance, (n) => `${n} px`);
-  const interval = pick([4, 6, 8, 10, 15, 20, 30], s.kiteInterval, (n) => `${n} giây`);
+  const interval = pick([1, 2, 3, 4, 6, 8, 10, 15, 20, 30], s.kiteInterval, (n) => `${n} giây`);
+  const kiteFlee = pick([[0, 'Không chạy'], [25, '< 25% máu'], [30, '< 30% máu'], [40, '< 40% máu'], [50, '< 50% máu'], [60, '< 60% máu']], s.kiteFleeHp ?? 40);
   const box = (checked) => { const c = h('input', { type: 'checkbox' }); c.checked = checked; return c; };
   const quest = box(s.autoQuest), dg = box(s.autoDungeon), assassin = box(s.autoAssassin);
   const boat = box(s.autoBoat !== false), weekBoss = box(s.autoWeekBoss !== false);
@@ -671,7 +703,8 @@ function renderSettings() {
     ]),
     section('Kéo quái khi Leo Tháp', [
       h('p', { class: 'note', text: 'Bật riêng từng acc ở nút ⋯ trên acc. Chỉ chạy khi đang ở Thông Thiên Tháp và Auto đang bật.' }),
-      h('div', { class: 'form-grid' }, [h('label', { text: 'Hướng chạy' }), dir, h('label', { text: 'Khoảng cách (px)' }), dist, h('label', { text: 'Chu kỳ (giây)' }), interval]),
+      h('p', { class: 'note', text: 'Đây là cài đặt chung; từng acc có thể cài riêng ở nút ⋯ › Kéo quái.' }),
+      h('div', { class: 'form-grid' }, [h('label', { text: 'Kiểu kéo' }), dir, h('label', { text: 'Mỗi lần chạy' }), dist, h('label', { text: 'Dừng đánh / chu kỳ' }), interval, h('label', { text: 'Máu thấp thì chạy xa' }), kiteFlee]),
     ]),
     section('Vòng tự động', [
       h('p', { class: 'note', text: 'Bấm 🔁 Auto để bắt đầu vòng. Chết nhanh 3 lần trong 15 phút thì Luyện Công, nghỉ tháp theo số phút bên dưới.' }),
@@ -682,7 +715,7 @@ function renderSettings() {
       h('label', { class: 'check-row' }, [assassin, '5. Còn Lệnh Bài Sát Thủ → gọi Sát Thủ']),
       h('div', { class: 'form-grid' }, [h('label', { text: '6. Xong hết thì' }), fallback, h('label', { text: 'Nghỉ tháp (phút)' }), rest]),
       h('button', { class: 'btn primary', text: 'Lưu cài đặt', onclick: () => act('settings', {
-        kiteDirection: dir.value, kiteDistance: +dist.value, kiteInterval: +interval.value,
+        kiteDirection: dir.value, kiteDistance: +dist.value, kiteInterval: +interval.value, kiteFleeHp: +kiteFlee.value,
         autoDungeon: dg.checked, autoQuest: quest.checked, autoFallback: fallback.value, towerRest: +rest.value, autoAssassin: assassin.checked,
         autoBoat: boat.checked, autoWeekBoss: weekBoss.checked,
       }, 'Đã lưu cài đặt') }),

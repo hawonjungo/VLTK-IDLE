@@ -40,7 +40,9 @@ public sealed class AppSettings
     // KiteDirection (Auto vẫn bật). Bật riêng từng acc (AccountSlot.Kite).
     public int KiteDistance { get; set; } = 250;
     public int KiteIntervalSeconds { get; set; } = 8;
-    public string KiteDirection { get; set; } = KiteDirections.Alternate;
+    public string KiteDirection { get; set; } = KiteDirections.Line;
+    // Kiểu "Hàng dọc": máu dưới KiteFleeHp % thì chạy về đầu đường xa đám quái (0 = tắt)
+    public int KiteFleeHp { get; set; } = 40;
 
     // Luật tự đổi chế độ (bật riêng từng acc bằng AccountSlot.AutoMode) – xem GameData.ModeRules
     public bool AutoModeDungeon { get; set; } = true;
@@ -129,8 +131,16 @@ public sealed class AppSettings
         SidePanelWidth = Math.Clamp(SidePanelWidth, 260, 600);
         IdleAlertMinutes = Math.Clamp(IdleAlertMinutes, 3, 240);
         KiteDistance = Math.Clamp(KiteDistance, 80, 600);
-        KiteIntervalSeconds = Math.Clamp(KiteIntervalSeconds, 3, 120);
-        if (!KiteDirections.All.Contains(KiteDirection)) KiteDirection = KiteDirections.Alternate;
+        KiteIntervalSeconds = Math.Clamp(KiteIntervalSeconds, 1, 120);
+        if (!KiteDirections.All.Contains(KiteDirection)) KiteDirection = KiteDirections.Line;
+        KiteFleeHp = Math.Clamp(KiteFleeHp, 0, 90);
+        foreach (var a in Accounts)
+        {
+            if (a.KiteDirection is { } d && !KiteDirections.All.Contains(d)) a.KiteDirection = null;
+            if (a.KiteDistance is { } kd) a.KiteDistance = Math.Clamp(kd, 80, 600);
+            if (a.KiteInterval is { } ki) a.KiteInterval = Math.Clamp(ki, 1, 120);
+            if (a.KiteFleeHp is { } kf) a.KiteFleeHp = Math.Clamp(kf, 0, 90);
+        }
         if (AutoModeFallback is not ("tower" or "farm")) AutoModeFallback = "tower";
         TowerFastDeathMinutes = Math.Clamp(TowerFastDeathMinutes, 1, 60);
         TowerFastDeathCount = Math.Clamp(TowerFastDeathCount, 2, 10);
@@ -175,6 +185,12 @@ public sealed class AccountSlot
 
     // Kéo quái khi Leo Tháp (mặc định tắt)
     public bool Kite { get; set; }
+    // Thông số kéo quái riêng của acc này; null = dùng cài đặt chung (AppSettings.KiteDirection / KiteDistance /
+    // KiteIntervalSeconds / KiteFleeHp)
+    public string? KiteDirection { get; set; }
+    public int? KiteDistance { get; set; }
+    public int? KiteInterval { get; set; }
+    public int? KiteFleeHp { get; set; }
 
     // Tự đổi chế độ theo luật (mặc định tắt)
     public bool AutoMode { get; set; }

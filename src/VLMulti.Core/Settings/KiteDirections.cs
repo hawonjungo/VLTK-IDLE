@@ -5,6 +5,8 @@ public static class KiteDirections
 {
     // Theo minimap: tâm phòng → phải → chéo xuống → xuống → về tâm (xem agent.js). Offset bên dưới
     // (phải → xuống → trái → lên) chỉ dùng khi không đọc được minimap.
+    // Hàng dọc giữa phòng: trang tự chạy (nhịp 0,3 giây) theo vị trí thật của nhân vật / quái, reset mỗi tầng – xem agent.js
+    public const string Line = "line";
     public const string Square = "square";
     public const string Alternate = "alternate"; // lần lượt trái rồi phải
     public const string Left = "left";
@@ -12,10 +14,11 @@ public static class KiteDirections
     public const string Up = "up";
     public const string Down = "down";
 
-    public static readonly string[] All = { Square, Alternate, Left, Right, Up, Down };
+    public static readonly string[] All = { Line, Square, Alternate, Left, Right, Up, Down };
 
     public static string Label(string direction) => direction switch
     {
+        Line => "Hàng dọc giữa phòng: vừa đánh vừa chạy, reset mỗi tầng",
         Square => "Hình vuông quanh tâm phòng (đọc minimap)",
         Left => "Chạy sang trái",
         Right => "Chạy sang phải",

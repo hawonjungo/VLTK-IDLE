@@ -2241,18 +2241,40 @@ public sealed class AccountController
 
     // ---------- Kéo quái (chỉ khi Leo Tháp, acc có bật 🏃) ----------
 
+    // Thông số kéo quái của acc này: riêng của acc (nếu đặt) hoặc cài đặt chung
+    public (string Direction, int Distance, int Interval, int FleeHp) KiteParams(AppSettings s) => (
+        Account.KiteDirection ?? s.KiteDirection, Account.KiteDistance ?? s.KiteDistance,
+        Account.KiteInterval ?? s.KiteIntervalSeconds, Account.KiteFleeHp ?? s.KiteFleeHp);
+
+    private string _kiteCfgSent = "";
+    private DateTime _kiteCfgAt;
+
     private void SuperviseKite(DateTime now)
     {
-        if (!Account.Kite || Screen != "game" || ModeCode != "tower") return;
         if (SettingsProvider?.Invoke() is not { } s) return;
-        if (now - _lastKiteAt < TimeSpan.FromSeconds(s.KiteIntervalSeconds)) return;
+        var (dir, dist, interval, flee) = KiteParams(s);
+        // Kiểu "Hàng dọc": trang tự chạy theo vị trí thật (agent.js kiteTick); app chỉ gửi cấu hình khi đổi / 30 giây một lần
+        bool lineOn = dir == KiteDirections.Line && Account.Kite && Screen == "game" && ModeCode == "tower";
+        var cfg = lineOn ? $"{dist}|{interval}|{flee}" : "off";
+        if (cfg != _kiteCfgSent || (lineOn && now - _kiteCfgAt > TimeSpan.FromSeconds(30)))
+        {
+            if (cfg != _kiteCfgSent) Log.Write($"[{Account.Id}] kite line: {cfg}");
+            _kiteCfgSent = cfg;
+            _kiteCfgAt = now;
+            Post(new { t = "kiteCfg", arg = lineOn ? new { on = true, step = dist, pause = interval, fleeHp = flee, span = 700, margin = 260 } : null });
+            if (lineOn) SetStatus("🏃 Kéo quái: hàng dọc giữa phòng", StatusLevel.Ok);
+        }
+        if (dir == KiteDirections.Line) return;
+
+        if (!Account.Kite || Screen != "game" || ModeCode != "tower") return;
+        if (now - _lastKiteAt < TimeSpan.FromSeconds(interval)) return;
 
         _lastKiteAt = now;
-        var (dx, dy) = KiteDirections.Offset(s.KiteDirection, s.KiteDistance, _kiteStep);
-        if (s.KiteDirection == KiteDirections.Square)
+        var (dx, dy) = KiteDirections.Offset(dir, dist, _kiteStep);
+        if (dir == KiteDirections.Square)
         {
             // Hình vuông theo minimap: trang tự quyết định đã tới góc chưa (xem OnKiteResult)
-            RunCommand("kite", new { mode = "square", side = s.KiteDistance, step = _kiteStep, dx, dy });
+            RunCommand("kite", new { mode = "square", side = dist, step = _kiteStep, dx, dy });
         }
         else
         {

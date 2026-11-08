@@ -139,6 +139,7 @@ public class AccountControllerTests
     {
         var (ctl, page, cfg) = Make();
         cfg.KiteIntervalSeconds = 5;
+        cfg.KiteDirection = KiteDirections.Alternate; // kiểu cũ: app ra lệnh chạy theo chu kỳ
         var t = Run(ctl, T0, 30, Status("game", mode: "tower", zone: "Thông Thiên Tháp · tầng 10"));
         Assert.DoesNotContain("kite", page.Commands); // chưa bật 🏃
 
@@ -150,6 +151,31 @@ public class AccountControllerTests
 
         Run(ctl, t, 30, Status("game", mode: "farm"));
         Assert.Equal(inTower, page.Commands.Count(c => c == "kite")); // ra khỏi tháp → ngừng
+    }
+
+    [Fact]
+    public void Line_kite_sends_config_to_the_page_with_per_account_overrides()
+    {
+        var (ctl, page, cfg) = Make();
+        cfg.KiteDirection = KiteDirections.Line;
+        cfg.KiteDistance = 250;
+        cfg.KiteIntervalSeconds = 3;
+        cfg.KiteFleeHp = 40;
+        ctl.Account.KiteDistance = 350;   // riêng acc này
+        ctl.Account.KiteFleeHp = 30;
+        JsonElement? LastCfg() => page.Sent.LastOrDefault(m => m.GetProperty("t").GetString() == "kiteCfg") is { ValueKind: JsonValueKind.Object } m ? m.GetProperty("arg") : null;
+        var t = Run(ctl, T0, 15, Status("game", mode: "tower", zone: "Thông Thiên Tháp · tầng 10"));
+        Assert.Equal(JsonValueKind.Null, LastCfg()!.Value.ValueKind); // chưa bật
+        ctl.SetKite(true, t);
+        t = Run(ctl, t, 6, Status("game", mode: "tower", zone: "Thông Thiên Tháp · tầng 10"));
+        var c = LastCfg()!.Value;
+        Assert.True(c.GetProperty("on").GetBoolean());
+        Assert.Equal(350, c.GetProperty("step").GetInt32());
+        Assert.Equal(3, c.GetProperty("pause").GetInt32());
+        Assert.Equal(30, c.GetProperty("fleeHp").GetInt32());
+        Assert.DoesNotContain("kite", page.Commands); // trang tự chạy, app không ra lệnh từng bước
+        Run(ctl, t, 6, Status("game", mode: "farm"));
+        Assert.Equal(JsonValueKind.Null, LastCfg()!.Value.ValueKind); // ra khỏi tháp → tắt
     }
 
     [Fact]

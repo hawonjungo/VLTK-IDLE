@@ -489,6 +489,75 @@
     },
   };
 
+  // ---------- 🏃 Kéo quái kiểu "Hàng dọc" (chạy trong trang, nhịp 0,3 giây) ----------
+  // Đọc trạng thái game qua cầu nối H5.G: nhân vật H (x, y), R.enemies, R.tower.floor, R.spawnT (đếm ngược quái ra),
+  // R.life, WORLD (kích thước phòng), CAM (góc trái trên của camera) và AR (khung nhìn logic 640×360).
+  // Nhân vật chạy lên/xuống trên đường dọc ở giữa phòng: chạy `step` px → dừng `pause` giây cho Auto đánh → chạy tiếp,
+  // tới đầu đường thì quay lại. Quái đuổi theo xếp thành hàng dọc sau lưng.
+  // Reset về giữa phòng: sang tầng mới, lệch khỏi đường > 200 px, hoặc sát mép / góc phòng (tránh bị ép vào góc).
+  // Né đợt quái mới: đếm ngược quái ra < 0,4 giây → chạy ngay. Máu < fleeHp% → chạy về đầu đường xa đám quái nhất.
+  let kiteCfg = null;
+  const kiteSt = { floor: null, dir: 1, phase: 'run', until: 0, target: null, last: '' };
+  const g = (n) => { try { return window.H5.G(n); } catch (_) { return undefined; } };
+  const clickWorld = (tx, ty) => {
+    const arena = $('#arena'), CAM = g('CAM'), AR = g('AR');
+    if (!arena || !CAM || !AR || !AR.w) return false;
+    const r = arena.getBoundingClientRect();
+    const k = r.width / AR.w;
+    let sx = (tx - CAM.x) * k, sy = (ty - CAM.y) * k;
+    // Ngoài màn hình: bấm theo đúng hướng, sát mép
+    const hx = (g('H').x - CAM.x) * k, hy = (g('H').y - CAM.y) * k;
+    const dx = sx - hx, dy = sy - hy;
+    const lim = Math.min(1, (r.width / 2 - 30) / Math.max(1, Math.abs(dx)), (r.height / 2 - 30) / Math.max(1, Math.abs(dy)));
+    if (lim < 1) { sx = hx + dx * lim; sy = hy + dy * lim; }
+    fireClick(arena, r.left + sx, r.top + sy);
+    return true;
+  };
+  const kiteTick = () => {
+    const c = kiteCfg;
+    if (!c || !c.on) return;
+    const auto = $('#ctrlBtn');
+    if (!auto || !auto.classList.contains('on') || flowBusy || anyWindowOpen() || inBossHk()) return;
+    const H = g('H'), R = g('R'), W = g('WORLD'), S = g('S');
+    if (!H || !R || !W || !R.tower || R.dg || R.sat || R.deadT > 0 || (S && S.mode !== 'tower')) { kiteSt.floor = null; return; }
+    const now = Date.now();
+    const m = c.margin ?? 260;
+    const cx = W.w / 2, cy = W.h / 2;
+    const half = Math.max(150, Math.min(c.span ?? 700, W.h / 2 - m));
+    const yTop = cy - half, yBot = cy + half;
+    const en = (R.enemies || []).filter((e) => e && !e.dead && e.hp > 0);
+    const lifePct = R.P && R.P.life > 0 ? 100 * (R.life || 0) / R.P.life : null; // R.P.life = máu tối đa
+    const go = (tx, ty, why) => { kiteSt.target = { x: tx, y: ty }; kiteSt.phase = 'run'; kiteSt.until = now + 1800; kiteSt.last = why; clickWorld(tx, ty); };
+    // Tầng mới → về giữa phòng
+    if (R.tower.floor !== kiteSt.floor) { kiteSt.floor = R.tower.floor; go(cx, cy, 'floor'); return; }
+    // Lệch khỏi đường / sát mép → reset về giữa
+    const nearEdge = H.x < m || H.x > W.w - m || H.y < m || H.y > W.h - m;
+    if ((Math.abs(H.x - cx) > 200 || nearEdge) && kiteSt.last !== 'reset') { go(cx, cy, 'reset'); return; }
+    // Máu thấp → chạy về đầu đường xa đám quái
+    if (c.fleeHp && lifePct != null && lifePct < c.fleeHp && en.length) {
+      const ey = en.reduce((a, e) => a + e.y, 0) / en.length;
+      const ty = ey > H.y ? yTop : yBot;
+      if (kiteSt.last !== 'flee' || now > kiteSt.until) { kiteSt.dir = ty > H.y ? 1 : -1; go(cx, ty, 'flee'); }
+      return;
+    }
+    // Chưa có quái: đứng giữa đường; quái sắp ra (đếm ngược < 0,4 giây) → chạy ngay để không bị vây lúc ra
+    if (!en.length) {
+      if (R.spawnT > 0 && R.spawnT < 0.4 && kiteSt.last !== 'dodge') go(cx, Math.max(yTop, Math.min(yBot, H.y + kiteSt.dir * (c.step ?? 250))), 'dodge');
+      return;
+    }
+    if (kiteSt.phase === 'run') {
+      const t = kiteSt.target;
+      const arrived = !t || Math.hypot(H.x - t.x, H.y - t.y) < 50;
+      if (arrived || now > kiteSt.until) { kiteSt.phase = 'pause'; kiteSt.until = now + 1000 * (c.pause ?? 3); }
+      return;
+    }
+    if (now < kiteSt.until) return; // đang dừng cho Auto đánh
+    let ty = H.y + kiteSt.dir * (c.step ?? 250);
+    if (ty > yBot || ty < yTop) { kiteSt.dir = -kiteSt.dir; ty = Math.max(yTop, Math.min(yBot, H.y + kiteSt.dir * (c.step ?? 250))); }
+    go(cx, ty, 'step');
+  };
+  setInterval(() => { try { kiteTick(); } catch (err) { post({ t: 'log', msg: 'kite: ' + err.message }); kiteCfg = null; } }, 300);
+
   // ---------- Tự mua Lệnh Bài Dã Tẩu (khi bấm 📜 Nhiệm Vụ) ----------
   // Kỳ Trân Các: mỗi lệnh bài 20 KNB khóa, tối đa 100 lần/ngày. Thiếu KNB khóa → đổi KNB thường (1:1, game hỏi lại
   // ở #askBox → bấm "Đổi"). Hết KNB thường → mở Đại Hồng Bao (100–1000 KNB, máy chủ quay số) rồi đổi tiếp.
@@ -1667,6 +1736,8 @@
       knbFlow().then((res) => post({ t: 'knbResult', ...res }), (err) => post({ t: 'knbResult', r: 'error: ' + err.message }));
     } else if (m.t === 'guild') {
       guildFlow(m.arg || {}).then((res) => post({ t: 'guildResult', ...res }), (err) => post({ t: 'guildResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'kiteCfg') {
+      kiteCfg = m.arg || null; // {on, step, pause, span, margin, fleeHp}
     } else if (m.t === 'knbSend') {
       knbFlowSend(m.arg || {}).then((res) => post({ t: 'knbSendResult', ...res }), (err) => post({ t: 'knbSendResult', r: 'error: ' + err.message }));
     } else if (m.t === 'bossHk') {
