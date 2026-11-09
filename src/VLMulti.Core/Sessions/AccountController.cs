@@ -957,32 +957,53 @@ public sealed class AccountController
     private DateTime _daTauTaskAt;
     public Action<string, IReadOnlyList<GameLog.Entry>>? GameLogSink { get; set; } = (id, list) => GameLog.Append(id, list);
 
+    // Dòng "Hạ Boss / Hạ Sát Thủ" chờ dòng phần thưởng "🎁 …" ngay sau (có thể tới ở lượt gửi sau, tối đa 5 giây)
+    private GameLog.Entry? _pendingKill;
+    private DateTime _pendingKillAt; // lúc app nhận dòng hạ boss (giờ máy, không phải giờ trong dòng)
+
     private void OnGameLog(JsonElement m, DateTime now)
     {
         if (!m.TryGetProperty("lines", out var arr) || arr.ValueKind != JsonValueKind.Array) return;
         var list = new List<GameLog.Entry>();
+        void Add(GameLog.Entry e)
+        {
+            list.Add(e);
+            if (e.Kind != "rare") return;
+            var where = e.Place.Length > 0 ? $" ({e.Place})" : "";
+            if (e.Text.Contains("Vô Danh", StringComparison.OrdinalIgnoreCase))
+                Raise("rare-item", $"💎 Đồ hiếm Vô Danh: {e.Text}{where} – có kỹ năng vốn có thì app tự khoá, kiểm tra lại");
+            else
+                Note(now, $"💎 {e.Text}{where}", StatusLevel.Ok);
+        }
+        if (_pendingKill is { } old && now - _pendingKillAt > TimeSpan.FromSeconds(5)) { Add(old); _pendingKill = null; }
         foreach (var l in arr.EnumerateArray())
         {
             var text = Str(l, "text");
-            // Dã Tẩu: nhớ nhiệm vụ đang làm, ghép vào dòng phần thưởng (dòng đi làm thì không ghi)
+            var at = l.TryGetProperty("at", out var a) && a.TryGetInt64(out var ms)
+                ? DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime.ToLocalTime() : now;
+            var place = Str(l, "place");
+            // Dã Tẩu: nhớ nhiệm vụ đang làm, ghép vào dòng phần thưởng
             if (GameLog.DaTauTask(text) is { } task) { _daTauTask = task; _daTauTaskAt = now; }
-            if (GameLog.IsNoise(text) || GameLog.AboutOthers(text, Account.CharName)) continue;
+            if (GameLog.AboutOthers(text, Account.CharName)) continue;
+            // Phần thưởng của lần hạ boss / sát thủ vừa rồi → một dòng "👑 Hạ Boss … → 6 Phúc Duyên, 1 Lam Thủy Tinh"
+            if (_pendingKill is { } pk && GameLog.IsKillReward(text))
+            {
+                var merged = $"{pk.Text.TrimEnd('!')} → {text[2..].Trim()}";
+                Add(pk with { Kind = GameLog.KindOf(merged) ?? pk.Kind, Text = merged });
+                _pendingKill = null;
+                continue;
+            }
+            var kind = GameLog.KindOf(text);
+            if (kind is null) continue;
+            if (_pendingKill is { } prev) { Add(prev); _pendingKill = null; }
             if (text.StartsWith("🎁 Dã Tẩu #"))
             {
                 text = GameLog.WithDaTauTask(text, now - _daTauTaskAt < TimeSpan.FromMinutes(15) ? _daTauTask : null);
                 _daTauTask = null;
             }
-            var at = l.TryGetProperty("at", out var a) && a.TryGetInt64(out var ms)
-                ? DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime.ToLocalTime() : now;
-            var place = Str(l, "place");
-            var kind = GameLog.Classify(text);
-            list.Add(new GameLog.Entry(at, kind, place, Account.CharName ?? "", text));
-            if (kind != "rare") continue;
-            var where = place.Length > 0 ? $" ({place})" : "";
-            if (text.Contains("Vô Danh", StringComparison.OrdinalIgnoreCase))
-                Raise("rare-item", $"💎 Đồ hiếm Vô Danh: {text}{where} – có kỹ năng vốn có thì app tự khoá, kiểm tra lại");
-            else
-                Note(now, $"💎 {text}{where}", StatusLevel.Ok);
+            var entry = new GameLog.Entry(at, kind, place, Account.CharName ?? "", text);
+            if (GameLog.IsKill(text)) { _pendingKill = entry; _pendingKillAt = now; continue; }
+            Add(entry);
         }
         if (list.Count > 0) GameLogSink?.Invoke(Account.Id, list);
     }

@@ -183,7 +183,7 @@ public partial class GameFrame : UserControl, IGamePage
         SetChipLabel(KiteButton, isBig ? "Kéo quái" : "");
         TitleText.MaxWidth = isBig ? double.PositiveInfinity : 110;
         // Khung lớn là khung bạn đang chơi: để bạn tự chọn kênh chat; khung nhỏ giữ thẻ Hệ thống để app đọc phần thưởng
-        Controller.KeepSystemChat = !isBig;
+        Controller.KeepSystemChat = true; // luôn mở thẻ chat Hệ thống (để đọc log), kể cả khung lớn
         ApplyZoom();
         if (changed) NudgeRender();
     }

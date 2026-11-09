@@ -909,15 +909,37 @@ public class AccountControllerTests
                 new { at, text = "📢 Chúc mừng X nhận được Đồ phổ Y từ Boss Hoàng Kim!", place = "Tầng 901" },
             },
         }), t);
-        Assert.Equal(4, written.Count); // bỏ dòng kinh nghiệm, dòng đi làm Dã Tẩu và thông báo về người chơi khác
+        Assert.Equal(5, written.Count); // bỏ dòng kinh nghiệm và thông báo về người chơi khác; giữ dòng đi làm Dã Tẩu (trạng thái)
+        Assert.Contains(written, e => e.Kind == "quest" && e.Text.StartsWith("🗺 Dã Tẩu: Săn 30 Thủy Tặc"));
         Assert.Contains(written, e => e.Kind == "datau" && e.Text == "🎁 Dã Tẩu #2491 (Săn 30 Thủy Tặc): 1 Rương Ngựa");
-        Assert.Equal(("tower", "Tầng 900"), (written[0].Kind, written[0].Place));
+        Assert.Equal(("milestone", "Tầng 900"), (written[0].Kind, written[0].Place)); // tầng chẵn 100 = mốc
         Assert.Equal("rare", written[1].Kind);
         Assert.DoesNotContain(written, e => e.Text.Contains("Chúc mừng X"));
         Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("💎 Nhặt được Tỏa Tử Hoàng Kim giáp (Tầng 901)"));
         var alert = Assert.Single(problems, p => p.Key == "rare-item");
         Assert.Contains("Nhẫn Vô Danh", alert.Msg);
         Assert.Contains("Phong Lăng độ", alert.Msg);
+    }
+
+    [Fact]
+    public void Boss_kill_and_its_reward_are_logged_as_one_line()
+    {
+        var (ctl, _, _) = Make();
+        var written = new List<GameLog.Entry>();
+        ctl.GameLogSink = (_, list) => written.AddRange(list);
+        var t = Run(ctl, T0, 6, St("farm"));
+        var at = new DateTimeOffset(T0).ToUnixTimeMilliseconds();
+        string Batch(params string[] texts) => JsonSerializer.Serialize(new { t = "gameLog", lines = texts.Select(x => new { at, text = x, place = "Trường Bạch sơn Nam" }) });
+        ctl.OnPageMessage(Batch("🔥 Boss Hoàng Kim · Đường Bất Nhiễm nổi giận — sát thương ×2!", "👑 Hạ Boss Hoàng Kim Đường Bất Nhiễm!"), t);
+        Assert.Empty(written); // chờ dòng phần thưởng
+        ctl.OnPageMessage(Batch("🎁 6 Phúc Duyên, 1 Lam Thủy Tinh", "Hạ Boss Hoàng Kim · Đường Bất Nhiễm"), t.AddSeconds(1));
+        var e = Assert.Single(written);
+        Assert.Equal("boss", e.Kind);
+        Assert.Equal("👑 Hạ Boss Hoàng Kim Đường Bất Nhiễm → 6 Phúc Duyên, 1 Lam Thủy Tinh", e.Text);
+        // Hạ Sát Thủ không có dòng thưởng ngay sau: vẫn ghi (sau 5 giây)
+        ctl.OnPageMessage(Batch("🗡 Hạ Sát Thủ · Bảo Triệt Sơn!"), t.AddSeconds(10));
+        ctl.OnPageMessage(Batch("🗼 Dịch chuyển vào Thông Thiên Tháp, tầng 900."), t.AddSeconds(20));
+        Assert.Contains(written, x => x.Kind == "assassin" && x.Text.StartsWith("🗡 Hạ Sát Thủ · Bảo Triệt Sơn"));
     }
 
     [Fact]

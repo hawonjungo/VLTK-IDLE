@@ -2124,6 +2124,7 @@
             const cleared = text.match(/qua tầng (\d+)/);
             if (cleared) lastCleared = { floor: +cleared[1], at: now };
             const place = /^Nhặt được/.test(text) && lastCleared && now - lastCleared.at < 4000 ? `Tầng ${lastCleared.floor}` : logPlace();
+            noteLogEvent(text, place, now);
             gameLogQ.push({ at: now, text, place });
           }
           if (gameLogQ.length > 500) gameLogQ.splice(0, gameLogQ.length - 500);
@@ -2132,8 +2133,60 @@
       };
     } catch (_) {}
   };
+  // 💎 Đồ hiếm vào túi: so danh sách đồ của nhân vật (H5.st.items – mọi chỗ: túi, đang mặc, rương, Mã Trường) với lần
+  // trước; món mới là HK bộ chung / HK Môn Phái (yêu cầu môn phái), Đồ phổ, đồ có kỹ năng vốn có, Vô Danh → một dòng
+  // "💎 HK Môn Phái: <tên> ← <nguồn>". Nguồn = việc vừa xảy ra trong 10 giây (hạ boss, mốc tầng, Dã Tẩu #, mở rương…),
+  // không có thì "nhặt ở <bản đồ>". Mốc 100 tầng cho HK thẳng vào túi, game không ghi dòng nào – chỉ thấy được cách này.
+  let lastEvent = null;
+  const recentPickup = new Map(); // tên món → lúc game ghi "Nhặt được <tên>"
+  const noteLogEvent = (text, place, now) => {
+    let m, src = null;
+    if ((m = text.match(/^👑 Hạ Boss Hoàng Kim (.+?)!?$/))) src = `Hạ Boss Hoàng Kim ${m[1]}`;
+    else if ((m = text.match(/^🗡 Hạ Sát Thủ · (.+?)!?$/))) src = `Hạ Sát Thủ ${m[1]}`;
+    else if (/Boss tuần/.test(text)) src = 'Boss tuần';
+    else if ((m = text.match(/qua tầng (\d+)/))) src = +m[1] % 100 === 0 ? `Mốc tầng ${m[1]}` : `Tháp tầng ${m[1]}`;
+    else if ((m = text.match(/^🎁 (Mốc )?Dã Tẩu (#?\d+)/))) src = `${m[1] ? 'Mốc ' : ''}Dã Tẩu ${m[2]}`;
+    else if (/^🎁 Mở .*Rương|Mở \d+ Rương/.test(text)) src = text.replace(/^🎁 /, '').slice(0, 60);
+    if (src) lastEvent = { text: src, place, at: now };
+    if ((m = text.match(/^Nhặt được (.+)$/))) recentPickup.set(m[1].trim(), now);
+  };
+  let bagKnownIds = null, bagKnownChar = '';
+  const rareLabel = (it) => {
+    if (it.set && it.set.kind === 'gold') { const f = (it.req || []).find((r) => r && r[0] === 39); return f && f[1] >= 0 ? 'HK Môn Phái' : 'HK bộ chung'; }
+    if (/^Đồ phổ/i.test(it.n || '')) return 'Đồ phổ';
+    if (hasInnate(it)) return 'Đồ vốn có';
+    if (/Vô Danh/i.test(it.n || '')) return 'Vô Danh';
+    return null;
+  };
+  const rareBagScan = () => {
+    let S, st;
+    try { S = window.H5.G('S'); st = window.H5.st; } catch (_) { return; }
+    if (!S || !S.name || !st || !(st.items instanceof Map)) return;
+    const ids = [...st.items.keys()].map(String);
+    if (!bagKnownIds || bagKnownChar !== S.name) { bagKnownIds = new Set(ids); bagKnownChar = S.name; return; }
+    const fresh = ids.filter((id) => !bagKnownIds.has(id));
+    if (!fresh.length) return;
+    for (const id of fresh) bagKnownIds.add(id);
+    const mine = [...(S.inv || []), ...Object.values(S.eq || {})].filter(Boolean);
+    const now = Date.now();
+    for (const id of fresh) {
+      const it = mine.find((x) => String(x.h5) === id);
+      const label = it && rareLabel(it);
+      if (!label) continue;
+      const innate = hasInnate(it) ? ` (vốn có +${(it.mag || []).filter((x) => window.JX.attr[x.a] === 'allskill_v').map((x) => (x.p || [])[0]).join('+')})` : '';
+      const picked = recentPickup.get(it.n);
+      const ev = lastEvent && now - lastEvent.at < 10000 && !(picked && now - picked < 5000) ? lastEvent : null;
+      const src = ev ? ev.text : `nhặt ở ${logPlace()}`;
+      // Dòng "Nhặt được <tên>" của chính món này (còn trong hàng chờ) → thay bằng dòng 💎 có loại và nguồn
+      const q = gameLogQ.findIndex((x) => x.text === `Nhặt được ${it.n}`);
+      if (q >= 0) gameLogQ.splice(q, 1);
+      gameLogQ.push({ at: now, text: `💎 ${label}: ${it.n}${innate} ← ${src}`, place: ev ? ev.place : logPlace() });
+    }
+    for (const [k, t] of recentPickup) if (now - t > 30000) recentPickup.delete(k);
+  };
   setInterval(() => {
     hookGameLog(); // R.logs có thể được tạo lại (vào game, đổi nhân vật) → móc lại
+    try { rareBagScan(); } catch (_) {}
     if (gameLogQ.length) post({ t: 'gameLog', lines: gameLogQ.splice(0, 120) });
   }, 1500);
   // Thông báo nhỏ của game (#toast): báo về app những câu cần biết, ví dụ "Cần đạt cấp 120 để vào Phong Lăng độ"
@@ -2416,8 +2469,16 @@
     const l = $('#u20lines');
     return !!l && (l.dataset.lt === 'sys' || !!document.querySelector('[data-lt="sys"].on'));
   };
+  // Luôn mở thẻ "Hệ thống" và luôn hiện khung dòng (nút 📜 #u20lt thu gọn / mở; thu gọn thì #u20lines ẩn)
+  let sysShowAt = 0;
   const ensureSysTab = () => {
-    if (!keepSys || sysActive() || Date.now() - sysTabAt < 20000 || document.activeElement === $('#u20in')) return;
+    if (!keepSys || document.activeElement === $('#u20in')) return;
+    const lines = $('#u20lines');
+    if (lines && getComputedStyle(lines).display === 'none' && Date.now() - sysShowAt > 15000) {
+      const t = $('#u20lt');
+      if (t) { sysShowAt = Date.now(); t.click(); }
+    }
+    if (sysActive() || Date.now() - sysTabAt < 5000) return;
     const tab = $('[data-lt="sys"]:not(#u20lines)');
     if (!tab) return;
     sysTabAt = Date.now();
@@ -2549,7 +2610,7 @@
       shopAt = Date.now();
       try { refreshShop(); } catch (err) { post({ t: 'log', msg: 'read shop failed: ' + err.message }); }
     }
-    if (screen === 'game' && !flowBusy && !anyWindowOpen() && Date.now() - gameSince > 10000) {
+    if (screen === 'game' && !flowBusy && Date.now() - gameSince > 10000) {
       try { ensureSysTab(); } catch (err) { post({ t: 'log', msg: 'system tab failed: ' + err.message }); }
     }
     if (screen === 'game' && !flowBusy && !inBossHk() && Date.now() - gameSince > 25000 && Date.now() - bagAt > BAG_REFRESH_MS) {

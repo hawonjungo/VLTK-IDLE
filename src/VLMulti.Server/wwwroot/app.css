@@ -301,3 +301,5 @@ p.warn { color: var(--warn); font-weight: 600; }
 .gl-sum { font-size: 13px; margin: 6px 0; overflow-wrap: anywhere; }
 .gl-sum:empty { display: none; }
 .gl-datau .gl-text { color: var(--ok, inherit); }
+
+.gl-milestone .gl-text, .gl-boss .gl-text { font-weight: 600; }

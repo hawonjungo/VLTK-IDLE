@@ -12,16 +12,23 @@ public static class GameLog
     private static readonly object Gate = new();
     public static string Dir => Path.Combine(AppPaths.DataDir, "gamelog");
 
-    // Dòng lặt vặt không ghi
+    // Dòng không ghi: lặt vặt và dòng lặp lại của cùng một việc
     private static readonly Regex Noise = new(
         @"^(Nhận được [\d.,]+ điểm kinh nghiệm|Nhặt được [\d.,]+ (vạn )?lượng|💰 \+\d+ KNB khóa|Tự mua |Tiếp tục hành tẩu" +
-        // Dã Tẩu: dòng đi làm nhiệm vụ / dùng lệnh bài (chỉ giữ dòng phần thưởng, xem DaTauTask)
-        @"|🗺 (Dã Tẩu|Nhiệm vụ): |📜 Dùng Lệnh Bài Dã Tẩu|📜 Chế độ Nhiệm Vụ: dịch chuyển)",
+        @"|📜 Dùng Lệnh Bài Dã Tẩu|🎁 Tháp tầng \d+$|Hạ (Boss Hoàng Kim|Sát Thủ) · |🔥 " +
+        @"|👑 Boss Hoàng Kim · .*(gọi \d+ hộ vệ|ở ngay gần)|🗡 Sát Thủ · .*ở ngay gần)",
         RegexOptions.Compiled);
-    // Đồ hiếm: Hoàng Kim, Đồ phổ, Thần Mã, bộ Vô Danh, trang bị có kỹ năng vốn có
-    private static readonly Regex Rare = new(@"Hoàng Kim|Đồ phổ|Thần Mã|Vô Danh|kỹ năng vốn có", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    // Đồ hiếm: Hoàng Kim (bộ chung / môn phái), Đồ phổ, Thần Mã, bộ Vô Danh, kỹ năng vốn có, Võ Lâm Mật Tịch, Tẩy Tủy
+    // Kinh, Đại Thành Bí Kíp ("Boss Hoàng Kim" là tên boss, không phải món đồ)
+    private static readonly Regex RareItem = new(@"Hoàng Kim|Đồ phổ|Thần Mã|Vô Danh|vốn có|Võ Lâm Mật Tịch|Tẩy Tủy Kinh|Đại Thành Bí Kíp",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    public static bool HasRareItem(string text) => RareItem.IsMatch(text.Replace("Boss Hoàng Kim", "Boss"));
+    // Hạ boss / sát thủ (dòng phần thưởng "🎁 …" ngay sau đó được ghép vào, xem AccountController.OnGameLog)
+    private static readonly Regex Kill = new(@"^(👑 Hạ Boss Hoàng Kim|🗡 Hạ Sát Thủ|.*Hạ Boss tuần|.*Rương Boss tuần)", RegexOptions.Compiled);
+    public static bool IsKill(string text) => Kill.IsMatch(text);
+    public static bool IsKillReward(string text) => text.StartsWith("🎁 ") && !IsDaTau(text) && !text.StartsWith("🎁 Tháp") && !text.StartsWith("🎁 Mốc");
 
-    public static bool IsNoise(string text) => text.Length == 0 || Noise.IsMatch(text);
+    public static bool IsNoise(string text) => KindOf(text) is null;
 
     // 📜 Dã Tẩu: "🗺 Dã Tẩu: Săn 30 Thủy Tặc ở Phong Lăng độ: tới Phong Lăng độ" → nhiệm vụ "Săn 30 Thủy Tặc"; dòng
     // thưởng sau đó "🎁 Dã Tẩu #2491: 1 Rương Ngựa" ghi thành "🎁 Dã Tẩu #2491 (Săn 30 Thủy Tặc): 1 Rương Ngựa"
@@ -38,20 +45,26 @@ public static class GameLog
     public static bool AboutOthers(string text, string? ownName) =>
         Others.IsMatch(text) && !(ownName is { Length: > 0 } && text.Contains(ownName));
 
-    // Loại dòng (để lọc trên trang web)
-    public static string Classify(string text)
+    // Loại dòng; null = không ghi. Giữ: đồ hiếm, boss / sát thủ (khi nào, được gì), mốc 100 tầng, và trạng thái (qua
+    // tầng, gục ngã, đi làm nhiệm vụ, thưởng Dã Tẩu) để biết acc đang làm gì ở đâu. Bỏ: nhặt đồ thường, dòng linh tinh.
+    public static string? KindOf(string text)
     {
-        bool boss = text.Contains("Boss Hoàng Kim") || text.Contains("Boss tuần");
-        if (Rare.IsMatch(text) && (text.Contains("Chúc mừng") || text.StartsWith("📢"))) return "rare"; // thông báo về chính mình
-        if (Rare.IsMatch(text) && !boss && Regex.IsMatch(text, @"Nhặt được|[Nn]hận|🎁|📕")) return "rare";
-        if (boss) return Rare.IsMatch(text) && text.Contains("🎁") ? "rare" : "boss";
+        if (text.Length == 0 || Noise.IsMatch(text)) return null;
+        bool rare = HasRareItem(text);
+        if (text.StartsWith("💎") || text.StartsWith("🔒 Tự khoá")) return "rare";              // món hiếm vào túi (trang đọc túi đồ)
+        if (rare && (text.Contains("Chúc mừng") || text.StartsWith("📢"))) return "rare";   // thông báo về chính mình, có nguồn
+        if (IsKill(text)) return rare ? "rare" : text.Contains("Sát Thủ") ? "assassin" : "boss";
+        if (rare && Regex.IsMatch(text, @"Nhặt được|[Nn]hận|🎁|📕|🐎")) return "rare";
         if (IsDaTau(text)) return "datau";
+        if (text.Contains("Boss Hoàng Kim") || text.Contains("Boss tuần")) return "boss";
         if (text.Contains("Sát Thủ") || text.Contains("truy sát")) return "assassin";
         if (Regex.IsMatch(text, @"Gục|trọng thương|gục ngã")) return "death";
+        if (Regex.IsMatch(text, @"qua tầng \d*00\b")) return "milestone";
         if (text.Contains("🗼") || text.Contains("Tháp")) return "tower";
-        if (Regex.IsMatch(text, @"^Nhặt được|🎁|Nhận ")) return "loot";
-        return "other";
+        if (Regex.IsMatch(text, @"^🗺 (Dã Tẩu|Nhiệm vụ)|Chế độ Nhiệm Vụ")) return "quest";
+        return null;
     }
+    public static string Classify(string text) => KindOf(text) ?? "other";
 
     public static string FileOf(string accId, DateOnly day) => Path.Combine(Dir, $"{accId}-{day:yyyy-MM-dd}.log");
     public static DateOnly VnDay(DateTime at) => DateOnly.FromDateTime(at.ToUniversalTime().AddHours(7));

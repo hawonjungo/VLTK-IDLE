@@ -475,8 +475,8 @@ $('#horseBtn').addEventListener('click', openHorses);
 
 // ---------- 📜 Nhật ký game ----------
 // Mỗi dòng game ghi về chính nhân vật (kèm tầng / bản đồ), lọc theo nhân vật, loại, ngày; "💎 Đồ hiếm" gộp các nhân vật của bạn
-const GAMELOG_KINDS = [['', 'Mọi loại'], ['rare', '💎 Đồ hiếm'], ['datau', '📜 Dã Tẩu'], ['boss', '👑 Boss'],
-  ['assassin', '🗡 Sát Thủ'], ['tower', '🗼 Tháp'], ['death', '💀 Gục ngã'], ['loot', '🎁 Nhặt / nhận đồ'], ['other', 'Khác']];
+const GAMELOG_KINDS = [['', 'Mọi loại'], ['rare', '💎 Đồ hiếm'], ['boss', '👑 Boss'], ['assassin', '🗡 Sát Thủ'],
+  ['milestone', '🏆 Mốc 100 tầng'], ['tower', '🗼 Tháp'], ['death', '💀 Gục ngã'], ['quest', '🗺 Đi làm nhiệm vụ'], ['datau', '📜 Thưởng Dã Tẩu']];
 const vnToday = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
 let logSel = { who: 'rare', kind: '', day: '', hideXp: true };
 // Thưởng Dã Tẩu chỉ có kinh nghiệm ("🎁 Dã Tẩu #2491 (…): 3% kinh nghiệm")
