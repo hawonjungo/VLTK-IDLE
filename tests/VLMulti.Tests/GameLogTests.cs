@@ -15,6 +15,7 @@ public class GameLogTests
         Assert.Equal("tower", GameLog.KindOf("🗼 Tháp: qua tầng 14041 · nhận 1 Huyền Tinh cấp 9"));
         Assert.Equal("milestone", GameLog.KindOf("🗼 Tháp: qua tầng 14100 · nhận 1 Tử Thủy Tinh, 1 Thần Bí Khoáng Thạch"));
         Assert.Equal("death", GameLog.KindOf("Gục ở tháp thử thách tầng 14062. Kỷ lục: 14061."));
+        Assert.Equal("tower", GameLog.KindOf("🗼 Chế độ Leo Tháp: tự vào Thông Thiên Tháp, gục ngã thì chuyển về Luyện Công."));
         // Rác: nhặt đồ thường, dùng lệnh bài, dòng lặp của boss, mua ở Kỳ Trân Các
         Assert.True(GameLog.IsNoise("Nhặt được Quan Âm Phát Quán"));
         Assert.True(GameLog.IsNoise("📜 Dùng Lệnh Bài Dã Tẩu: +1 nhiệm vụ hôm nay (120/155)."));

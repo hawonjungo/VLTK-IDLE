@@ -58,7 +58,7 @@ public static class GameLog
         if (IsDaTau(text)) return "datau";
         if (text.Contains("Boss Hoàng Kim") || text.Contains("Boss tuần")) return "boss";
         if (text.Contains("Sát Thủ") || text.Contains("truy sát")) return "assassin";
-        if (Regex.IsMatch(text, @"Gục|trọng thương|gục ngã")) return "death";
+        if (Regex.IsMatch(text, @"^(Gục|⚔ Gục|Bạn đã trọng thương)")) return "death"; // không tính dòng "Chế độ Leo Tháp: … gục ngã thì …"
         if (Regex.IsMatch(text, @"qua tầng \d*00\b")) return "milestone";
         if (text.Contains("🗼") || text.Contains("Tháp")) return "tower";
         if (Regex.IsMatch(text, @"^🗺 (Dã Tẩu|Nhiệm vụ)|Chế độ Nhiệm Vụ")) return "quest";
