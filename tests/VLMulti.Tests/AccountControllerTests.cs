@@ -624,12 +624,11 @@ public class AccountControllerTests
         var (ctl, page, cfg) = Make();
         cfg.EventTeacher = false;
         cfg.DailyKnbBuy = false;
-        cfg.GuildWeekAlert = true;
         var st = Status("game", mode: "tower", zone: "Thông Thiên Tháp · tầng 900");
-        Run(ctl, T0, 170, st);
-        Assert.Equal(0, Assert.Single(Sent(page, "guild")).GetProperty("arg").GetProperty("knbAmount").GetInt32());
+        Run(ctl, T0, 10 * 60, st);
+        Assert.Empty(Sent(page, "guildKnb"));
 
-        // Bật: góp tới mức chọn, chừa KnbKeep
+        // Bật: mỗi ngày một lần, tới mức chọn, chừa KnbKeep
         var (ctl2, page2, cfg2) = Make();
         cfg2.EventTeacher = false;
         cfg2.DailyKnbBuy = false;
@@ -637,11 +636,21 @@ public class AccountControllerTests
         cfg2.GuildKnbAmount = 100;
         cfg2.KnbKeep = 1000;
         var t = Run(ctl2, T0, 170, st);
-        var arg = Assert.Single(Sent(page2, "guild")).GetProperty("arg");
-        Assert.Equal(100, arg.GetProperty("knbAmount").GetInt32());
-        Assert.Equal(1000, arg.GetProperty("knbKeep").GetInt32());
-        ctl2.OnPageMessage("""{"t":"guildResult","r":"ok","bought":"","knbGiven":100}""", t);
-        Assert.Contains(ctl2.Activity.Items, e => e.Text == "💎 Góp 100 KNB vào quỹ bang");
+        var arg = Assert.Single(Sent(page2, "guildKnb")).GetProperty("arg");
+        Assert.Equal(100, arg.GetProperty("amount").GetInt32());
+        Assert.Equal(1000, arg.GetProperty("keep").GetInt32());
+        // Chưa đủ KNB sau khi chừa → ghi lý do, 60 phút sau thử lại (không thử dồn dập)
+        ctl2.OnPageMessage("""{"t":"guildKnbResult","r":"ok","given":0,"done":0,"have":1000,"reason":"low"}""", t);
+        Assert.Contains(ctl2.Activity.Items, e => e.Text.StartsWith("💎 Chưa góp KNB vào bang: còn 1,000 KNB") || e.Text.StartsWith("💎 Chưa góp KNB vào bang: còn 1.000 KNB"));
+        t = Run(ctl2, t, 50 * 60, st);
+        Assert.Single(Sent(page2, "guildKnb"));
+        t = Run(ctl2, t, 15 * 60, st);
+        Assert.Equal(2, Sent(page2, "guildKnb").Count());
+        ctl2.OnPageMessage("""{"t":"guildKnbResult","r":"ok","given":100,"done":100,"have":1050}""", t);
+        Assert.Contains(ctl2.Activity.Items, e => e.Text.StartsWith("💎 Góp 100 KNB vào quỹ bang"));
+        Assert.True(ctl2.GuildKnbDoneToday(t));
+        t = Run(ctl2, t, 3 * 60 * 60, st);
+        Assert.Equal(2, Sent(page2, "guildKnb").Count()); // xong hôm nay: thôi
 
         // Sổ KNB: chỉ đọc nhật ký bang khi app nghe kết quả, 3 phút một lần; không ở trong bang → nghỉ 60 phút
         var got = new List<JsonElement>();
@@ -1087,6 +1096,25 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Knb_sent_to_main_keeps_todays_guild_donation()
+    {
+        var (ctl, page, cfg) = Make();
+        cfg.DailyKnbBuy = false;
+        cfg.EventTeacher = false;
+        cfg.Accounts[0].CharName = "A";
+        cfg.Accounts[1].CharName = "Main";
+        ctl.Account.CharName = "A";
+        cfg.KnbMainName = "Main";
+        cfg.KnbSendOn = true;
+        cfg.GuildKnbOn = true;
+        cfg.GuildKnbAmount = 100;
+        cfg.KnbKeep = 1000;
+        Run(ctl, T0, 8 * 60, Status("game", "tower", "Thông Thiên Tháp · tầng 900"));
+        var send = page.Sent.Single(m => m.GetProperty("t").GetString() == "knbSend").GetProperty("arg");
+        Assert.Equal(1100, send.GetProperty("keep").GetInt32()); // góp bang trước, gửi về acc chính sau
+    }
+
+    [Fact]
     public void Sends_knb_to_main_character_daily_and_main_collects()
     {
         var (ctl, page, cfg) = Make();
@@ -1103,7 +1131,7 @@ public class AccountControllerTests
         var send = page.Sent.Single(m => m.GetProperty("t").GetString() == "knbSend").GetProperty("arg");
         Assert.Equal("send", send.GetProperty("op").GetString());
         Assert.Equal("Main", send.GetProperty("to").GetString());
-        Assert.Equal(1000, send.GetProperty("keep").GetInt32());
+        Assert.Equal(1000, send.GetProperty("keep").GetInt32()); // không góp KNB vào bang: chỉ chừa "Mỗi acc giữ lại"
         Assert.Equal(new[] { "A", "Main" }, send.GetProperty("allowed").EnumerateArray().Select(x => x.GetString()));
         ctl.OnPageMessage("""{"t":"knbSendResult","r":"ok","opened":3,"gained":1500,"sent":4200,"mails":0,"knb":1000}""", t);
         Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("💰 Gửi 4,200 KNB cho Main") || e.Text.StartsWith("💰 Gửi 4.200 KNB cho Main"));

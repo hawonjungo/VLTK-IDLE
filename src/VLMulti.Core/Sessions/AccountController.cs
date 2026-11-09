@@ -510,6 +510,9 @@ public sealed class AccountController
                 case "knbSendResult":
                     OnKnbSendResult(m, now);
                     break;
+                case "guildKnbResult":
+                    OnGuildKnbResult(m, now);
+                    break;
                 case "guildLogResult":
                     OnGuildLogResult(m, now);
                     break;
@@ -1161,6 +1164,7 @@ public sealed class AccountController
         SuperviseGuild(now);
         SuperviseLockInnate(now);
         SuperviseGuildLedger(now);
+        SuperviseGuildKnb(now);
         SuperviseSellJunk(now);
         SuperviseKnbTransfer(now);
         SuperviseStuck(now);
@@ -1773,7 +1777,8 @@ public sealed class AccountController
         if (cfg.DailyKnbBuy && _knbDoneDay != DateOnly.FromDateTime(vn)) return;
         _knbSendTry = now;
         _knbSendPending = true;
-        Post(new { t = "knbSend", arg = new { op = "send", to = cfg.KnbMainName, keep = cfg.KnbKeep, openBig = cfg.KnbOpenBig, allowed = own, min = 100 } });
+        // Góp KNB vào bang hôm nay chưa xong → giữ lại thêm phần đó (góp bang trước, gửi về acc chính sau)
+        Post(new { t = "knbSend", arg = new { op = "send", to = cfg.KnbMainName, keep = cfg.KnbKeep + GuildKnbStillToGive(cfg, now), openBig = cfg.KnbOpenBig, allowed = own, min = 100 } });
     }
 
     private void OnKnbSendResult(JsonElement m, DateTime now)
@@ -1797,6 +1802,71 @@ public sealed class AccountController
     private DateTime _junkLastTry;
     private bool _junkPending;
     private DateOnly _junkNoneNoted;
+
+    // 💎 Góp KNB vào quỹ bang (bạn bật), MỖI NGÀY MỘT LẦN: từ 00:10 giờ VN, 2,5 phút sau khi vào game. Góp xong (hoặc
+    // hôm nay đã góp tay đủ, hoặc không ở trong bang) thì thôi tới hôm sau; chưa đủ KNB sau khi chừa "Mỗi acc giữ lại"
+    // thì 60 phút thử lại. Gửi KNB về acc chính giữ lại thêm phần này cho tới khi góp xong.
+    private DateOnly _guildKnbDoneDay;
+    private DateTime _guildKnbNextTry, _guildKnbAt;
+    private bool _guildKnbPending;
+    private DateOnly _guildKnbLowNoted;
+    public bool GuildKnbDoneToday(DateTime now) => _guildKnbDoneDay == VnDate(now);
+    private int GuildKnbStillToGive(AppSettings cfg, DateTime now) => cfg.GuildKnbOn && !GuildKnbDoneToday(now) ? cfg.GuildKnbAmount : 0;
+
+    private void SuperviseGuildKnb(DateTime now)
+    {
+        var cfg = SettingsProvider?.Invoke();
+        if (cfg is null || !cfg.GuildKnbOn || Screen != "game" || Away || GuildKnbDoneToday(now)) return;
+        var vn = now.ToUniversalTime().AddHours(7);
+        if (vn.TimeOfDay < TimeSpan.FromMinutes(10) || now - _screenSince < TimeSpan.FromSeconds(150)) return;
+        if (_guildKnbPending)
+        {
+            if (now - _guildKnbAt < TimeSpan.FromMinutes(2)) return;
+            _guildKnbPending = false; // trang không trả lời → 10 phút sau thử lại
+            _guildKnbNextTry = _guildKnbAt + TimeSpan.FromMinutes(10);
+        }
+        if (now < _guildKnbNextTry || _ldtBuyingSince is not null || EventRunning(now)) return;
+        _guildKnbAt = now;
+        _guildKnbPending = true;
+        Post(new { t = "guildKnb", arg = new { amount = cfg.GuildKnbAmount, keep = cfg.KnbKeep } });
+    }
+
+    private void OnGuildKnbResult(JsonElement m, DateTime now)
+    {
+        _guildKnbPending = false;
+        long L(string n) => m.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number ? (long)v.GetDouble() : 0;
+        var r = Str(m, "r");
+        var reason = Str(m, "reason");
+        Log.Write($"[{Account.Id}] guild knb: {r} given={L("given")} done={L("done")} have={L("have")} {reason}");
+        var cfg = SettingsProvider?.Invoke();
+        switch (r)
+        {
+            case "busy" or "boss-hk" or "no-data":
+                _guildKnbNextTry = now + TimeSpan.FromMinutes(2);
+                return;
+            case "no-guild":
+                _guildKnbDoneDay = VnDate(now);
+                return;
+            case "ok" when L("given") > 0:
+                _guildKnbDoneDay = VnDate(now);
+                Note(now, $"💎 Góp {L("given"):N0} KNB vào quỹ bang (hôm nay {L("done"):N0})", StatusLevel.Ok);
+                return;
+            case "ok" when reason is "enough" or "cap":
+                _guildKnbDoneDay = VnDate(now); // đã góp (tay) đủ hôm nay
+                return;
+            case "ok" when reason == "low":
+                _guildKnbNextTry = now + TimeSpan.FromMinutes(60);
+                if (_guildKnbLowNoted != VnDate(now))
+                {
+                    _guildKnbLowNoted = VnDate(now);
+                    Note(now, $"💎 Chưa góp KNB vào bang: còn {L("have"):N0} KNB, cần chừa {cfg?.KnbKeep ?? 0:N0} – 60 phút thử lại", StatusLevel.Warn);
+                }
+                return;
+            default:
+                _guildKnbNextTry = now + TimeSpan.FromMinutes(10);
+                return;
+        }
+    }
 
     // 🏯 Sổ KNB của bang: đọc Nhật ký bang (game chỉ giữ 30 dòng) + danh sách thành viên ~3 phút một lần (gọi thẳng
     // dữ liệu bang, không mở bảng); acc không ở trong bang thì 60 phút mới thử lại. App (server) gom vào GuildLedger.
@@ -1917,7 +1987,7 @@ public sealed class AccountController
             if (cfg.GuildTtsp) items.Add("ttsp");
             if (cfg.GuildThbt) items.Add("thbt");
         }
-        if (items.Count == 0 && cfg.GuildDailyAmount <= 0 && !cfg.GuildFurnace && !cfg.GuildWeekAlert && !cfg.GuildKnbOn) return;
+        if (items.Count == 0 && cfg.GuildDailyAmount <= 0 && !cfg.GuildFurnace && !cfg.GuildWeekAlert) return;
         var vn = now.ToUniversalTime().AddHours(7);
         if (_guildDoneDay == DateOnly.FromDateTime(vn) || vn.TimeOfDay < TimeSpan.FromMinutes(10)) return;
         if (_guildPending && now - _guildLastTry < TimeSpan.FromMinutes(3)) return;
@@ -1934,7 +2004,6 @@ public sealed class AccountController
                 items, donateCap = cfg.GuildShop ? cfg.GuildDonateCap : 0,
                 dailyAmount = cfg.GuildDailyAmount, reserve = cfg.GuildDonateReserve,
                 furnace = cfg.GuildFurnace, keep = GuildFurnaceKeep,
-                knbAmount = cfg.GuildKnbOn ? cfg.GuildKnbAmount : 0, knbKeep = cfg.KnbKeep,
             },
         });
     }
@@ -1990,11 +2059,9 @@ public sealed class AccountController
     private void OnGuildExtras(JsonElement m, DateTime now)
     {
         int Int(string name) => m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
-        Log.Write($"[{Account.Id}] guild extras: daily={Int("daily")} knb={Int("knbGiven")} red={Int("redOpened")} burned={Int("burned")} kept={Str(m, "kept")} stashed={Int("stashed")}");
+        Log.Write($"[{Account.Id}] guild extras: daily={Int("daily")} red={Int("redOpened")} burned={Int("burned")} kept={Str(m, "kept")} stashed={Int("stashed")}");
         if (Int("daily") > 0)
             Note(now, $"🏯 Cống hiến {Int("daily"):N0} vạn vào bang" + (Int("redOpened") > 0 ? $" (mở {Int("redOpened")} Hồng Bao)" : ""), StatusLevel.Ok);
-        if (Int("knbGiven") > 0)
-            Note(now, $"💎 Góp {Int("knbGiven"):N0} KNB vào quỹ bang", StatusLevel.Ok);
         if (Int("burned") > 0)
             Note(now, $"🔥 Lò Đốt Đồ: góp {Int("burned")} món Hoàng Kim (+{Int("burnPts"):N0} cống hiến)", StatusLevel.Ok);
         if (Str(m, "kept").Length > 0)

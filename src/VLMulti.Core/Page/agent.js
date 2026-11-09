@@ -944,7 +944,7 @@
     if (!menu) return { r: 'no-guild' };
     flowBusy = true;
     const res = { r: 'ok', bought: [], spent: 0, donated: 0, mails: 0, points: null,
-      daily: 0, knbGiven: 0, redOpened: 0, burned: 0, burnPts: 0, kept: [], stashed: 0, week: null };
+      daily: 0, redOpened: 0, burned: 0, burnPts: 0, kept: [], stashed: 0, week: null };
     try {
       await guildShop(arg, menu, res);
       if (res.r !== 'no-guild') await guildMail(res);
@@ -1037,31 +1037,6 @@
             if (await pressAndAgree(btn, /góp|cống hiến/i)) {
               const after = await waitFor(() => { const p = guildPts(); return p != null && p > (before ?? 0) ? p : null; }, 4000);
               res.daily = after != null && before != null ? after - before : amount;
-            }
-          }
-        }
-      }
-      // 1b. 💎 Góp KNB (bạn bật trong Cài đặt): tới arg.knbAmount KNB trong ngày (tính cả phần đã góp tay), không quá mức
-      //     tối đa của game, luôn chừa arg.knbKeep KNB. Ô #bhGopK + nút #bhGopKb, game hỏi "Góp N KNB vào quỹ bang …?"
-      if (arg.knbAmount > 0) {
-        const load = gameGet('bhLoad');
-        try { if (typeof load === 'function') await load(); } catch (_) {}
-        const me = ((gameGet('BH') || {}).d || {}).toi;
-        if (me) {
-          const done = +me.gop_knb || 0;
-          const room = Math.max(0, (+me.max_knb || 0) - done);
-          const have = knbExact() ?? 0;
-          const amount = Math.max(0, Math.min(arg.knbAmount - done, room, have - (arg.knbKeep ?? 1000)));
-          if (amount > 0 && (await openGuildTab('gop'))) {
-            const input = await waitFor(() => $('#bhGopK'), 2000), btn = $('#bhGopKb');
-            if (input && btn && !btn.disabled) {
-              setValue(input, String(amount));
-              if (await pressAndAgree(btn, /KNB/i)) {
-                await sleep(800);
-                try { if (typeof load === 'function') await load(); } catch (_) {}
-                const after = (((gameGet('BH') || {}).d || {}).toi || {}).gop_knb;
-                res.knbGiven = after != null ? Math.max(0, after - done) : amount;
-              }
             }
           }
         }
@@ -1465,6 +1440,40 @@
     }
     await closeModalSure();
     return ok;
+  };
+  // 💎 Góp KNB vào quỹ bang (bạn bật trong Cài đặt), mỗi ngày một lần: tới `amount` KNB trong ngày (tính cả phần đã
+  // góp tay), không quá mức tối đa của game, luôn chừa `keep` KNB. Ô #bhGopK + nút #bhGopKb, game hỏi "Góp N KNB vào
+  // quỹ bang …?". Trả về lý do khi không góp: enough (đã đủ hôm nay), low (không đủ KNB sau khi chừa), cap (hết mức).
+  const guildKnbFlow = async (arg) => {
+    if (flowBusy || anyWindowOpen()) return { r: 'busy' };
+    if (inBossHk()) return { r: 'boss-hk' };
+    const load = gameGet('bhLoad');
+    let d = null;
+    try { if (typeof load === 'function') d = await load(); } catch (_) {}
+    if (!d) return { r: 'no-data' };
+    if (!d.co || !d.toi) return { r: 'no-guild' };
+    const want = +arg.amount || 0, keep = arg.keep ?? 1000;
+    const done = +d.toi.gop_knb || 0;
+    const have = knbExact() ?? 0;
+    if (done >= want) return { r: 'ok', given: 0, done, have, reason: 'enough' };
+    const room = Math.max(0, (+d.toi.max_knb || 0) - done);
+    const amount = Math.max(0, Math.min(want - done, room, have - keep));
+    if (amount <= 0) return { r: 'ok', given: 0, done, have, reason: room <= 0 ? 'cap' : 'low' };
+    flowBusy = true;
+    try {
+      if (!(await openGuildTab('gop'))) return { r: 'no-tab', done, have };
+      const input = await waitFor(() => $('#bhGopK'), 2000), btn = $('#bhGopKb');
+      if (!input || !btn || btn.disabled) return { r: 'no-button', done, have };
+      setValue(input, String(amount));
+      if (!(await pressAndAgree(btn, /KNB/i))) return { r: 'no-confirm', done, have };
+      await sleep(800);
+      let after = null;
+      try { const d2 = await load(); after = d2 && d2.toi ? +d2.toi.gop_knb || 0 : null; } catch (_) {}
+      return { r: 'ok', given: after != null ? Math.max(0, after - done) : amount, done: after ?? done + amount, have: knbExact() ?? have - amount };
+    } finally {
+      await closeModalSure();
+      flowBusy = false;
+    }
   };
   // 🏯 Sổ KNB của bang: tải dữ liệu bang bằng hàm của game (bhLoad → máy chủ "bh_get", không mở bảng nào) rồi gửi
   // nhật ký bang (30 dòng gần nhất), danh sách thành viên và quỹ về app
@@ -1872,6 +1881,8 @@
       knbFlowSend(m.arg || {}).then((res) => post({ t: 'knbSendResult', ...res }), (err) => post({ t: 'knbSendResult', r: 'error: ' + err.message }));
     } else if (m.t === 'bossHk') {
       bossHkFlow(m.arg || {}).then((res) => post({ t: 'bossHkResult', ...res }), (err) => post({ t: 'bossHkResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'guildKnb') {
+      guildKnbFlow(m.arg || {}).then((res) => post({ t: 'guildKnbResult', ...res }), (err) => post({ t: 'guildKnbResult', r: 'error: ' + err.message }));
     } else if (m.t === 'guildLog') {
       guildLogFlow().then((res) => post({ t: 'guildLogResult', ...res }), (err) => post({ t: 'guildLogResult', r: 'error: ' + err.message }));
     } else if (m.t === 'lockInnate') {
