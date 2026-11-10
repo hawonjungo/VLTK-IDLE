@@ -62,6 +62,7 @@ public sealed class AccountController
     private readonly IGamePage _page;
     private readonly AttemptLimiter _loginLimiter = new(6, TimeSpan.FromMinutes(30));
     private readonly AttemptLimiter _enterLimiter = new(3, TimeSpan.FromMinutes(10));
+    private DateTime _lastEnterAt;
     private readonly AttemptLimiter _reloadLimiter = new(3, TimeSpan.FromMinutes(15));
     private readonly Dictionary<string, DateTime> _modeBlockedUntil = new();
 
@@ -1328,7 +1329,13 @@ public sealed class AccountController
         if (now - _screenSince < ScreenSettle) return;
 
         if (Screen == "login") SuperviseLogin(now);
-        else if (Screen == "charselect" && _enterLimiter.TryAcquire(now)) RunCommand("enter");
+        // Màn chọn nhân vật: bấm "Vào game" cách nhau ≥ 20 giây (10/11: 3 lần trong 9 giây lúc máy chủ game chậm –
+        // "Máy chủ không phản hồi" – rồi hết lượt, đứng yên 10 phút)
+        else if (Screen == "charselect" && now - _lastEnterAt >= TimeSpan.FromSeconds(20) && _enterLimiter.TryAcquire(now))
+        {
+            _lastEnterAt = now;
+            RunCommand("enter");
+        }
     }
 
     private void SuperviseLogin(DateTime now)

@@ -638,6 +638,39 @@
   };
   setInterval(() => { try { kiteTick(); } catch (err) { post({ t: 'log', msg: 'kite: ' + err.message }); kiteCfg = null; } }, 100);
 
+  // 🐎 Trong Tháp không cưỡi ngựa: game tự lên ngựa khi Auto đi tới con quái ở xa (ngoài vòng 400), tới nơi lại phải
+  // xuống ngựa (0,6 giây) mới đánh được, trên ngựa không đánh / không hút sinh lực. Vào tháp → tắt "Tự lên ngựa"
+  // (S.autoRide) và xuống ngựa nếu đang cưỡi; ra khỏi tháp → bật lại (chỉ khi chính tool đã tắt, nhớ trong trình duyệt
+  // của acc). Tắt "Tự lên ngựa" mà còn ngồi ngựa thì game không tự xuống để đánh nữa → luôn xuống ngựa khi ở tháp.
+  let rideAt = 0;
+  setInterval(() => {
+    try {
+      let S, R;
+      try { S = window.H5.G('S'); R = window.H5.G('R'); } catch (_) { return; }
+      if (!S || !R || !S.name) return;
+      const key = 'vlRideOff';
+      if (R.tower) {
+        if (S.autoRide !== false) {
+          S.autoRide = false;
+          try { localStorage.setItem(key, '1'); } catch (_) {}
+          post({ t: 'log', msg: 'ride: vào tháp → tắt Tự lên ngựa' });
+        }
+        if (R.mounted && Date.now() - rideAt > 1500) {
+          const rb = $('#rideBtn');
+          if (rb && /Xuống ngựa/.test(rb.textContent)) { rideAt = Date.now(); rb.click(); }
+        }
+      } else {
+        let mine = false;
+        try { mine = localStorage.getItem(key) === '1'; } catch (_) {}
+        if (mine && !R.dg) {
+          S.autoRide = true;
+          try { localStorage.removeItem(key); } catch (_) {}
+          post({ t: 'log', msg: 'ride: ra khỏi tháp → bật lại Tự lên ngựa' });
+        }
+      }
+    } catch (_) {}
+  }, 1000);
+
   // ---------- Tự mua Lệnh Bài Dã Tẩu (khi bấm 📜 Nhiệm Vụ) ----------
   // Kỳ Trân Các: mỗi lệnh bài 20 KNB khóa, tối đa 100 lần/ngày. Thiếu KNB khóa → đổi KNB thường (1:1, game hỏi lại
   // ở #askBox → bấm "Đổi"). Hết KNB thường → mở Đại Hồng Bao (100–1000 KNB, máy chủ quay số) rồi đổi tiếp.
