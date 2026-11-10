@@ -18,7 +18,7 @@ public static class KiteDirections
 
     public static string Label(string direction) => direction switch
     {
-        Line => "Hàng dọc giữa phòng: vừa đánh vừa chạy, reset mỗi tầng",
+        Line => "Né liên tục: cận chiến đi vòng quanh quái, đánh xa đi ngang – vẫn đánh, hút sinh lực",
         Square => "Hình vuông quanh tâm phòng (đọc minimap)",
         Left => "Chạy sang trái",
         Right => "Chạy sang phải",

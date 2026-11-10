@@ -532,6 +532,10 @@ public sealed class AccountController
                 case "gameLog":
                     OnGameLog(m, now);
                     break;
+                case "kiteFloor":
+                    // Số liệu né liên tục từng tầng (để so và chỉnh): thời gian, máu mất, số lần nhích, máu thấp nhất
+                    Log.Write($"[{Account.Id}] kite floor {Raw(m, "floor")}: {Raw(m, "secs")}s lost={Raw(m, "lost")} steps={Raw(m, "steps")} min={Raw(m, "minPct")}% {(Raw(m, "melee") == "1" ? "melee" : "ranged")}");
+                    break;
                 case "gameToast":
                     OnGameToast(Str(m, "text"), now);
                     break;
@@ -2701,6 +2705,7 @@ public sealed class AccountController
     }
 
     // Trường chữ trong tin trạng thái; thiếu (trang chạy bản script cũ) thì coi là rỗng
+    private static string Raw(JsonElement s, string name) => s.TryGetProperty(name, out var v) ? v.ToString() : "";
     private static string Str(JsonElement s, string name) =>
         s.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
 

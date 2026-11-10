@@ -617,7 +617,7 @@ function openKiteSheet(a) {
   const dirLabel = (dirs.find(([v]) => v === s.kiteDirection) || [, s.kiteDirection])[1];
   const on = h('input', { type: 'checkbox' }); on.checked = !!a.kite;
   const dir = sel(dirs, a.kiteDir, dirLabel);
-  const dist = sel([100, 120, 150, 180, 250, 350, 450, 600].map((n) => [n, `${n} px`]), a.kiteDist, `${s.kiteDistance} px`);
+  const dist = sel([40, 50, 60, 70, 80, 90, 120, 180, 250, 350].map((n) => [n, `${n} px`]), a.kiteDist, `${s.kiteDistance} px`);
   const crowdOpts = [[0, 'Luôn chạy theo nhịp'], [2, 'Hơn 2 con'], [3, 'Hơn 3 con'], [4, 'Hơn 4 con'], [5, 'Hơn 5 con']];
   const crowdLabel = (n) => (crowdOpts.find(([v]) => v === n) || [, `hơn ${n} con`])[1];
   const crowd = sel(crowdOpts, a.kiteCrowd, crowdLabel(s.kiteCrowd));
@@ -631,7 +631,7 @@ function openKiteSheet(a) {
     h('div', { class: 'form-grid' }, [
       h('label', { text: 'Kiểu kéo' }), dir,
       h('label', { text: 'Chạy khi quái ở gần' }), crowd,
-      h('label', { text: 'Mỗi bước chạy' }), dist,
+      h('label', { text: 'Mỗi lần nhích (né liên tục: 40–90)' }), dist,
       h('label', { text: 'Dừng ra chiêu giữa 2 bước' }), pause,
       h('label', { text: 'Máu thấp thì chạy xa' }), flee,
       h('label', { text: 'Chu kỳ (kiểu cũ)' }), interval,
@@ -781,7 +781,7 @@ function renderSettings() {
   const vanLabel = (n) => (+n ? `${n0(n)} vạn` : 'Không');
   // Kéo quái & luật đổi chế độ
   const dir = h('select', {}, s.kiteDirections.map((d) => { const o = h('option', { value: d.id, text: d.label }); o.selected = d.id === s.kiteDirection; return o; }));
-  const dist = pick([120, 180, 250, 350, 450, 600], s.kiteDistance, (n) => `${n} px`);
+  const dist = pick([40, 50, 60, 70, 80, 90, 120, 180, 250, 350], s.kiteDistance, (n) => `${n} px`);
   const interval = pick([1, 2, 3, 4, 6, 8, 10, 15, 20, 30], s.kiteInterval, (n) => `${n} giây`);
   const kiteFlee = pick([[0, 'Không chạy'], [25, '< 25% máu'], [30, '< 30% máu'], [40, '< 40% máu'], [50, '< 50% máu'], [60, '< 60% máu']], s.kiteFleeHp ?? 40);
   const box = (checked) => { const c = h('input', { type: 'checkbox' }); c.checked = checked; return c; };

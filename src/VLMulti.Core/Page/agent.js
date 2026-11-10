@@ -501,18 +501,19 @@
     },
   };
 
-  // ---------- 🏃 Kéo quái kiểu "Hàng dọc" (chạy trong trang, nhịp 0,3 giây) ----------
-  // Đọc trạng thái game qua cầu nối H5.G: nhân vật H (x, y), R.enemies, R.tower.floor, R.spawnT (đếm ngược quái ra),
-  // R.life, WORLD (kích thước phòng), CAM (góc trái trên của camera) và AR (khung nhìn logic 640×360).
-  // Luôn VỪA ĐÁNH VỪA ĐI: mọi lần di chuyển là một bước ngắn (tối đa `step` px – đi xa game tự lên ngựa, không đánh
-  // được), giữa 2 bước dừng `pauseMs` ms để ra chiêu và hút sinh lực. Bước dọc theo đường thẳng đứng giữa phòng, ngược
-  // phía đám quái → quái đuổi theo thành một hàng, đòn đánh của quái bị lệch.
-  //  - Quái ở gần (trong `near` px, mặc định 400) nhiều hơn `crowd` con → bước theo nhịp; ít hơn thì đứng yên đánh.
-  //  - Quái tầng mới sắp ra / vừa ra (ra quanh nhân vật ±260 px, 08/11 chết trong 2 giây) → một bước né ngay.
-  //  - Lệch khỏi đường / sát mép: bước ngắn dần về phía giữa (không chạy một mạch). Máu thấp: bước ra xa đám quái.
-  //  - Đã bấm đi mà nhân vật không nhúc nhích (08/11: đứng yên lúc chuyển tầng) → bấm lại, ghi log.
+  // ---------- 🏃 Né liên tục khi leo tháp (chạy trong trang, nhịp 0,1 giây) ----------
+  // Cơ chế game (app.js jx1mAI): quái tháp ra chiêu kiểu JX1 – CHỐT vị trí nhân vật lúc bắt đầu ra chiêu rồi chiêu bay /
+  // chém vào đúng điểm đó; lúc chiêu tới mà nhân vật đã rời điểm đó thì không trúng. Vì vậy có quái ở gần thì nhân vật
+  // KHÔNG BAO GIỜ đứng yên: cứ ~0,3 giây nhích một đoạn ngắn (40–70 px, không đi xa nên không lên ngựa); Auto của game
+  // vẫn ra đòn khi đi → vẫn hút sinh lực. Thấy quái gần vừa ra chiêu (act "at") thì nhích ngay (phản xạ).
+  //  - ⚔ Cận chiến (kỹ năng chính R.P.main.melee): đi vòng quanh con quái gần nhất ở bán kính ~70% tầm đánh.
+  //  - 🏹 Đánh xa: giữ khoảng cách ~55% tầm (200–320 px) tới con gần nhất, đi NGANG so với hướng quái (né chiêu bay tốt
+  //    nhất), đổi chiều sau vài bước hoặc khi sát mép → zig-zag, quái đuổi theo thành hàng.
+  //  - Sát mép / góc phòng: hướng vào giữa. Máu thấp (< fleeHp%): bước dài hơn, lùi khỏi đám quái. Choáng: chờ.
+  // Ghi số liệu từng tầng (máu mất, số lần nhích, thời gian) để so và chỉnh: post "kiteFloor".
   let kiteCfg = null;
-  const kiteSt = { floor: null, dir: 1, phase: 'stand', until: 0, target: null, from: null, at: 0, retry: 0, last: '', dodged: false, stuckLog: 0 };
+  const kiteSt = { floor: null, side: 1, lastClick: 0, target: null, from: null, steps: 0, sideSteps: 0, stuckLog: 0,
+    stat: null };
   const g = (n) => { try { return window.H5.G(n); } catch (_) { return undefined; } };
   const clickWorld = (tx, ty) => {
     const arena = $('#arena'), CAM = g('CAM'), AR = g('AR');
@@ -528,101 +529,94 @@
     fireClick(arena, r.left + sx, r.top + sy);
     return true;
   };
+  const kiteFloorDone = (R) => {
+    const st = kiteSt.stat;
+    if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0 });
+    kiteSt.stat = null;
+  };
   const kiteTick = () => {
     const c = kiteCfg;
     if (!c || !c.on) return;
     const auto = $('#ctrlBtn');
     if (!auto || !auto.classList.contains('on') || flowBusy || anyWindowOpen() || inBossHk()) return;
     const H = g('H'), R = g('R'), W = g('WORLD'), S = g('S');
-    if (!H || !R || !W || !R.tower || R.dg || R.sat || R.deadT > 0 || (S && S.mode !== 'tower')) { kiteSt.floor = null; return; }
+    if (!H || !R || !W || !R.tower || R.dg || R.sat || R.deadT > 0 || (S && S.mode !== 'tower')) {
+      if (kiteSt.stat && R && (R.deadT > 0 || !R.tower)) { kiteSt.stat.died = 1; kiteFloorDone(R); }
+      kiteSt.floor = null; return;
+    }
     const now = Date.now();
-    const m = c.margin ?? 260;
-    // ⚔ Nhân vật cận chiến (kỹ năng chính tầm gần: R.P.main.melee, ví dụ Thiên Nhẫn Vân Long Kích tầm 90): không kéo
-    // hàng, không đi xa – chỉ nhích ngang một chút quanh quái gần nhất cho lệch đòn, vẫn đứng trong tầm đánh để hút
-    // sinh lực. Đánh xa: bước dọc đường giữa phòng như trên.
     const melee = c.melee != null ? !!c.melee : !!(R.P && R.P.main && R.P.main.melee);
-    const step = melee ? (c.meleeStep ?? 45) : Math.min(c.step ?? 150, 200);
-    const pauseMs = melee ? (c.meleePauseMs ?? 900) : (c.pauseMs ?? 500);
-    const cx = W.w / 2, cy = W.h / 2;
-    const half = Math.max(150, Math.min(c.span ?? 700, W.h / 2 - m));
-    const yTop = cy - half, yBot = cy + half;
+    const rad = (R.P && R.P.main && +R.P.main.rad) || (melee ? 90 : 400);
+    const m = c.margin ?? 220;
+    const lifePct = R.P && R.P.life > 0 ? 100 * (R.life || 0) / R.P.life : 100;
+    const low = c.fleeHp && lifePct < c.fleeHp;
+    const step = Math.max(30, Math.min(c.step ?? (melee ? 50 : 60), 90)) * (low ? 1.4 : 1);
+    const every = c.everyMs ?? 300;
+    // Số liệu tầng
+    if (R.tower.floor !== kiteSt.floor) {
+      kiteFloorDone(R);
+      kiteSt.floor = R.tower.floor;
+      kiteSt.stat = { floor: R.tower.floor, t0: now, lost: 0, steps: 0, minPct: 100, life: R.life, melee };
+      kiteSt.target = null;
+    }
+    const st = kiteSt.stat;
+    if (st) { if (R.life < st.life) st.lost += st.life - R.life; st.life = R.life; st.minPct = Math.min(st.minPct, lifePct); }
+    if (R.stunT > 0) return; // choáng: không đi được
     const en = (R.enemies || []).filter((e) => e && !e.dead && e.hp > 0);
-    const lifePct = R.P && R.P.life > 0 ? 100 * (R.life || 0) / R.P.life : null; // R.P.life = máu tối đa
-    // Một bước ngắn về phía (tx, ty): cắt còn tối đa `step` px
-    const go = (tx, ty, why) => {
-      let dx = tx - H.x, dy = ty - H.y; const d = Math.hypot(dx, dy);
-      if (d > step) { dx *= step / d; dy *= step / d; }
-      const x = H.x + dx, y = H.y + dy;
-      kiteSt.target = { x, y }; kiteSt.from = { x: H.x, y: H.y }; kiteSt.at = now; kiteSt.retry = 0;
-      kiteSt.phase = 'run'; kiteSt.until = now + Math.min(d, step) / 150 * 1000 + 450; kiteSt.last = why;
-      clickWorld(x, y);
-    };
-    // Hướng bước dọc đường: ngược phía đám quái (nếu có), tới đầu đường thì quay lại
-    const stepAlong = (why, list) => {
-      if (list && list.length) { const ey = list.reduce((a, e) => a + e.y, 0) / list.length; kiteSt.dir = ey > H.y ? -1 : 1; }
-      let ty = H.y + kiteSt.dir * step;
-      if (ty > yBot || ty < yTop) { kiteSt.dir = -kiteSt.dir; ty = H.y + kiteSt.dir * step; }
-      go(cx, Math.max(yTop, Math.min(yBot, ty)), why);
-    };
-    // Tầng mới: không chạy về giữa một mạch (đi xa là lên ngựa) – chỉ ghi nhận, chờ né lúc quái ra
-    if (R.tower.floor !== kiteSt.floor) { kiteSt.floor = R.tower.floor; kiteSt.dodged = false; kiteSt.phase = 'stand'; kiteSt.target = null; }
-    // Đang đi một bước
-    if (kiteSt.phase === 'run') {
-      const t = kiteSt.target, f = kiteSt.from;
-      const moved = f ? Math.hypot(H.x - f.x, H.y - f.y) : 99;
-      // Bấm rồi mà không nhúc nhích sau 0,7 giây → bấm lại (tối đa 2 lần), ghi log
-      if (moved < 12 && now - kiteSt.at > 700 && kiteSt.retry < 2) {
-        kiteSt.retry++; kiteSt.at = now; clickWorld(t.x, t.y);
-        if (now - kiteSt.stuckLog > 30000) { kiteSt.stuckLog = now; post({ t: 'log', msg: `kite: không nhúc nhích sau khi bấm (${kiteSt.last}, tầng ${R.tower.floor}, quái ${en.length}) → bấm lại` }); }
-        return;
+    const dist = (e) => Math.hypot(e.x - H.x, e.y - H.y);
+    const nearR = melee ? 260 : Math.max(300, rad * 0.9);
+    const near = en.filter((e) => dist(e) <= nearR);
+    // Quái sắp ra (đếm ngược < 0,6 giây): nhích trước một bước; không có quái gần thì đứng đánh (Auto tự tới quái)
+    if (!near.length) {
+      if (!en.length && R.spawnT > 0 && R.spawnT < 0.6 && now - kiteSt.lastClick > 600) {
+        kiteSt.side = -kiteSt.side; go(H.x + step * kiteSt.side, H.y, 'pre');
       }
-      const arrived = !t || Math.hypot(H.x - t.x, H.y - t.y) < 30;
-      if (arrived || now > kiteSt.until) { kiteSt.phase = 'pause'; kiteSt.until = now + pauseMs; }
       return;
     }
-    if (kiteSt.phase === 'pause' && now < kiteSt.until) return; // đang dừng ra chiêu / hút sinh lực
+    // Phản xạ: con quái gần vừa ra chiêu → nhích ngay, không chờ nhịp
+    const swing = near.some((e) => e.act === 'at' && (e.actT ?? 1) < 0.15);
+    const arrived = !kiteSt.target || Math.hypot(H.x - kiteSt.target.x, H.y - kiteSt.target.y) < 12;
+    const due = now - kiteSt.lastClick >= every || (arrived && now - kiteSt.lastClick >= 150) || (swing && now - kiteSt.lastClick >= 120);
+    if (!due) return;
+    // Bấm rồi mà không nhúc nhích (lúc chuyển tầng, bị chặn) → ghi log, bấm lại bình thường ở lượt sau
+    if (kiteSt.from && now - kiteSt.lastClick > 700 && Math.hypot(H.x - kiteSt.from.x, H.y - kiteSt.from.y) < 4 && now - kiteSt.stuckLog > 30000) {
+      kiteSt.stuckLog = now;
+      post({ t: 'log', msg: `kite: không nhúc nhích sau khi bấm (tầng ${R.tower.floor}, quái ${en.length}, cận chiến ${melee ? 1 : 0})` });
+    }
+    const t = near.reduce((a, e) => (dist(e) < dist(a) ? e : a));
+    const vx = H.x - t.x, vy = H.y - t.y, d = Math.hypot(vx, vy) || 1;
+    const ux = vx / d, uy = vy / d;            // hướng từ quái → nhân vật
+    let tx, ty;
     if (melee) {
-      if (!en.length) return;
-      // Sát mép / góc phòng → nhích dần về phía giữa
-      if (H.x < m || H.x > W.w - m || H.y < m || H.y > W.h - m) { go(cx, cy, 'reset'); return; }
-      const nearM = en.filter((e) => Math.hypot(e.x - H.x, e.y - H.y) <= (c.meleeNear ?? 250));
-      const low = c.fleeHp && lifePct != null && lifePct < c.fleeHp;
-      const crowdM = c.crowd ?? 2;
-      // Quái vừa ra, đông quanh người hoặc máu thấp → nhích; còn lại đứng yên đánh
-      if (kiteSt.dodged && !low && crowdM > 0 && nearM.length <= crowdM) { kiteSt.phase = 'stand'; return; }
-      kiteSt.dodged = true;
-      const list = nearM.length ? nearM : en;
-      const t = list.reduce((a, e) => (Math.hypot(e.x - H.x, e.y - H.y) < Math.hypot(a.x - H.x, a.y - H.y) ? e : a));
-      const vx = t.x - H.x, vy = t.y - H.y, d = Math.hypot(vx, vy) || 1;
-      kiteSt.side = -(kiteSt.side || 1);
-      if (low) { // máu thấp: nhích lùi khỏi đám quái (vẫn gần, vẫn đánh được)
-        const ex = list.reduce((a, e) => a + e.x, 0) / list.length, ey = list.reduce((a, e) => a + e.y, 0) / list.length;
-        const bx = H.x - ex, by = H.y - ey, bd = Math.hypot(bx, by) || 1;
-        go(H.x + bx / bd * step, H.y + by / bd * step, 'nudge-back');
-      } else {
-        go(H.x - vy / d * step * kiteSt.side, H.y + vx / d * step * kiteSt.side, 'nudge'); // ngang, so với quái gần nhất
-      }
-      return;
+      // Đi vòng quanh quái ở bán kính ~70% tầm đánh (trong tầm), mỗi lần một cung dài `step`
+      const r = Math.max(40, Math.min(rad * 0.7, 80));
+      const a = Math.atan2(vy, vx) + kiteSt.side * (step / r);
+      const rr = low ? r + step : r;
+      tx = t.x + Math.cos(a) * rr; ty = t.y + Math.sin(a) * rr;
+      if (++kiteSt.sideSteps >= 8) { kiteSt.sideSteps = 0; kiteSt.side = -kiteSt.side; } // đổi chiều vòng cho khó đoán
+    } else {
+      // Đi ngang so với hướng quái + chỉnh khoảng cách về ~55% tầm
+      const want = Math.max(200, Math.min(rad * 0.55, 320));
+      const fix = Math.max(-step, Math.min(step, (want - d) * 0.5)) * (low ? 1.5 : 1);
+      tx = H.x + (-uy) * step * kiteSt.side + ux * fix;
+      ty = H.y + (ux) * step * kiteSt.side + uy * fix;
+      if (++kiteSt.sideSteps >= 5) { kiteSt.sideSteps = 0; kiteSt.side = -kiteSt.side; }
     }
-    // Quái sắp ra (đếm ngược < 0,5 giây) hoặc vừa ra: một bước né ngay, rồi vào nhịp
-    if (!kiteSt.dodged && ((!en.length && R.spawnT > 0 && R.spawnT < 0.5) || en.length)) { kiteSt.dodged = true; stepAlong('dodge', en); return; }
-    if (!en.length) return;
-    // Lệch khỏi đường / sát mép → bước ngắn về phía giữa
-    const nearEdge = H.x < m || H.x > W.w - m || H.y < m || H.y > W.h - m;
-    if (Math.abs(H.x - cx) > 200 || nearEdge) {
-      const ty = H.y < m || H.y > W.h - m ? cy : Math.max(yTop, Math.min(yBot, H.y));
-      go(cx, ty, 'reset');
-      return;
+    // Sát mép / góc → kéo điểm đến vào trong, đổi chiều
+    const cx = W.w / 2, cy = W.h / 2;
+    if (tx < m || tx > W.w - m || ty < m || ty > W.h - m) {
+      kiteSt.side = -kiteSt.side; kiteSt.sideSteps = 0;
+      const k = step / (Math.hypot(cx - H.x, cy - H.y) || 1);
+      tx = H.x + (cx - H.x) * k; ty = H.y + (cy - H.y) * k;
     }
-    const nearList = en.filter((e) => Math.hypot(e.x - H.x, e.y - H.y) <= (c.near ?? 400));
-    // Máu thấp → bước ra xa đám quái (vẫn từng bước, vẫn đánh giữa các bước)
-    if (c.fleeHp && lifePct != null && lifePct < c.fleeHp) { stepAlong('flee', nearList.length ? nearList : en); return; }
-    // Ít quái quanh nhân vật → đứng yên đánh hết tốc lực
-    const crowd = c.crowd ?? 2;
-    if (crowd > 0 && nearList.length <= crowd) { kiteSt.phase = 'stand'; return; }
-    stepAlong('step', nearList);
+    go(tx, ty, swing ? 'swing' : melee ? 'orbit' : 'strafe');
+    function go(x, y) {
+      kiteSt.target = { x, y }; kiteSt.from = { x: H.x, y: H.y }; kiteSt.lastClick = now;
+      if (kiteSt.stat) kiteSt.stat.steps++;
+      clickWorld(x, y);
+    }
   };
-  setInterval(() => { try { kiteTick(); } catch (err) { post({ t: 'log', msg: 'kite: ' + err.message }); kiteCfg = null; } }, 300);
+  setInterval(() => { try { kiteTick(); } catch (err) { post({ t: 'log', msg: 'kite: ' + err.message }); kiteCfg = null; } }, 100);
 
   // ---------- Tự mua Lệnh Bài Dã Tẩu (khi bấm 📜 Nhiệm Vụ) ----------
   // Kỳ Trân Các: mỗi lệnh bài 20 KNB khóa, tối đa 100 lần/ngày. Thiếu KNB khóa → đổi KNB thường (1:1, game hỏi lại
