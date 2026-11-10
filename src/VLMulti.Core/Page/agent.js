@@ -510,6 +510,10 @@
   //  - 🏹 Đánh xa: giữ khoảng cách ~55% tầm (200–320 px) tới con gần nhất, đi NGANG so với hướng quái (né chiêu bay tốt
   //    nhất), đổi chiều sau vài bước hoặc khi sát mép → zig-zag, quái đuổi theo thành hàng.
   //  - Sát mép / góc phòng: hướng vào giữa. Máu thấp (< fleeHp%): bước dài hơn, lùi khỏi đám quái. Choáng: chờ.
+  // ⚠ Ngựa: game tự cho lên ngựa khi nhân vật ĐANG ĐI mà không có quái nào trong vòng 400 theo thước của game
+  // (jxd = hypot(dx, 2·dy) / 0,81 → ~324 px ngang nhưng chỉ ~162 px dọc). Trên ngựa chiêu chính không dùng được, không
+  // hút sinh lực. Vì vậy: mọi khoảng cách đo bằng thước của game; chỉ đi khi SAU bước đó vẫn còn quái trong vòng 330;
+  // không đi lúc chưa có quái; lỡ đang ngồi ngựa mà có quái gần thì bấm xuống ngựa.
   // Ghi số liệu từng tầng (máu mất, số lần nhích, thời gian) để so và chỉnh: post "kiteFloor".
   let kiteCfg = null;
   const kiteSt = { floor: null, side: 1, lastClick: 0, target: null, from: null, steps: 0, sideSteps: 0, stuckLog: 0,
@@ -531,7 +535,7 @@
   };
   const kiteFloorDone = (R) => {
     const st = kiteSt.stat;
-    if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0 });
+    if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0, mounted: st.mounted || 0 });
     kiteSt.stat = null;
   };
   const kiteTick = () => {
@@ -550,8 +554,12 @@
     const m = c.margin ?? 220;
     const lifePct = R.P && R.P.life > 0 ? 100 * (R.life || 0) / R.P.life : 100;
     const low = c.fleeHp && lifePct < c.fleeHp;
-    const step = Math.max(30, Math.min(c.step ?? (melee ? 50 : 60), 90)) * (low ? 1.4 : 1);
-    const every = c.everyMs ?? 300;
+    // Cận chiến: bước dài hơn (75) để ra khỏi vùng chém, nhịp nhanh hơn (0,2 giây)
+    const step = Math.max(30, Math.min(melee ? Math.max(c.step ?? 75, 75) : (c.step ?? 60), 90)) * (low ? 1.3 : 1);
+    const every = c.everyMs ?? (melee ? 200 : 300);
+    // Thước khoảng cách của game (dọc tính gấp đôi); ngưỡng tự lên ngựa 400, giữ dưới SAFE
+    const JK = 0.81, SAFE = 330;
+    const jx = (ax, ay, bx, by) => Math.hypot(bx - ax, (by - ay) * 2) / JK;
     // Số liệu tầng
     if (R.tower.floor !== kiteSt.floor) {
       kiteFloorDone(R);
@@ -560,18 +568,17 @@
       kiteSt.target = null;
     }
     const st = kiteSt.stat;
-    if (st) { if (R.life < st.life) st.lost += st.life - R.life; st.life = R.life; st.minPct = Math.min(st.minPct, lifePct); }
+    if (st) { if (R.life < st.life) st.lost += st.life - R.life; st.life = R.life; st.minPct = Math.min(st.minPct, lifePct); if (R.mounted) st.mounted = (st.mounted || 0) + 1; }
     if (R.stunT > 0) return; // choáng: không đi được
     const en = (R.enemies || []).filter((e) => e && !e.dead && e.hp > 0);
-    const dist = (e) => Math.hypot(e.x - H.x, e.y - H.y);
-    const nearR = melee ? 260 : Math.max(300, rad * 0.9);
-    const near = en.filter((e) => dist(e) <= nearR);
-    // Quái sắp ra (đếm ngược < 0,6 giây): nhích trước một bước; không có quái gần thì đứng đánh (Auto tự tới quái)
-    if (!near.length) {
-      if (!en.length && R.spawnT > 0 && R.spawnT < 0.6 && now - kiteSt.lastClick > 600) {
-        kiteSt.side = -kiteSt.side; go(H.x + step * kiteSt.side, H.y, 'pre');
-      }
-      return;
+    const dist = (e) => jx(H.x, H.y, e.x, e.y);
+    const near = en.filter((e) => dist(e) <= SAFE);
+    // Không có quái trong vòng an toàn → KHÔNG đi (đi lúc này là lên ngựa); Auto tự tới quái
+    if (!near.length) return;
+    // Lỡ đang ngồi ngựa mà quái ở gần → xuống ngựa (nút của game), mỗi giây tối đa một lần
+    if (R.mounted && now - (kiteSt.dismountAt || 0) > 1000) {
+      const rb = $('#rideBtn');
+      if (rb && /Xuống ngựa/.test(rb.textContent)) { kiteSt.dismountAt = now; rb.click(); kiteSt.dismounts = (kiteSt.dismounts || 0) + 1; return; }
     }
     // Phản xạ: con quái gần vừa ra chiêu → nhích ngay, không chờ nhịp
     const swing = near.some((e) => e.act === 'at' && (e.actT ?? 1) < 0.15);
@@ -583,21 +590,32 @@
       kiteSt.stuckLog = now;
       post({ t: 'log', msg: `kite: không nhúc nhích sau khi bấm (tầng ${R.tower.floor}, quái ${en.length}, cận chiến ${melee ? 1 : 0})` });
     }
-    const t = near.reduce((a, e) => (dist(e) < dist(a) ? e : a));
-    const vx = H.x - t.x, vy = H.y - t.y, d = Math.hypot(vx, vy) || 1;
-    const ux = vx / d, uy = vy / d;            // hướng từ quái → nhân vật
+    let t = near.reduce((a, e) => (dist(e) < dist(a) ? e : a));
     let tx, ty;
     if (melee) {
-      // Đi vòng quanh quái ở bán kính ~70% tầm đánh (trong tầm), mỗi lần một cung dài `step`
-      const r = Math.max(40, Math.min(rad * 0.7, 80));
-      const a = Math.atan2(vy, vx) + kiteSt.side * (step / r);
-      const rr = low ? r + step : r;
-      tx = t.x + Math.cos(a) * rr; ty = t.y + Math.sin(a) * rr;
+      // Đông quái sát người (≥ 3 con trong 120) → đi vòng quanh TÂM đám quái, ở mép ngoài; ít quái → quanh con gần nhất.
+      // Bán kính ~70% tầm đánh (trong tầm), mỗi lần một cung dài `step` (px trên màn hình).
+      // Tính trong thước của game (x/0,81, 2y/0,81): vòng tròn ở đó = elip dẹt dọc trên màn hình → luôn trong tầm đánh
+      const pack = near.filter((e) => dist(e) <= 120);
+      let rJ = Math.max(45, Math.min(rad * 0.7, 80));
+      if (pack.length >= 3) {
+        const gx = pack.reduce((a, e) => a + e.x, 0) / pack.length, gy = pack.reduce((a, e) => a + e.y, 0) / pack.length;
+        const spread = Math.max(...pack.map((e) => jx(gx, gy, e.x, e.y)));
+        t = { x: gx, y: gy };
+        rJ = Math.max(rJ, Math.min(spread + 45, 130));
+      }
+      const stepJ = step / JK;
+      const a = Math.atan2(2 * (H.y - t.y), H.x - t.x) + kiteSt.side * (stepJ / rJ);
+      const rr = (low ? rJ + stepJ * 0.6 : rJ) * JK;
+      tx = t.x + Math.cos(a) * rr; ty = t.y + Math.sin(a) * rr / 2;
       if (++kiteSt.sideSteps >= 8) { kiteSt.sideSteps = 0; kiteSt.side = -kiteSt.side; } // đổi chiều vòng cho khó đoán
     } else {
-      // Đi ngang so với hướng quái + chỉnh khoảng cách về ~55% tầm
-      const want = Math.max(200, Math.min(rad * 0.55, 320));
-      const fix = Math.max(-step, Math.min(step, (want - d) * 0.5)) * (low ? 1.5 : 1);
+      // Đi ngang so với hướng quái + chỉnh khoảng cách (theo thước game) về ~55% tầm, tối đa 260 – luôn dưới ngưỡng ngựa
+      const vx = H.x - t.x, vy = H.y - t.y, d = Math.hypot(vx, vy) || 1;
+      const ux = vx / d, uy = vy / d;            // hướng từ quái → nhân vật
+      const dj = dist(t);
+      const want = Math.max(150, Math.min(rad * 0.55, 260));
+      const fix = Math.max(-step, Math.min(step, (want - dj) * 0.4 * JK)) * (low ? 1.5 : 1);
       tx = H.x + (-uy) * step * kiteSt.side + ux * fix;
       ty = H.y + (ux) * step * kiteSt.side + uy * fix;
       if (++kiteSt.sideSteps >= 5) { kiteSt.sideSteps = 0; kiteSt.side = -kiteSt.side; }
@@ -609,6 +627,8 @@
       const k = step / (Math.hypot(cx - H.x, cy - H.y) || 1);
       tx = H.x + (cx - H.x) * k; ty = H.y + (cy - H.y) * k;
     }
+    // Điểm đến phải còn quái trong vòng an toàn (không thì game cho lên ngựa) → không đi, đứng đánh
+    if (!near.some((e) => jx(tx, ty, e.x, e.y) <= SAFE)) { kiteSt.side = -kiteSt.side; return; }
     go(tx, ty, swing ? 'swing' : melee ? 'orbit' : 'strafe');
     function go(x, y) {
       kiteSt.target = { x, y }; kiteSt.from = { x: H.x, y: H.y }; kiteSt.lastClick = now;

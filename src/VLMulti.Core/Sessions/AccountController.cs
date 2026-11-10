@@ -534,7 +534,7 @@ public sealed class AccountController
                     break;
                 case "kiteFloor":
                     // Số liệu né liên tục từng tầng (để so và chỉnh): thời gian, máu mất, số lần nhích, máu thấp nhất
-                    Log.Write($"[{Account.Id}] kite floor {Raw(m, "floor")}: {Raw(m, "secs")}s lost={Raw(m, "lost")} steps={Raw(m, "steps")} min={Raw(m, "minPct")}% {(Raw(m, "melee") == "1" ? "melee" : "ranged")}");
+                    Log.Write($"[{Account.Id}] kite floor {Raw(m, "floor")}: {Raw(m, "secs")}s lost={Raw(m, "lost")} steps={Raw(m, "steps")} min={Raw(m, "minPct")}% {(Raw(m, "melee") == "1" ? "melee" : "ranged")} ngựa={Raw(m, "mounted")}");
                     break;
                 case "gameToast":
                     OnGameToast(Str(m, "text"), now);
