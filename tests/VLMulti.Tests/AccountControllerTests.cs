@@ -975,15 +975,23 @@ public class AccountControllerTests
         t = Run(ctl, t, 30, Status("game", mode: "farm"));
         t = Run(ctl, t, 60, Tower(900));
         Assert.Single(Modes());
-        // Ở Luyện Công lâu → Hồng Ảnh
+        // Ở Luyện Công 90 giây (chết rồi chờ vào lại) → chưa đổi; đủ 3 phút → Hồng Ảnh
         t = Run(ctl, t, 90, Status("game", mode: "farm"));
+        Assert.Single(Modes());
+        t = Run(ctl, t, 100, Status("game", mode: "farm"));
         Assert.Equal(new[] { "power", "exp" }, Modes());
         ctl.OnPageMessage("""{"t":"jewelResult","r":"ok","mode":"exp","changed":"Hồng ảnh Mục Túc","exp":182}""", t);
         Assert.Equal("exp", ctl.JewelMode);
         // Tắt riêng acc này → không đổi nữa
         ctl.Account.JewelSwap = false;
-        Run(ctl, t, 60, Tower(901));
+        t = Run(ctl, t, 60, Tower(901));
         Assert.Equal(2, Modes().Count);
+        // Nhưng ô trang sức trống (trong túi có món đeo được) → vẫn đeo vào, không đổi món khác
+        var empty = JsonSerializer.Serialize(new { t = "status", screen = "game", lv = "139", gold = "1 vạn", knb = "1 🔒1", mode = "tower", modeText = "tower",
+            zone = "Thông Thiên Tháp · tầng 901", dt = "200/200", pb = "0/4", ldtHave = "0", ldtUsed = "160/160", ldtBuy = "100/100", st = "0/60", jewelEmpty = 1 });
+        Run(ctl, t, 10, empty);
+        Assert.Equal(3, Modes().Count);
+        Assert.Equal("fill", Modes().Last());
     }
 
     [Fact]

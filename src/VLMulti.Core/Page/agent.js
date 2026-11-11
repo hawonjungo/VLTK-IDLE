@@ -1650,9 +1650,24 @@
     const all = [...Object.values(S.eq || {}), ...(S.inv || [])].filter(isHongAnh);
     return JEWEL.flatMap((j) => all.filter((i) => i.d === j.d).sort((a, b) => expOf(b) - expOf(a)).slice(0, j.slots.length));
   };
+  // Ô trang sức đang trống và món trong túi để lấp (mỗi ô một món; nhẫn tối đa 2)
+  const jewelFillers = () => {
+    const G = window.H5.G, S = G('S');
+    const ip = G('itemPower');
+    const score = (i) => (isHongAnh(i) ? 1e6 + expOf(i) : 0) + powerOf(i) * 1e3 + (typeof ip === 'function' ? (+ip(i) || 0) : 0);
+    const out = [];
+    for (const j of JEWEL) {
+      const emptyN = j.slots.filter((s) => !S.eq[s]).length;
+      if (!emptyN) continue;
+      const bag = (S.inv || []).filter((i) => i && i.d === j.d && !out.includes(i)).sort((a, b) => score(b) - score(a));
+      out.push(...bag.slice(0, emptyN));
+    }
+    return out;
+  };
+  const jewelEmpty = () => { try { return jewelFillers().length; } catch (_) { return 0; } };
   const jewelFlow = async (arg) => {
     if (flowBusy || anyWindowOpen()) return { r: 'busy' };
-    if (inBossHk() && arg.mode !== 'power') return { r: 'boss-hk' };
+    if (inBossHk() && arg.mode === 'exp') return { r: 'boss-hk' };
     const G = window.H5.G, S = G('S');
     const equip = G('equip'), unequip = G('unequip');
     if (!S || typeof equip !== 'function' || typeof unequip !== 'function') return { r: 'no-fn' };
@@ -1660,17 +1675,22 @@
     for (const j of JEWEL) {
       const pool = [...j.slots.map((s) => S.eq[s]), ...(S.inv || []).filter((i) => i && i.d === j.d)].filter(Boolean);
       const uniq = [...new Set(pool)];
-      const pick = arg.mode === 'exp'
+      // "fill": chỉ lấp ô trống, không đổi món đang đeo
+      const pick = arg.mode === 'fill' ? [] : arg.mode === 'exp'
         ? uniq.filter(isHongAnh).sort((a, b) => expOf(b) - expOf(a))
         : uniq.filter((i) => powerOf(i) > 0).sort((a, b) => powerOf(b) - powerOf(a));
       // Thiếu món hợp thì lấp bằng món đang đeo (giữ nguyên), rồi món Hồng Ảnh tốt nhất
       const worn = j.slots.map((s) => S.eq[s]).filter(Boolean);
-      const fill = [...pick, ...worn.filter((w) => !pick.includes(w)), ...uniq.filter(isHongAnh).sort((a, b) => expOf(b) - expOf(a))];
+      const fill = arg.mode === 'fill' ? worn : [...pick, ...worn.filter((w) => !pick.includes(w)), ...uniq.filter(isHongAnh).sort((a, b) => expOf(b) - expOf(a))];
       want[j.d] = [...new Set(fill)].slice(0, j.slots.length);
     }
     const changed = [];
     const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
-    const waitWorn = (it) => waitFor(() => Object.values(G('S').eq || {}).includes(it), 3000);
+    // Sau mỗi lần mặc / tháo game làm mới túi đồ (đối tượng món mới) → luôn lấy lại món theo uid trước khi mặc
+    // (11/11: tháo 2 nhẫn, đeo được chiếc đầu, chiếc thứ hai "không còn ở hành trang" → ô nhẫn 2 trống)
+    const fresh = (it) => (G('S').inv || []).find((x) => x && x.uid === it.uid) || it;
+    const isWorn = (it) => Object.values(G('S').eq || {}).some((x) => x && x.uid === it.uid);
+    const wear = async (it) => { const f = fresh(it); try { equip(f, true); } catch (_) {} return !!(await waitFor(() => isWorn(it), 3000)); };
     flowBusy = true;
     try {
       for (const j of JEWEL) {
@@ -1681,16 +1701,17 @@
         if (j.slots.length > 1) {
           if (free < j.slots.length) return { r: 'bag-full', changed: changed.join(', ') };
           for (const s of j.slots) if (G('S').eq[s]) { try { unequip(s); } catch (_) {} await waitFor(() => !G('S').eq[s], 3000); }
-          for (const it of target) { try { equip(it, true); } catch (_) {} if (await waitWorn(it)) changed.push(it.n); }
+          for (const it of target) { if (await wear(it)) changed.push(it.n); }
         } else {
           if (free < 1) return { r: 'bag-full', changed: changed.join(', ') };
           const it = target[0];
           if (worn[0] === it) continue;
-          try { equip(it, true); } catch (_) {}
-          if (await waitWorn(it)) changed.push(it.n);
+          if (await wear(it)) changed.push(it.n);
         }
         await sleep(300);
       }
+      // Không để ô trang sức trống: ô nào còn trống → món tốt nhất trong túi (Hồng Ảnh, rồi món sức mạnh, rồi món mạnh nhất)
+      for (const it of jewelFillers()) { if (await wear(it)) changed.push(it.n + ' (ô trống)'); await sleep(300); }
     } finally {
       await closeModalSure();
       flowBusy = false;
@@ -2864,6 +2885,7 @@
       // Boss Hoàng Kim đợt này của riêng acc (game S.gb, mỗi nhân vật một con boss): "<đợt>|<1 = đã hạ>|<% máu boss>"
       gbw: screen === 'game' ? goldBossNow() : '',
       innate: screen === 'game' ? innateUnlocked().length + innateEquippedUnlocked().length : 0, // đồ có kỹ năng vốn có chưa khoá
+      jewelEmpty: screen === 'game' ? jewelEmpty() : 0, // ô trang sức trống mà trong túi có món đeo được
       gold: txt('#gold'),
       knb: txt('#knbTop'),
       // Chế độ: theo nút đang sáng, nhưng nút lệch với trạng thái game quá 5 giây thì theo game (xem reportedMode)

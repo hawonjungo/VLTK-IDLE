@@ -668,6 +668,7 @@ public sealed class AccountController
             ApplyGoldBoss(Str(s, "gbw"), now);
             InTower = s.TryGetProperty("inTower", out var it) && it.ValueKind == JsonValueKind.Number ? it.GetInt32() : -1;
             InnateUnlocked = s.TryGetProperty("innate", out var inn) && inn.ValueKind == JsonValueKind.Number ? inn.GetInt32() : 0;
+            JewelEmpty = s.TryGetProperty("jewelEmpty", out var je) && je.ValueKind == JsonValueKind.Number ? je.GetInt32() : 0;
 
             var modeCode = Str(s, "mode");
             if (modeCode == "tower" && ModeCode != "tower")
@@ -1906,8 +1907,10 @@ public sealed class AccountController
 
     // 💍 Trang sức theo việc (bạn bật; chung hoặc riêng từng acc): Leo Tháp / Phó bản / Boss Hoàng Kim (từ 2 phút trước
     // đợt) / truy sát / thuyền / Boss tuần → trang sức sức mạnh; Luyện Công / Nhiệm Vụ → Hồng Ảnh (kinh nghiệm). Chỉ đổi
-    // khi việc đã đổi ổn định: sang kinh nghiệm phải ở Luyện Công / Nhiệm Vụ 60 giây (chết trong tháp rồi vào lại ngay
-    // thì không đổi qua lại); sang sức mạnh thì đổi ngay.
+    // khi việc đã đổi ổn định: sang kinh nghiệm phải ở Luyện Công / Nhiệm Vụ 3 phút (chết trong tháp, ra Luyện Công ~1,5
+    // phút rồi vào lại thì không đổi qua lại – 11/11 đổi qua lại sau mỗi lần chết); sang sức mạnh thì đổi ngay.
+    // Ô trang sức trống mà trong túi có món đeo được → đeo ngay (kể cả khi không đổi chế độ, kể cả khi tính năng tắt).
+    public int JewelEmpty { get; private set; }
     public string JewelMode { get; private set; } = "";   // trang sức đang đeo theo tool: "exp" / "power" / ""
     private string _jewelWant = "";
     private DateTime _jewelWantSince, _jewelNextTry, _jewelAt;
@@ -1926,17 +1929,21 @@ public sealed class AccountController
     private void SuperviseJewel(DateTime now)
     {
         var cfg = SettingsProvider?.Invoke();
-        if (cfg is null || !JewelSwapOn(cfg) || Screen != "game" || Away) return;
-        var want = JewelWanted(now);
+        if (cfg is null || Screen != "game" || Away) return;
+        var on = JewelSwapOn(cfg);
+        var want = on ? JewelWanted(now) : "";
         if (want != _jewelWant) { _jewelWant = want; _jewelWantSince = now; }
-        if (want.Length == 0 || want == JewelMode) return;
-        if (want == "exp" && now - _jewelWantSince < TimeSpan.FromSeconds(60)) return;
+        bool fill = JewelEmpty > 0;
+        if (!fill && (want.Length == 0 || want == JewelMode)) return;
+        if (!fill && want == "exp" && now - _jewelWantSince < TimeSpan.FromMinutes(3)) return;
+        if (fill && (want.Length == 0 || want == JewelMode)) want = "fill"; // chỉ lấp ô trống, không đổi món đang đeo
         if (_jewelPending && now - _jewelAt < TimeSpan.FromMinutes(1)) return;
         _jewelPending = false;
         if (now < _jewelNextTry || _ldtBuyingSince is not null) return;
         _jewelAt = now;
         _jewelPending = true;
         Post(new { t = "jewel", arg = new { mode = want } });
+        if (fill) Log.Write($"[{Account.Id}] jewel: ô trang sức trống ({JewelEmpty}) → đeo món trong túi");
     }
 
     private void OnJewelResult(JsonElement m, DateTime now)
@@ -1949,7 +1956,7 @@ public sealed class AccountController
         switch (r)
         {
             case "ok":
-                JewelMode = mode;
+                if (mode != "fill") JewelMode = mode;
                 if (changed.Length > 0)
                 {
                     var label = mode == "exp" ? "Kinh nghiệm (Hồng Ảnh)" : "Sức mạnh";
