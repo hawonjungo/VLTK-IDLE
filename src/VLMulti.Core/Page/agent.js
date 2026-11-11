@@ -538,6 +538,14 @@
     if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0, mounted: st.mounted || 0, movePct: st.nearTicks ? Math.round(100 * (st.moveTicks || 0) / st.nearTicks) : null });
     kiteSt.stat = null;
   };
+  const clearSpot = (x, y) => {
+    const ga = g('groundAt'), ra = g('rtAt');
+    const hit = (a, b) => { try { return (typeof ga === 'function' && ga(a, b)) || (typeof ra === 'function' && ra(a, b)); } catch (_) { return false; } };
+    if (!hit(x, y)) return [x, y];
+    for (const [dx, dy] of [[26, 0], [-26, 0], [0, 26], [0, -26], [36, 36], [-36, 36], [36, -36], [-36, -36], [52, 0], [-52, 0], [0, 52], [0, -52]])
+      if (!hit(x + dx, y + dy)) return [x + dx, y + dy];
+    return null;
+  };
   const mainHorseOk = (R) => {
     try { const id = R && R.P && R.P.main && R.P.main.id; const lim = g('HORSE_LIM'); return !(lim && id && lim[id] === 1); } catch (_) { return false; }
   };
@@ -666,7 +674,12 @@
       else { const k = step / (Math.hypot(t.x - H.x, t.y - H.y) || 1); tx = H.x + (t.x - H.x) * k; ty = H.y + (t.y - H.y) * k; }
     }
     go(tx, ty, swing ? 'swing' : melee ? 'orbit' : 'strafe');
-    function go(x, y) {
+    function go(x0, y0) {
+      // Điểm bấm trúng đồ rơi (game hiểu là "đi nhặt" / bấm lại thì huỷ) hoặc vật bấm được (mở bảng → né dừng) → lệch
+      // sang chỗ trống bên cạnh (11/11: cận chiến đánh ngay chỗ quái chết, bấm trúng đồ rơi, chỉ di chuyển 32–36%)
+      const spot = clearSpot(x0, y0);
+      if (!spot) return;
+      const [x, y] = spot;
       kiteSt.target = { x, y }; kiteSt.from = { x: H.x, y: H.y }; kiteSt.lastClick = now;
       if (kiteSt.stat) kiteSt.stat.steps++;
       clickWorld(x, y);
