@@ -340,7 +340,7 @@ public sealed class AccountController
             : towerState == "current" ? string.Join(" · ", new[]
                 {
                     TowerFloor is { } f ? $"tầng {f}" : "",
-                    _fastDeaths.Count > 0 ? $"chết nhanh {_fastDeaths.Count}/{cfg.TowerFastDeathCount}" : "",
+                    _fastDeaths.Count > 0 ? $"chết {_fastDeaths.Count}/{cfg.TowerFastDeathCount} ở tầng {_deathFloor}" : "",
                 }.Where(x => x.Length > 0))
             : "";
 
@@ -535,7 +535,7 @@ public sealed class AccountController
                     break;
                 case "kiteFloor":
                     // Số liệu né liên tục từng tầng (để so và chỉnh): thời gian, máu mất, số lần nhích, máu thấp nhất
-                    Log.Write($"[{Account.Id}] kite floor {Raw(m, "floor")}: {Raw(m, "secs")}s lost={Raw(m, "lost")} steps={Raw(m, "steps")} min={Raw(m, "minPct")}% {(Raw(m, "melee") == "1" ? "melee" : "ranged")} ngựa={Raw(m, "mounted")}");
+                    Log.Write($"[{Account.Id}] kite floor {Raw(m, "floor")}: {Raw(m, "secs")}s lost={Raw(m, "lost")} steps={Raw(m, "steps")} min={Raw(m, "minPct")}% {(Raw(m, "melee") == "1" ? "melee" : "ranged")} ngựa={Raw(m, "mounted")} đi={Raw(m, "movePct")}%");
                     break;
                 case "gameToast":
                     OnGameToast(Str(m, "text"), now);
@@ -1459,7 +1459,12 @@ public sealed class AccountController
         Log.Write($"[{Account.Id}] mode {from} -> {to} (không do luật), tạm bỏ qua {ModeRules.Label(from)} {ModeBlockDefault.TotalMinutes:0} phút");
     }
 
-    // Chết trong tháp: vào lại ngay. Chết nhanh nhiều lần liền trong thời gian ngắn → nghỉ tháp, Luyện Công, báo bạn.
+    // Chết trong tháp: vào lại ngay (game cho vào lại đúng tầng vừa chết). Chết TowerFastDeathCount lần Ở CÙNG MỘT TẦNG
+    // → đụng tường: nghỉ tháp TowerRestMinutes, Luyện Công, báo bạn. Chết ở các tầng khác nhau (vẫn đang lên) không tính;
+    // qua được tầng đó thì đếm lại. (Trước 11/11: 3 lần chết nhanh trong 15 phút bất kể tầng – chết ở 13716, 13717, 13718
+    // khi vẫn đang lên tầng đều cũng bị đẩy ra.)
+    private int? _deathFloor;
+
     private void OnTowerDeath(DateTime now)
     {
         var cfg = SettingsProvider?.Invoke() ?? new AppSettings();
@@ -1468,28 +1473,19 @@ public sealed class AccountController
         Tower.OnFall(now);
         Log.Write($"[{Account.Id}] tower death at floor {floor} after {lived.TotalMinutes:0.0} min");
 
-        if (lived >= TimeSpan.FromMinutes(cfg.TowerFastDeathMinutes))
+        if (_lastTowerFloor != _deathFloor) { _fastDeaths.Clear(); _deathFloor = _lastTowerFloor; }
+        _fastDeaths.Add(now);
+        if (_lastTowerFloor is not null && _fastDeaths.Count >= cfg.TowerFastDeathCount)
         {
-            _fastDeaths.Clear(); // sống lâu → đếm lại từ đầu
-            Note(now, $"💀 Chết ở tầng {floor} (sống {Minutes(lived)}) – vào lại tháp", StatusLevel.Warn);
+            _fastDeaths.Clear();
+            var rest = TimeSpan.FromMinutes(cfg.TowerRestMinutes);
+            _modeBlockedUntil[ModeRules.Tower] = now + rest;
+            Raise("tower-fast-death", $"Chết {cfg.TowerFastDeathCount} lần ở tầng {floor} – Luyện Công, {Minutes(rest)} nữa vào lại tháp");
+            SetStatus($"Nghỉ tháp tới {(now + rest):HH:mm}", StatusLevel.Warn);
+            InfoChanged?.Invoke();
+            return;
         }
-        else
-        {
-            var window = TimeSpan.FromMinutes(cfg.TowerFastDeathWindowMinutes);
-            _fastDeaths.Add(now);
-            _fastDeaths.RemoveAll(t => now - t > window);
-            if (_fastDeaths.Count >= cfg.TowerFastDeathCount)
-            {
-                _fastDeaths.Clear();
-                var rest = TimeSpan.FromMinutes(cfg.TowerRestMinutes);
-                _modeBlockedUntil[ModeRules.Tower] = now + rest;
-                Raise("tower-fast-death", $"Chết nhanh {cfg.TowerFastDeathCount} lần ở tầng {floor} – Luyện Công, {Minutes(rest)} nữa vào lại tháp");
-                SetStatus($"Nghỉ tháp tới {(now + rest):HH:mm}", StatusLevel.Warn);
-                InfoChanged?.Invoke();
-                return;
-            }
-            Note(now, $"💀 Chết nhanh ở tầng {floor} (sống {Minutes(lived)}, lần {_fastDeaths.Count}/{cfg.TowerFastDeathCount}) – vào lại tháp", StatusLevel.Warn);
-        }
+        Note(now, $"💀 Chết ở tầng {floor} (sống {Minutes(lived)}, lần {_fastDeaths.Count}/{cfg.TowerFastDeathCount} ở tầng này) – vào lại tháp", StatusLevel.Warn);
         _towerReturnAt = now + TowerReturnDelay;
     }
 

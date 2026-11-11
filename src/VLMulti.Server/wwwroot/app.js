@@ -851,7 +851,7 @@ function renderSettings() {
       h('div', { class: 'form-grid' }, [h('label', { text: 'Kiểu kéo' }), dir, h('label', { text: 'Mỗi lần chạy' }), dist, h('label', { text: 'Dừng đánh / chu kỳ' }), interval, h('label', { text: 'Máu thấp thì chạy xa' }), kiteFlee]),
     ]),
     section('Vòng tự động', [
-      h('p', { class: 'note', text: 'Bấm 🔁 Auto để bắt đầu vòng. Chết nhanh 3 lần trong 15 phút thì Luyện Công, nghỉ tháp theo số phút bên dưới.' }),
+      h('p', { class: 'note', text: 'Bấm 🔁 Auto để bắt đầu vòng. Chết 3 lần ở cùng một tầng thì Luyện Công, nghỉ tháp theo số phút bên dưới (chết ở các tầng khác nhau không tính).' }),
       h('label', { class: 'check-row' }, [quest, '1. Dã Tẩu còn làm được → Nhiệm Vụ']),
       h('label', { class: 'check-row' }, [dg, '2. Còn lượt Phó bản → Phó Bản']),
       h('label', { class: 'check-row' }, [boat, '3. Còn chuyến thuyền → Đi thuyền']),

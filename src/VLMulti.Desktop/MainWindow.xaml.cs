@@ -771,7 +771,7 @@ public partial class MainWindow : Window
         body.Add(accounts);
 
         body.Add(Section("Vòng tự động"));
-        body.Add(Note("Bấm 🔁 Auto để bắt đầu vòng (hoặc bật \"Tự động\" trên khung). Mỗi 30 giây app chọn việc theo thứ tự dưới đây. Chết nhanh liền 3 lần trong 15 phút thì Luyện Công, nghỉ tháp theo số phút bên dưới."));
+        body.Add(Note("Bấm 🔁 Auto để bắt đầu vòng (hoặc bật \"Tự động\" trên khung). Mỗi 30 giây app chọn việc theo thứ tự dưới đây. Chết 3 lần ở cùng một tầng thì Luyện Công, nghỉ tháp theo số phút bên dưới (chết ở các tầng khác nhau không tính)."));
         body.Add(_setQuest = Box("1. Dã Tẩu còn làm được → Nhiệm Vụ (tự mua Lệnh Bài Dã Tẩu)"));
         body.Add(_setDungeon = Box("2. Còn lượt Phó bản → Phó Bản"));
         body.Add(_setBoat = Box("3. Còn chuyến thuyền → Đi thuyền"));
@@ -780,7 +780,7 @@ public partial class MainWindow : Window
         _setFallback = new ComboBox { Items = { new ComboBoxItem { Content = "Leo Tháp", Tag = "tower" }, new ComboBoxItem { Content = "Luyện Công", Tag = "farm" } } };
         _setFallback.SelectionChanged += (_, _) => SaveSettingsForm();
         body.Add(FormRow("6. Xong hết thì", _setFallback));
-        body.Add(FormRow("Nghỉ tháp sau 3 lần chết nhanh (phút)", _setRest = Number("5–720 phút")));
+        body.Add(FormRow("Nghỉ tháp sau 3 lần chết ở cùng một tầng (phút)", _setRest = Number("5–720 phút")));
 
         body.Add(Section("Sự kiện"));
         body.Add(Note("🌹 Tri Ân Nhà Giáo (tới hết 20/11): mỗi ngày tặng Thầy Đồ đủ 40 Bó Hoa (mức tối đa có điểm), tự ghép thêm khi sắp hết. Giấy Gói mua bằng lượng, không bao giờ tiêu KNB."));

@@ -233,7 +233,7 @@ public class AccountControllerTests
         t = Run(ctl, t, 6, Tower(501));
         Run(ctl, t, 6, Status("game", mode: "farm"));
         Assert.Equal(1, ctl.Tower.Falls);
-        Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("Chết nhanh ở tầng 501") && e.Level == StatusLevel.Warn);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("Chết ở tầng 501") && e.Level == StatusLevel.Warn);
         Assert.Null(ctl.TowerFloor);
     }
 
@@ -269,10 +269,10 @@ public class AccountControllerTests
         .Where(m => m.GetProperty("t").GetString() == "cmd" && m.GetProperty("name").GetString() == "mode")
         .Select(m => m.GetProperty("arg").GetString()).ToList();
 
-    // Vào tháp, sống `lived` giây, chết (game đẩy ra Luyện Công), chờ `after` giây
-    private static DateTime DieInTower(AccountController ctl, DateTime t, int lived, int after = 30)
+    // Vào tháp, sống `lived` giây, chết ở tầng `floor` (game đẩy ra Luyện Công), chờ `after` giây
+    private static DateTime DieInTower(AccountController ctl, DateTime t, int lived, int after = 30, int floor = 700)
     {
-        t = Run(ctl, t, lived, Tower(700));
+        t = Run(ctl, t, lived, Tower(floor));
         return Run(ctl, t, after, Status("game", mode: "farm"));
     }
 
@@ -308,7 +308,7 @@ public class AccountControllerTests
     }
 
     [Fact]
-    public void Slow_death_resets_fast_death_count()
+    public void Only_three_deaths_on_the_same_floor_rest_the_tower()
     {
         var (ctl, _, _) = Make();
         var problems = new List<string>();
@@ -316,13 +316,17 @@ public class AccountControllerTests
         var t = Run(ctl, T0, 15, Status("game", mode: "farm"));
         ctl.RequestMode("tower", t);
         t = t.AddSeconds(70);
-        t = DieInTower(ctl, t, 60);
-        t = DieInTower(ctl, t, 60);
-        t = DieInTower(ctl, t, 5 * 60); // sống lâu → đếm lại
-        t = DieInTower(ctl, t, 60);
-        DieInTower(ctl, t, 60);
+        // Chết nhanh nhưng mỗi lần một tầng (vẫn đang lên) → không tính
+        t = DieInTower(ctl, t, 60, floor: 700);
+        t = DieInTower(ctl, t, 60, floor: 701);
+        t = DieInTower(ctl, t, 60, floor: 702);
+        t = DieInTower(ctl, t, 60, floor: 703);
         Assert.DoesNotContain("tower-fast-death", problems);
-        Assert.Equal(5, ctl.Tower.Falls);
+        // Chết 3 lần ở cùng tầng 703 (kể cả sống lâu) → nghỉ tháp
+        t = DieInTower(ctl, t, 5 * 60, floor: 703);
+        DieInTower(ctl, t, 60, floor: 703);
+        Assert.Contains("tower-fast-death", problems);
+        Assert.Equal(6, ctl.Tower.Falls);
     }
 
     [Fact]

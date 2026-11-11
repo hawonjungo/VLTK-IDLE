@@ -535,8 +535,11 @@
   };
   const kiteFloorDone = (R) => {
     const st = kiteSt.stat;
-    if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0, mounted: st.mounted || 0 });
+    if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0, mounted: st.mounted || 0, movePct: st.nearTicks ? Math.round(100 * (st.moveTicks || 0) / st.nearTicks) : null });
     kiteSt.stat = null;
+  };
+  const mainHorseOk = (R) => {
+    try { const id = R && R.P && R.P.main && R.P.main.id; const lim = g('HORSE_LIM'); return !(lim && id && lim[id] === 1); } catch (_) { return false; }
   };
   const kiteTick = () => {
     const c = kiteCfg;
@@ -559,6 +562,9 @@
     const every = c.everyMs ?? (melee ? 200 : 300);
     // Thước khoảng cách của game (dọc tính gấp đôi); ngưỡng tự lên ngựa 400, giữ dưới SAFE
     const JK = 0.81, SAFE = 330;
+    // Chiêu chính dùng được khi cưỡi ngựa? (HORSE_LIM của game: 1 = không dùng được trên ngựa). Được → không cần tránh
+    // lên ngựa, không bắt xuống ngựa (ví dụ Vân Long Kích, Huyền Âm Trảm); không được → giữ trong vòng an toàn.
+    const horseOk = mainHorseOk(R);
     const jx = (ax, ay, bx, by) => Math.hypot(bx - ax, (by - ay) * 2) / JK;
     // Số liệu tầng
     if (R.tower.floor !== kiteSt.floor) {
@@ -568,22 +574,39 @@
       kiteSt.target = null;
     }
     const st = kiteSt.stat;
-    if (st) { if (R.life < st.life) st.lost += st.life - R.life; st.life = R.life; st.minPct = Math.min(st.minPct, lifePct); if (R.mounted) st.mounted = (st.mounted || 0) + 1; }
+    if (st) {
+      if (R.life < st.life) st.lost += st.life - R.life;
+      st.life = R.life; st.minPct = Math.min(st.minPct, lifePct);
+      if (R.mounted) st.mounted = (st.mounted || 0) + 1;
+      // % thời gian đang di chuyển khi có quái gần (mục tiêu > 95%)
+      const pp = kiteSt.prevPos;
+      if (kiteSt.nearNow && pp) { st.nearTicks = (st.nearTicks || 0) + 1; if (Math.hypot(H.x - pp.x, H.y - pp.y) > 1.5) st.moveTicks = (st.moveTicks || 0) + 1; }
+      kiteSt.prevPos = { x: H.x, y: H.y };
+    }
+    kiteSt.nearNow = false;
     if (R.stunT > 0) return; // choáng: không đi được
     const en = (R.enemies || []).filter((e) => e && !e.dead && e.hp > 0);
     const dist = (e) => jx(H.x, H.y, e.x, e.y);
     const near = en.filter((e) => dist(e) <= SAFE);
     // Không có quái trong vòng an toàn → KHÔNG đi (đi lúc này là lên ngựa); Auto tự tới quái
     if (!near.length) return;
-    // Lỡ đang ngồi ngựa mà quái ở gần → xuống ngựa (nút của game), mỗi giây tối đa một lần
-    if (R.mounted && now - (kiteSt.dismountAt || 0) > 1000) {
+    kiteSt.nearNow = true;
+    // Lỡ đang ngồi ngựa mà quái ở gần → xuống ngựa (nút của game), mỗi giây tối đa một lần – chỉ khi chiêu chính không
+    // dùng được trên ngựa
+    if (!horseOk && R.mounted && now - (kiteSt.dismountAt || 0) > 1000) {
       const rb = $('#rideBtn');
       if (rb && /Xuống ngựa/.test(rb.textContent)) { kiteSt.dismountAt = now; rb.click(); kiteSt.dismounts = (kiteSt.dismounts || 0) + 1; return; }
     }
     // Phản xạ: con quái gần vừa ra chiêu → nhích ngay, không chờ nhịp
     const swing = near.some((e) => e.act === 'at' && (e.actT ?? 1) < 0.15);
+    // Ra lệnh bước tiếp TRƯỚC khi tới nơi (~70% thời gian đi hết bước, theo tốc độ hiện tại) → không có khoảnh khắc đứng
+    // yên giữa 2 bước (đứng yên là lúc quái chốt vị trí và đánh trúng)
+    let speed = 150;
+    try { speed = 150 * (g('curSpeed')() || 1); } catch (_) {}
+    const leg = kiteSt.target && kiteSt.from ? Math.hypot(kiteSt.target.x - kiteSt.from.x, kiteSt.target.y - kiteSt.from.y) : 0;
+    const legMs = Math.max(120, Math.min(every, (leg / Math.max(60, speed)) * 1000 * 0.7));
     const arrived = !kiteSt.target || Math.hypot(H.x - kiteSt.target.x, H.y - kiteSt.target.y) < 12;
-    const due = now - kiteSt.lastClick >= every || (arrived && now - kiteSt.lastClick >= 150) || (swing && now - kiteSt.lastClick >= 120);
+    const due = now - kiteSt.lastClick >= legMs || (arrived && now - kiteSt.lastClick >= 100) || (swing && now - kiteSt.lastClick >= 120);
     if (!due) return;
     // Bấm rồi mà không nhúc nhích (lúc chuyển tầng, bị chặn) → ghi log, bấm lại bình thường ở lượt sau
     if (kiteSt.from && now - kiteSt.lastClick > 700 && Math.hypot(H.x - kiteSt.from.x, H.y - kiteSt.from.y) < 4 && now - kiteSt.stuckLog > 30000) {
@@ -627,8 +650,15 @@
       const k = step / (Math.hypot(cx - H.x, cy - H.y) || 1);
       tx = H.x + (cx - H.x) * k; ty = H.y + (cy - H.y) * k;
     }
-    // Điểm đến phải còn quái trong vòng an toàn (không thì game cho lên ngựa) → không đi, đứng đánh
-    if (!near.some((e) => jx(tx, ty, e.x, e.y) <= SAFE)) { kiteSt.side = -kiteSt.side; return; }
+    // Điểm đến phải còn quái trong vòng an toàn (không thì game cho lên ngựa) – trừ khi chiêu chính dùng được trên ngựa.
+    // Không đạt → thử đi ngược chiều, rồi bước về phía con quái gần nhất (luôn an toàn); không đứng yên.
+    const ok = (x, y) => horseOk || near.some((e) => jx(x, y, e.x, e.y) <= SAFE);
+    if (!ok(tx, ty)) {
+      kiteSt.side = -kiteSt.side;
+      const bx = 2 * H.x - tx, by = 2 * H.y - ty;   // đối xứng qua vị trí hiện tại
+      if (ok(bx, by)) { tx = bx; ty = by; }
+      else { const k = step / (Math.hypot(t.x - H.x, t.y - H.y) || 1); tx = H.x + (t.x - H.x) * k; ty = H.y + (t.y - H.y) * k; }
+    }
     go(tx, ty, swing ? 'swing' : melee ? 'orbit' : 'strafe');
     function go(x, y) {
       kiteSt.target = { x, y }; kiteSt.from = { x: H.x, y: H.y }; kiteSt.lastClick = now;
@@ -649,6 +679,13 @@
       try { S = window.H5.G('S'); R = window.H5.G('R'); } catch (_) { return; }
       if (!S || !R || !S.name) return;
       const key = 'vlRideOff';
+      // Chiêu chính dùng được trên ngựa → cứ cưỡi (nhanh hơn, né tốt hơn); bật lại nếu tool đã tắt trước đó
+      if (R.tower && mainHorseOk(R)) {
+        let mine = false;
+        try { mine = localStorage.getItem(key) === '1'; } catch (_) {}
+        if (mine) { S.autoRide = true; try { localStorage.removeItem(key); } catch (_) {} post({ t: 'log', msg: 'ride: chiêu chính dùng được trên ngựa → giữ Tự lên ngựa' }); }
+        return;
+      }
       if (R.tower) {
         if (S.autoRide !== false) {
           S.autoRide = false;

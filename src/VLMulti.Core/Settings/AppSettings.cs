@@ -106,8 +106,9 @@ public sealed class AppSettings
     public bool AutoSellJunk { get; set; } = true;
     public int AutoSellFreeSlots { get; set; } = 20;
 
-    // Chết trong tháp (game đẩy ra Luyện Công): vào lại tháp ngay. Chết nhanh (sống dưới TowerFastDeathMinutes phút)
-    // TowerFastDeathCount lần trong TowerFastDeathWindowMinutes phút → nghỉ tháp TowerRestMinutes phút, Luyện Công và báo.
+    // Chết trong tháp (game đẩy ra Luyện Công): vào lại tháp ngay. Chết TowerFastDeathCount lần ở cùng một tầng → nghỉ
+    // tháp TowerRestMinutes phút, Luyện Công và báo. (TowerFastDeathMinutes / WindowMinutes: không dùng nữa, giữ để đọc
+    // được cài đặt cũ.)
     public int TowerFastDeathMinutes { get; set; } = 3;
     public int TowerFastDeathCount { get; set; } = 3;
     public int TowerFastDeathWindowMinutes { get; set; } = 15;
