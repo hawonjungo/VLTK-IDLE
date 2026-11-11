@@ -677,12 +677,21 @@
     function go(x0, y0) {
       // Điểm bấm trúng đồ rơi (game hiểu là "đi nhặt" / bấm lại thì huỷ) hoặc vật bấm được (mở bảng → né dừng) → lệch
       // sang chỗ trống bên cạnh (11/11: cận chiến đánh ngay chỗ quái chết, bấm trúng đồ rơi, chỉ di chuyển 32–36%)
-      const spot = clearSpot(x0, y0);
-      if (!spot) return;
-      const [x, y] = spot;
+      // Ra lệnh đi đúng như game làm khi chạm xuống đất ở chế độ Tự động (INPUT.tmp + INPUT.target, bỏ "đi nhặt"),
+      // không qua bước dò đồ rơi / vật bấm được dưới điểm chạm. Không có thì bấm chuột như trước, tránh đồ rơi.
+      const IN = g('INPUT'), iw = g('inWorld');
+      let x = x0, y = y0;
+      if (IN && typeof iw === 'function') {
+        try { [x, y] = iw(x0, y0); } catch (_) {}
+        IN.tmp = true; IN.target = { x, y }; R.pickTarget = null;
+      } else {
+        const spot = clearSpot(x0, y0);
+        if (!spot) return;
+        [x, y] = spot;
+        clickWorld(x, y);
+      }
       kiteSt.target = { x, y }; kiteSt.from = { x: H.x, y: H.y }; kiteSt.lastClick = now;
       if (kiteSt.stat) kiteSt.stat.steps++;
-      clickWorld(x, y);
     }
   };
   setInterval(() => { try { kiteTick(); } catch (err) { post({ t: 'log', msg: 'kite: ' + err.message }); kiteCfg = null; } }, 100);
