@@ -10,6 +10,19 @@
   const wv = window.chrome && window.chrome.webview;
   if (!wv || window.top !== window) return; // chỉ chạy ở trang chính, bỏ qua iframe
 
+  // Khung cố định (game thêm 11/11, trang /khung): game chạy trong iframe "index.html?khung=1" ở độ phân giải cố định
+  // (mặc định 1024 × 768) → script này ở trang ngoài không thấy game, các acc kẹt "đang tải". Cài đặt hiển thị của game
+  // (localStorage 'h5.khung' {res, fit, ui}; Hiển thị › độ phân giải): chọn không dùng khung cố định thì trang tự chuyển
+  // về index.html chạy thẳng như trước. Đặt sẵn lựa chọn đó trước khi script của game chạy.
+  try {
+    const K = 'h5.khung';
+    let o = null;
+    try { o = JSON.parse(localStorage.getItem(K) || 'null'); } catch (_) {}
+    if (!o || typeof o !== 'object' || /^\d+x\d+$/.test(String(o.res || '')) || (o.res === undefined && !o.chon)) {
+      localStorage.setItem(K, JSON.stringify({ ...(o && typeof o === 'object' ? o : {}), chon: 1, res: 'auto' }));
+    }
+  } catch (_) {}
+
   const post = (m) => { try { wv.postMessage(m); } catch (_) {} };
   const $ = (s) => document.querySelector(s);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
