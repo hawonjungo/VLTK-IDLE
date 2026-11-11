@@ -739,6 +739,20 @@
     }
     if (isVisible($('#modal'))) post({ t: 'log', msg: 'modal did not close: ' + (($('#mBody h3') || {}).textContent || '') });
   };
+  // Lưới an toàn: trong 8 giây sau khi một việc tự động xong (flowBusy true → false) mà còn bảng mở → đóng. Game có thể mở
+  // lại bảng sau khi tool đã đóng (11/11: gửi KNB xong, game nhận phản hồi rồi vẽ lại Hộp thư → bảng mở mãi, tool tưởng
+  // đang bận: ngừng né trong tháp, 2 nhân vật đứng yên giữa đám quái hơn 10 phút).
+  let prevFlowBusy = false, flowEndAt = 0, leftoverAt = 0;
+  setInterval(() => {
+    if (prevFlowBusy && !flowBusy) flowEndAt = Date.now();
+    prevFlowBusy = flowBusy;
+    if (flowBusy || !flowEndAt || Date.now() - flowEndAt > 8000 || Date.now() - leftoverAt < 1000) return;
+    if (isVisible($('#modal'))) {
+      leftoverAt = Date.now();
+      post({ t: 'log', msg: 'leftover window closed: ' + ((($('#mBody') || {}).innerText || '').replace(/\s+/g, ' ').slice(0, 60)) });
+      closeModal();
+    }
+  }, 300);
   const ldtCard = () => { const b = $('#mBody [data-ktc="ldt"]'); return b ? b.closest('.u2card') : null; };
   const ldtState = () => {
     const c = ldtCard();
@@ -1242,6 +1256,7 @@
                 const after = await waitFor(() => { const x = knbExact(); return x != null && x <= have - amount ? x : null; }, 5000);
                 res.sent = after != null ? have - after : 0;
                 if (!after) res.r = 'not-sent';
+                await sleep(1500); // game vẽ lại Hộp thư sau khi máy chủ trả lời → đợi rồi mới đóng
               } else {
                 res.r = 'no-confirm';
                 const box = $('#askBox');
