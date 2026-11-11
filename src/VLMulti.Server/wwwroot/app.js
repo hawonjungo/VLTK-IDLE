@@ -811,7 +811,7 @@ function renderSettings() {
   })));
   const knbKeep = pick([500, 1000, 2000, 5000], s.knbKeep ?? 1000, (n) => `${n0(n)} KNB`);
   const fallback = h('select', {}, [['tower', 'Leo Tháp'], ['farm', 'Luyện Công']].map(([v, t]) => { const o = h('option', { value: v, text: t }); o.selected = v === s.autoFallback; return o; }));
-  const rest = pick([30, 60, 120, 240], s.towerRest, (n) => `${n} phút`);
+  const rest = pick([10, 15, 30, 60, 120, 240], s.towerRest, (n) => `${n} phút`);
 
   // Mật khẩu game: acc đã lưu chỉ hiện tên tài khoản + nút "Đổi"
   const forms = state.accounts.map((a) => {
