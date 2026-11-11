@@ -545,7 +545,9 @@
     const c = kiteCfg;
     if (!c || !c.on) return;
     const auto = $('#ctrlBtn');
-    if (!auto || !auto.classList.contains('on') || flowBusy || anyWindowOpen() || inBossHk()) return;
+    // Không tắt theo khung giờ Boss Hoàng Kim: lúc game kéo đi đánh boss nhân vật không ở trong tháp (R.tower) nên phần né
+    // tự nghỉ; đánh xong quay lại tháp thì né ngay (11/11: hạ boss lúc 12:02 rồi đứng yên trong tháp tới 12:33)
+    if (!auto || !auto.classList.contains('on') || flowBusy || anyWindowOpen()) return;
     const H = g('H'), R = g('R'), W = g('WORLD'), S = g('S');
     if (!H || !R || !W || !R.tower || R.dg || R.sat || R.deadT > 0 || (S && S.mode !== 'tower')) {
       if (kiteSt.stat && R && (R.deadT > 0 || !R.tower)) { kiteSt.stat.died = 1; kiteFloorDone(R); }
