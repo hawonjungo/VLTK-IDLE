@@ -589,8 +589,12 @@
     if (R.stunT > 0) return; // choáng: không đi được
     const en = (R.enemies || []).filter((e) => e && !e.dead && e.hp > 0);
     const dist = (e) => jx(H.x, H.y, e.x, e.y);
-    const near = en.filter((e) => dist(e) <= SAFE);
-    // Không có quái trong vòng an toàn → KHÔNG đi (đi lúc này là lên ngựa); Auto tự tới quái
+    // Quái trong tầm đánh của nhân vật (đánh xa: tới tầm chiêu, ví dụ 512) – quái tháp ở xa vẫn ra chiêu trúng được (11/11:
+    // đánh xa đứng yên đánh con quái cách 357 vì chỉ tính quái trong vòng 330, mất 89% máu)
+    // Không cưỡi ngựa đánh được → tối đa 390 (đi khi con gần nhất xa hơn 400 là game cho lên ngựa)
+    const reach = horseOk ? Math.max(SAFE, Math.min(rad + 60, 600)) : Math.min(Math.max(SAFE, rad + 60), 390);
+    const near = en.filter((e) => dist(e) <= reach);
+    // Không có quái trong tầm → KHÔNG đi (đi lúc này là lên ngựa); Auto tự tới quái
     if (!near.length) return;
     kiteSt.nearNow = true;
     // Lỡ đang ngồi ngựa mà quái ở gần → xuống ngựa (nút của game), mỗi giây tối đa một lần – chỉ khi chiêu chính không
