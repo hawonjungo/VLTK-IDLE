@@ -673,6 +673,13 @@ public sealed class AccountController
             InnateUnlocked = s.TryGetProperty("innate", out var inn) && inn.ValueKind == JsonValueKind.Number ? inn.GetInt32() : 0;
             JewelEmpty = s.TryGetProperty("jewelEmpty", out var je) && je.ValueKind == JsonValueKind.Number ? je.GetInt32() : 0;
             Land = LandState.Parse(Str(s, "ld"));
+            if (Land is { In: true } land)
+            {
+                // Trong lãnh địa nút chế độ vẫn sáng Luyện Công: ghi rõ nhân vật đang ở đâu, làm gì
+                var lt = land.Text;
+                changed |= ModeText != lt;
+                ModeText = lt;
+            }
 
             var modeCode = Str(s, "mode");
             if (modeCode == "tower" && ModeCode != "tower")
@@ -1162,6 +1169,8 @@ public sealed class AccountController
             // Trong Lãnh địa bang game dừng luyện công: không đổi chế độ / vào tháp, không tính là đứng yên
             _stepWatch = null;
             Stats.ResetActivity(now);
+            if (Land is { In: true } land && StatusText != land.Text) SetStatus(land.Text, StatusLevel.Ok);
+            SuperviseJewel(now);
             SuperviseBuffs(now);
             SuperviseRecovery(now);
             return;
@@ -1207,6 +1216,10 @@ public sealed class AccountController
         public bool LuaLeft => LuaOn && Cap > 0 && Used < Cap;
         public bool CanCall => Right && Open && N < CgMax;
         public bool Worth => Open && (CgUp || LuaLeft || CanCall);
+        public string Text => CgUp ? $"🏯 Lãnh địa bang · ⚔️ Cơ Giáp {Math.Max(N, 1)}/{CgMax} còn {CgPct}% máu"
+            : LuaLeft ? $"🏯 Lãnh địa bang · 🔥 Lửa trại {Used / 1_000_000:0}/{Cap / 1_000_000:0} triệu EXP"
+            : CanCall ? $"🏯 Lãnh địa bang · gọi Cơ Giáp {N + 1}/{CgMax}"
+            : "🏯 Lãnh địa bang";
         public static LandState? Parse(string raw)
         {
             var p = raw.Split('|');
@@ -2031,8 +2044,15 @@ public sealed class AccountController
 
     public bool JewelSwapOn(AppSettings cfg) => Account.JewelSwap ?? cfg.JewelSwapOn;
 
+    // 🏯 Trong Lãnh địa bang: đang có Cơ Giáp → sức mạnh (đánh); ngồi Lửa trại → Hồng Ảnh (kinh nghiệm), kể cả acc tắt
+    // 💍 (rời lãnh địa thì acc tắt 💍 đeo lại trang sức sức mạnh).
+    private bool _landJewel;
+    private string LandJewelWanted() => Land is { In: true } l ? (l.CgUp ? "power" : "exp") : "";
+
     private string JewelWanted(DateTime now)
     {
+        var land = LandJewelWanted();
+        if (land.Length > 0) return land;
         bool fight = ModeCode is ModeRules.Tower or ModeRules.Dungeon || BossHkSchedule(now) || BossHkSchedule(now + BossPrepAhead)
                      || AssassinActive || EventRunning(now) || _eventPhase is not null || _assassinPhase;
         if (fight) return "power";
@@ -2044,11 +2064,14 @@ public sealed class AccountController
         var cfg = SettingsProvider?.Invoke();
         if (cfg is null || Screen != "game" || Away) return;
         var on = JewelSwapOn(cfg);
-        var want = on ? JewelWanted(now) : "";
+        var landWant = LandJewelWanted();
+        if (landWant == "exp") _landJewel = true;
+        else if (landWant.Length == 0 && _landJewel && (on || JewelMode != "exp")) _landJewel = false;
+        var want = on || landWant.Length > 0 ? JewelWanted(now) : _landJewel ? "power" : "";
         if (want != _jewelWant) { _jewelWant = want; _jewelWantSince = now; }
         bool fill = JewelEmpty > 0;
         if (!fill && (want.Length == 0 || want == JewelMode)) return;
-        if (!fill && want == "exp" && now - _jewelWantSince < TimeSpan.FromMinutes(3)) return;
+        if (!fill && want == "exp" && landWant.Length == 0 && now - _jewelWantSince < TimeSpan.FromMinutes(3)) return;
         if (fill && (want.Length == 0 || want == JewelMode)) want = "fill"; // chỉ lấp ô trống, không đổi món đang đeo
         if (_jewelPending && now - _jewelAt < TimeSpan.FromMinutes(1)) return;
         _jewelPending = false;

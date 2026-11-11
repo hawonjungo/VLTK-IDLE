@@ -1036,6 +1036,32 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Guild_land_wears_hong_anh_at_the_campfire_and_power_for_co_giap()
+    {
+        var (ctl, page, cfg) = Make();
+        ctl.BossHkSchedule = _ => false;
+        cfg.EventTeacher = false;
+        cfg.DailyKnbBuy = false;
+        ctl.SetAutoMode(true, T0);
+        List<string> Modes() => page.Sent.Where(m => m.GetProperty("t").GetString() == "jewel").Select(m => m.GetProperty("arg").GetProperty("mode").GetString()!).ToList();
+        string St(string ld) => JsonSerializer.Serialize(new { t = "status", screen = "game", lv = "180", gold = "1 vạn", knb = "1 🔒1", mode = "farm", modeText = "farm",
+            zone = "Hoa Sơn", dt = "200/200", pb = "0/4", ldtHave = "0", ldtUsed = "160/160", ldtBuy = "100/100", st = "0/60", ld });
+        // 💍 tắt: trong lãnh địa đang có Cơ Giáp → trang sức sức mạnh để đánh
+        var t = Run(ctl, T0, 60, St("1|60|1|0|100000000|3|5|0|1"));
+        Assert.Equal(new[] { "power" }, Modes());
+        ctl.OnPageMessage("""{"t":"jewelResult","r":"ok","mode":"power","changed":"","exp":100}""", t);
+        Assert.Equal("🏯 Lãnh địa bang · ⚔️ Cơ Giáp 3/5 còn 60% máu", ctl.ModeText);
+        // Cơ Giáp xong, ngồi Lửa trại → Hồng Ảnh ngay (không chờ 3 phút)
+        t = Run(ctl, t, 5, St("1|-1|1|0|100000000|3|5|0|1"));
+        Assert.Equal(new[] { "power", "exp" }, Modes());
+        Assert.StartsWith("🏯 Lãnh địa bang · 🔥 Lửa trại", ctl.StatusText);
+        ctl.OnPageMessage("""{"t":"jewelResult","r":"ok","mode":"exp","changed":"Hồng ảnh Mục Túc","exp":182}""", t);
+        // Rời lãnh địa (acc tắt 💍) → đeo lại trang sức sức mạnh
+        t = Run(ctl, t, 10, St("0|-1|1|100000000|100000000|5|5|0|1"));
+        Assert.Equal("power", Modes().Last());
+    }
+
+    [Fact]
     public void Items_with_innate_skills_are_locked_before_selling_junk()
     {
         var (ctl, page, cfg) = Make();

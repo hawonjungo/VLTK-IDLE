@@ -116,6 +116,7 @@ public sealed class SessionManager : IAsyncDisposable
             var now = DateTime.Now;
             var sessions = Sessions;
             foreach (var s in sessions) s.Locked(c => c.Tick(now));
+            SuperviseHorsesInLand(now);
 
             if (now - _lastStateSave > SaveStateEvery)
             {
@@ -760,6 +761,40 @@ public sealed class SessionManager : IAsyncDisposable
         List<string> names;
         lock (_gate) names = _settings.Accounts.Select(a => a.CharName ?? "").Where(n => n.Length > 0).Distinct().ToList();
         return (members, names);
+    }
+
+    // 🐴 Ngồi Lửa trại trong Lãnh địa bang thì rảnh: mỗi ngày một lần, khi mọi acc đang trong game đều ngồi Lửa trại
+    // (không có Cơ Giáp) được 1 phút → tự quét và chuyển ngựa giữa các nhân vật của bạn (không mở Rương Ngựa, không
+    // bán – bán con thừa vẫn để bạn xem và xác nhận ở nút 🐴).
+    private DateOnly _horseLandDay;
+    private DateTime? _horseLandSince;
+
+    private void SuperviseHorsesInLand(DateTime now)
+    {
+        var day = DateOnly.FromDateTime(now.ToUniversalTime().AddHours(7));
+        if (_horseLandDay == day || _horses.Busy || _horses.Phase == "ready") { _horseLandSince = null; return; }
+        bool on;
+        lock (_gate) on = _settings.GuildLandOn;
+        int inGame = 0, sitting = 0;
+        foreach (var s in Sessions)
+            s.Locked(c =>
+            {
+                if (c.Screen != "game" || string.IsNullOrWhiteSpace(c.Account.CharName)) return;
+                inGame++;
+                if (c.Land is { In: true, CgUp: false }) sitting++;
+            });
+        if (!on || inGame < 2 || sitting < inGame) { _horseLandSince = null; return; }
+        _horseLandSince ??= now;
+        if (now - _horseLandSince < TimeSpan.FromMinutes(1)) return;
+        _horseLandDay = day;
+        _horseLandSince = null;
+        var (members, names) = HorseParty();
+        Log.Write($"horse: ngồi Lửa trại – tự quét {members.Count} acc");
+        _ = Task.Run(async () =>
+        {
+            if (await _horses.ScanAsync(members, names, openChests: false) && _horses.Plan.Count > 0)
+                await _horses.SendAsync(members, names, sell: false);
+        });
     }
 
     public string? HorseScan(bool openChests)

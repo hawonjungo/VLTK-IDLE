@@ -165,7 +165,8 @@ public sealed class HorseCoordinator
     }
 
     // Thực hiện kế hoạch đã quét (bạn đã xác nhận). Trả về false nếu không có kế hoạch hoặc đang bận.
-    public async Task<bool> SendAsync(IReadOnlyList<HorseMember> members, IReadOnlyList<string> ownNames)
+    // sell = false (tự trao đổi lúc ngồi Lửa trại): chỉ chuyển ngựa giữa các nhân vật, không bán con nào.
+    public async Task<bool> SendAsync(IReadOnlyList<HorseMember> members, IReadOnlyList<string> ownNames, bool sell = true)
     {
         List<HorseMove> plan;
         List<HorseSale> sales;
@@ -173,7 +174,8 @@ public sealed class HorseCoordinator
         {
             if (Phase != "ready" || _plan.Count + _sales.Count == 0) return false;
             plan = _plan.ToList();
-            sales = _sales.ToList();
+            sales = sell ? _sales.ToList() : new List<HorseSale>();
+            if (plan.Count + sales.Count == 0) return false;
         }
         if (!Begin("sending")) return false;
         try
