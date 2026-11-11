@@ -1663,6 +1663,65 @@
     const all = [...Object.values(S.eq || {}), ...(S.inv || [])].filter(isHongAnh);
     return JEWEL.flatMap((j) => all.filter((i) => i.d === j.d).sort((a, b) => expOf(b) - expOf(a)).slice(0, j.slots.length));
   };
+  // 🏯 Lãnh địa bang (game thêm 11/2026; mở thứ 4, thứ 7 theo lịch của bang): Bang chủ / Phó / Trưởng lão gọi Cơ Giáp ở
+  // Võ trường Tây / Đông (tối đa cgMax con mỗi ngày, mỗi con cgMin phút), cả bang đứng gần cùng đánh; hạ được thì Lửa trại
+  // cháy tới 23:59, ngồi trong lãnh địa +xp mỗi 10 giây tới trần cap mỗi ngày. Trong lãnh địa game dừng luyện công.
+  // Game có sẵn H5.ld = {st, vao, ra, cg} (cg tự đi tới Võ trường gần nhất rồi gọi); ngoài lãnh địa xem bằng "ld.xem".
+  let ldView = null, ldViewAt = 0, ldViewBusy = false;
+  const ldRefresh = () => {
+    if (ldViewBusy || !window.H5 || typeof window.H5.call !== 'function') return;
+    ldViewBusy = true;
+    window.H5.call('ld.xem').then((v) => { if (v && typeof v === 'object') { ldView = v; ldViewAt = Date.now(); } })
+      .catch(() => {}).finally(() => { ldViewBusy = false; });
+  };
+  // "<trong lãnh địa>|<% máu Cơ Giáp, -1 = không có>|<lửa cháy>|<xp lửa đã nhận>|<trần>|<Cơ Giáp đã gọi hôm nay>|<tối đa>|<có quyền gọi>|<đang mở>"
+  const ldStatus = () => {
+    const L = window.H5 && window.H5.ld;
+    if (!L || !L.st) return '';
+    const st = L.st;
+    // Ngoài lãnh địa: xem lại mỗi phút trong ngày mở, mỗi 20 phút ngày khác (lịch theo bang)
+    const v = ldView, open = !!(v && v.lich && v.lich.ngay);
+    if (!st.in && Date.now() - ldViewAt > (open || !v ? 60000 : 1200000)) ldRefresh();
+    if (st.in && Date.now() - ldViewAt > 60000) ldRefresh(); // trong lãnh địa game tự xem mỗi 30 giây; số lửa của mình lấy ở đây
+    if (!v) return '';
+    const src = st.in && st.lich ? st : v;
+    const cg = st.in ? st.cg : v.cg && !v.cg.done ? v.cg : null;
+    const lua = (st.in && st.lua) || v.lua || {};
+    const lich = src.lich || {};
+    const pct = cg && cg.max ? Math.round(100 * cg.hp / cg.max) : -1;
+    return [st.in ? 1 : 0, pct, lua.on ? 1 : 0, Math.round(+lua.used || 0), Math.round(+lua.cap || 0), src.n | 0, lich.cgMax | 0,
+      src.quyen ? 1 : 0, lich.bat !== false && lich.ngay && lich.gio ? 1 : 0].join('|');
+  };
+  const landFlow = async (arg) => {
+    const L = window.H5 && window.H5.ld;
+    if (!L || !L.st) return { r: 'no-land', op: arg.op };
+    const st = L.st, R = g('R') || {};
+    if (arg.op === 'vao') {
+      if (st.in) return { r: 'ok', op: 'vao' };
+      if (R.tower || R.dg || R.sat) return { r: 'in-tower', op: 'vao' };
+      L.vao();
+      const ok = await waitFor(() => st.in, 8000);
+      ldViewAt = 0;
+      return { r: ok ? 'ok' : 'fail', op: 'vao' };
+    }
+    if (arg.op === 'ra') {
+      if (!st.in) return { r: 'ok', op: 'ra' };
+      L.ra();
+      const ok = await waitFor(() => !st.in, 8000);
+      ldViewAt = 0;
+      return { r: ok ? 'ok' : 'fail', op: 'ra' };
+    }
+    if (arg.op === 'cg') {
+      if (!st.in) return { r: 'not-in', op: 'cg' };
+      if (st.cg) return { r: 'ok', op: 'cg', n: st.n | 0 };
+      if (!st.quyen) return { r: 'no-right', op: 'cg' };
+      L.cg(); // xa Võ trường: game tự đi tới rồi tự gọi khi tới nơi
+      const ok = await waitFor(() => st.cg, 45000);
+      return { r: ok ? 'ok' : st.pend || st.walk ? 'walking' : 'fail', op: 'cg', n: st.n | 0 };
+    }
+    return { r: 'bad-op', op: arg.op };
+  };
+
   // Ô trang sức đang trống và món trong túi để lấp (mỗi ô một món; nhẫn tối đa 2)
   const jewelFillers = () => {
     const G = window.H5.G, S = G('S');
@@ -2116,6 +2175,8 @@
       guildKnbFlow(m.arg || {}).then((res) => post({ t: 'guildKnbResult', ...res }), (err) => post({ t: 'guildKnbResult', r: 'error: ' + err.message }));
     } else if (m.t === 'guildLog') {
       guildLogFlow().then((res) => post({ t: 'guildLogResult', ...res }), (err) => post({ t: 'guildLogResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'land') {
+      landFlow(m.arg || {}).then((res) => post({ t: 'landResult', ...res }), (err) => post({ t: 'landResult', r: 'error: ' + err.message }));
     } else if (m.t === 'jewel') {
       jewelFlow(m.arg || {}).then((res) => post({ t: 'jewelResult', ...res }), (err) => post({ t: 'jewelResult', r: 'error: ' + err.message }));
     } else if (m.t === 'lockInnate') {
@@ -2899,6 +2960,7 @@
       gbw: screen === 'game' ? goldBossNow() : '',
       innate: screen === 'game' ? innateUnlocked().length + innateEquippedUnlocked().length : 0, // đồ có kỹ năng vốn có chưa khoá
       jewelEmpty: screen === 'game' ? jewelEmpty() : 0, // ô trang sức trống mà trong túi có món đeo được
+      ld: screen === 'game' ? ((f) => { try { return f(); } catch (_) { return ''; } })(ldStatus) : '', // 🏯 Lãnh địa bang (xem ldStatus)
       gold: txt('#gold'),
       knb: txt('#knbTop'),
       // Chế độ: theo nút đang sáng, nhưng nút lệch với trạng thái game quá 5 giây thì theo game (xem reportedMode)

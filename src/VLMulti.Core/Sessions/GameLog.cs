@@ -15,7 +15,7 @@ public static class GameLog
     // Dòng không ghi: lặt vặt và dòng lặp lại của cùng một việc
     private static readonly Regex Noise = new(
         @"^(Nhận được [\d.,]+ điểm kinh nghiệm|Nhặt được [\d.,]+ (vạn )?lượng|💰 \+\d+ KNB khóa|Tự mua |Tiếp tục hành tẩu" +
-        @"|📜 Dùng Lệnh Bài Dã Tẩu|🎁 Tháp tầng \d+$|Hạ (Boss Hoàng Kim|Sát Thủ) · |🔥 " +
+        @"|📜 Dùng Lệnh Bài Dã Tẩu|🎁 Tháp tầng \d+$|Hạ (Boss Hoàng Kim|Sát Thủ) · |🔥 (?!.*(Cơ Giáp|Lửa trại))" + // "🔥 … nổi giận"; giữ dòng Lửa trại / Cơ Giáp
         @"|👑 Boss Hoàng Kim · .*(gọi \d+ hộ vệ|ở ngay gần)|🗡 Sát Thủ · .*ở ngay gần)",
         RegexOptions.Compiled);
     // Đồ hiếm: Hoàng Kim (bộ chung / môn phái), Đồ phổ, Thần Mã, bộ Vô Danh, kỹ năng vốn có, Võ Lâm Mật Tịch, Tẩy Tủy
@@ -53,6 +53,7 @@ public static class GameLog
         bool rare = HasRareItem(text);
         if (text.StartsWith("💎") || text.StartsWith("🔒 Tự khoá")) return "rare";              // món hiếm vào túi (trang đọc túi đồ)
         if (rare && (text.Contains("Chúc mừng") || text.StartsWith("📢"))) return "rare";   // thông báo về chính mình, có nguồn
+        if (Regex.IsMatch(text, @"Cơ Giáp|Lửa trại|Lãnh địa bang")) return "land"; // 🏯 Lãnh địa bang (Cơ Giáp bị hạ, Lửa trại…)
         if (IsKill(text)) return rare ? "rare" : text.Contains("Sát Thủ") ? "assassin" : "boss";
         if (rare && Regex.IsMatch(text, @"Nhặt được|[Nn]hận|🎁|📕|🐎")) return "rare";
         if (IsDaTau(text)) return "datau";

@@ -478,7 +478,7 @@ $('#horseBtn').addEventListener('click', openHorses);
 // ---------- 📜 Nhật ký game ----------
 // Mỗi dòng game ghi về chính nhân vật (kèm tầng / bản đồ), lọc theo nhân vật, loại, ngày; "💎 Đồ hiếm" gộp các nhân vật của bạn
 const GAMELOG_KINDS = [['', 'Mọi loại'], ['rare', '💎 Đồ hiếm'], ['boss', '👑 Boss'], ['assassin', '🗡 Sát Thủ'],
-  ['milestone', '🏆 Mốc 100 tầng'], ['tower', '🗼 Tháp'], ['death', '💀 Gục ngã'], ['quest', '🗺 Đi làm nhiệm vụ'], ['datau', '📜 Thưởng Dã Tẩu']];
+  ['milestone', '🏆 Mốc 100 tầng'], ['tower', '🗼 Tháp'], ['death', '💀 Gục ngã'], ['quest', '🗺 Đi làm nhiệm vụ'], ['datau', '📜 Thưởng Dã Tẩu'], ['land', '🏯 Lãnh địa bang']];
 const vnToday = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
 let logSel = { who: 'rare', kind: '', day: '', hideXp: true };
 // Thưởng Dã Tẩu chỉ có kinh nghiệm ("🎁 Dã Tẩu #2491 (…): 3% kinh nghiệm")
@@ -804,6 +804,7 @@ function renderSettings() {
   const gFurnace = box(!!s.guildFurnace), gWeek = box(s.guildWeekAlert !== false);
   const gKnbOn = box(!!s.guildKnbOn);
   const jewelOn = box(!!s.jewelSwapOn);
+  const landOn = box(s.guildLandOn !== false);
   const gKnbAmount = pick([50, 100, 200, 300, 500], s.guildKnbAmount ?? 100, (n) => `${n0(n)} KNB`);
   const knbOn = box(!!s.knbSendOn), knbBig = box(s.knbOpenBig !== false);
   const knbMain = h('select', {}, [h('option', { value: '', text: '— Chọn —' })].concat((s.charNames || []).map((n) => {
@@ -914,6 +915,7 @@ function renderSettings() {
       h('div', { class: 'form-grid' }, [h('label', { text: 'KNB mỗi ngày (cũng là mức "đủ" của thành viên trong sổ KNB)' }), gKnbAmount]),
       h('p', { class: 'note', text: 'Tính cả phần đã góp tay hôm nay; luôn chừa lại số KNB ở mục "Gửi KNB về acc chính › Mỗi acc giữ lại".' }),
       h('label', { class: 'check-row' }, [jewelOn, '💍 Đổi trang sức theo việc: Luyện Công / Nhiệm Vụ đeo Hồng Ảnh (kinh nghiệm), Leo Tháp / Boss đeo trang sức sức mạnh (vốn có, HK Môn Phái). Chỉ đổi dây chuyền, 2 nhẫn, ngọc bội; riêng từng acc ở nút ⋯']),
+      h('label', { class: 'check-row' }, [landOn, '🏯 Lãnh địa bang (thứ 4, thứ 7): sau Boss Hoàng Kim tự vào lãnh địa, cùng bang đánh Cơ Giáp (Bang chủ / Phó / Trưởng lão tự gọi), ngồi Lửa trại tới đủ kinh nghiệm hôm nay rồi về tháp']),
       h('label', { class: 'check-row' }, [gFurnace, '🔥 Lò Đốt Đồ mỗi ngày: góp Hoàng Kim bộ chung (trừ món khoá); giữ Động Sát May mắn max và Hồng Ảnh Kinh nghiệm max, cất vào Rương']),
       h('label', { class: 'check-row' }, [gWeek, '⚠ Cảnh báo điều kiện tuần (điểm tuần, 15 người vào game, quỹ duy trì) vào thứ Bảy, Chủ Nhật']),
       h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', {
@@ -921,6 +923,7 @@ function renderSettings() {
         guildDonateCap: +gDonate.value, guildDailyAmount: +gDaily.value, guildDonateReserve: +gReserve.value,
         guildFurnace: gFurnace.checked, guildWeekAlert: gWeek.checked,
         guildKnbOn: gKnbOn.checked, guildKnbAmount: +gKnbAmount.value, jewelSwapOn: jewelOn.checked,
+        guildLandOn: landOn.checked,
       }, 'Đã lưu cài đặt bang hội') }),
     ]),
     section('Mật khẩu acc game', [

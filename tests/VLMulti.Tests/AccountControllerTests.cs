@@ -995,6 +995,47 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Guild_land_entered_for_campfire_and_left_before_boss()
+    {
+        var (ctl, page, cfg) = Make();
+        bool boss = false;
+        ctl.BossHkSchedule = _ => boss;
+        cfg.EventTeacher = false;
+        cfg.DailyKnbBuy = false;
+        ctl.SetAutoMode(true, T0);
+        List<string> Ops() => page.Sent.Where(m => m.GetProperty("t").GetString() == "land").Select(m => m.GetProperty("arg").GetProperty("op").GetString()!).ToList();
+        string St(string mode, string ld) => JsonSerializer.Serialize(new { t = "status", screen = "game", lv = "180", gold = "1 vạn", knb = "1 🔒1", mode, modeText = mode,
+            zone = mode == "tower" ? "Thông Thiên Tháp · tầng 900" : "Hoa Sơn", dt = "200/200", pb = "0/4", ldtHave = "0", ldtUsed = "160/160", ldtBuy = "100/100", st = "0/60", ld });
+        Assert.Equal("land", GameLog.KindOf("🔥 Cơ Giáp 2 đã bị hạ! Lửa trại cháy (đã diệt 2 Cơ Giáp hôm nay)"));
+        // Lửa trại đang cháy, chưa nhận: đang trong tháp → ra Luyện Công trước, rồi vào lãnh địa
+        var t = Run(ctl, T0, 60, St("tower", "0|-1|1|0|100000000|2|5|0|1"));
+        Assert.Contains(page.Sent, m => m.GetProperty("t").GetString() == "cmd" && m.GetRawText().Contains("farm"));
+        t = Run(ctl, t, 40, St("farm", "0|-1|1|0|100000000|2|5|0|1"));
+        Assert.Equal("vao", Ops().Last());
+        // Trong lãnh địa: không bị vòng 🔁 kéo lại vào tháp
+        int cmds = page.Sent.Count(m => m.GetProperty("t").GetString() == "cmd");
+        t = Run(ctl, t, 300, St("farm", "1|-1|1|50000000|100000000|2|5|0|1"));
+        Assert.Equal(cmds, page.Sent.Count(m => m.GetProperty("t").GetString() == "cmd"));
+        // Sắp tới Boss Hoàng Kim → rời lãnh địa
+        boss = true;
+        t = Run(ctl, t, 5, St("farm", "1|-1|1|60000000|100000000|2|5|0|1"));
+        Assert.Equal("ra", Ops().Last());
+        int n = Ops().Count;
+        // Ngoài giờ mở thì không vào
+        boss = false;
+        t = Run(ctl, t, 120, St("farm", "0|-1|1|60000000|100000000|2|5|0|0"));
+        Assert.Equal(n, Ops().Count);
+        // Lửa đã đủ, không Cơ Giáp, không có quyền gọi → không vào
+        t = Run(ctl, t, 120, St("farm", "0|-1|1|100000000|100000000|5|5|0|1"));
+        Assert.Equal(n, Ops().Count);
+        // Có quyền gọi, bang chưa gọi đủ → vào và gọi Cơ Giáp
+        t = Run(ctl, t, 40, St("farm", "0|-1|1|100000000|100000000|3|5|1|1"));
+        Assert.Equal("vao", Ops().Last());
+        Run(ctl, t, 60, St("farm", "1|-1|1|100000000|100000000|3|5|1|1"));
+        Assert.Equal("cg", Ops().Last());
+    }
+
+    [Fact]
     public void Items_with_innate_skills_are_locked_before_selling_junk()
     {
         var (ctl, page, cfg) = Make();

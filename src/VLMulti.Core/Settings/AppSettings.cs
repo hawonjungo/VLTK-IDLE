@@ -96,6 +96,9 @@ public sealed class AppSettings
     // 💍 Đổi trang sức theo việc (mặc định tắt): Luyện Công / Nhiệm Vụ → Hồng Ảnh; tháp / boss → trang sức sức mạnh.
     // Riêng từng acc: AccountSlot.JewelSwap (null = theo cài đặt chung)
     public bool JewelSwapOn { get; set; }
+    // 🏯 Tự vào Lãnh địa bang (thứ 4, thứ 7): cùng bang đánh Cơ Giáp, acc có quyền tự gọi Cơ Giáp, ngồi Lửa trại tới trần
+    // kinh nghiệm mỗi ngày rồi về tháp (xem AccountController.SuperviseGuildLand). Riêng từng acc: AccountSlot.GuildLand.
+    public bool GuildLandOn { get; set; } = true;
     public int GuildKnbAmount { get; set; } = 100;
     // 💰 Gửi KNB (thư tặng) về acc chính KnbMainName, mỗi acc chừa KnbKeep KNB; chỉ chạy khi KnbSendOn và đã chọn acc chính.
     // KnbOpenBig: mở hết Đại Hồng Bao trước khi gửi
@@ -210,6 +213,8 @@ public sealed class AccountSlot
     public int? KitePauseMs { get; set; }
     // 💍 Đổi trang sức theo việc riêng acc này (null = theo cài đặt chung)
     public bool? JewelSwap { get; set; }
+    // 🏯 Tự vào Lãnh địa bang riêng acc này (null = theo cài đặt chung GuildLandOn)
+    public bool? GuildLand { get; set; }
 
     // Tự đổi chế độ theo luật (mặc định tắt)
     public bool AutoMode { get; set; }

@@ -520,6 +520,9 @@ public sealed class AccountController
                 case "jewelResult":
                     OnJewelResult(m, now);
                     break;
+                case "landResult":
+                    OnLandResult(m, now);
+                    break;
                 case "lockInnateResult":
                     OnLockInnateResult(m, now);
                     break;
@@ -669,6 +672,7 @@ public sealed class AccountController
             InTower = s.TryGetProperty("inTower", out var it) && it.ValueKind == JsonValueKind.Number ? it.GetInt32() : -1;
             InnateUnlocked = s.TryGetProperty("innate", out var inn) && inn.ValueKind == JsonValueKind.Number ? inn.GetInt32() : 0;
             JewelEmpty = s.TryGetProperty("jewelEmpty", out var je) && je.ValueKind == JsonValueKind.Number ? je.GetInt32() : 0;
+            Land = LandState.Parse(Str(s, "ld"));
 
             var modeCode = Str(s, "mode");
             if (modeCode == "tower" && ModeCode != "tower")
@@ -1132,6 +1136,7 @@ public sealed class AccountController
         // Chỉ đứng yên khi acc thật sự đang bận với boss (xem BossHandsOff), không đứng yên cả khung giờ: acc không
         // dính boss (vừa chết ra Luyện Công, game không đưa đi…) hoặc đánh xong mà game không đưa về tháp thì
         // trước đây đứng ở Luyện Công tới hết đợt (~30 phút).
+        bool inLand = SuperviseGuildLand(now); // trước Boss: trong lãnh địa mà sắp tới đợt boss thì ra trước
         bool handsOff = BossHandsOff(now);
         SuperviseBossPrep(now);
         SuperviseBossWave(now);
@@ -1149,6 +1154,15 @@ public sealed class AccountController
         if (handsOff)
         {
             _stepWatch = null; // game tự đưa đi đánh boss: thời gian này không tính là kẹt
+            SuperviseRecovery(now);
+            return;
+        }
+        if (inLand)
+        {
+            // Trong Lãnh địa bang game dừng luyện công: không đổi chế độ / vào tháp, không tính là đứng yên
+            _stepWatch = null;
+            Stats.ResetActivity(now);
+            SuperviseBuffs(now);
             SuperviseRecovery(now);
             return;
         }
@@ -1179,6 +1193,105 @@ public sealed class AccountController
         SuperviseKnbTransfer(now);
         SuperviseStuck(now);
         SuperviseRecovery(now);
+    }
+
+    // ---------- 🏯 Lãnh địa bang: Cơ Giáp + Lửa trại ----------
+    // Ngày mở (thứ 4, thứ 7; giờ theo lịch của bang, hiện 14:00–23:00), ngoài đợt Boss Hoàng Kim: acc đang Leo Tháp /
+    // Luyện Công (vòng 🔁) vào lãnh địa khi có Cơ Giáp đang ra (cùng đánh), Lửa trại đang cháy mà chưa nhận đủ trần
+    // kinh nghiệm hôm nay, hoặc acc có quyền gọi (Bang chủ / Phó / Trưởng lão) mà bang chưa gọi đủ Cơ Giáp. Acc có quyền
+    // gọi con kế tiếp ngay khi con trước xong. Hết việc (lửa đủ, không còn Cơ Giáp), hết giờ, hoặc 3 phút trước đợt Boss
+    // Hoàng Kim → rời lãnh địa, vòng 🔁 đưa về tháp như thường.
+    public record LandState(bool In, int CgPct, bool LuaOn, long Used, long Cap, int N, int CgMax, bool Right, bool Open)
+    {
+        public bool CgUp => CgPct >= 0;
+        public bool LuaLeft => LuaOn && Cap > 0 && Used < Cap;
+        public bool CanCall => Right && Open && N < CgMax;
+        public bool Worth => Open && (CgUp || LuaLeft || CanCall);
+        public static LandState? Parse(string raw)
+        {
+            var p = raw.Split('|');
+            if (p.Length < 9) return null;
+            int I(int i) => int.TryParse(p[i], out var v) ? v : 0;
+            long Lg(int i) => long.TryParse(p[i], out var v) ? v : 0;
+            return new LandState(I(0) == 1, int.TryParse(p[1], out var c) ? c : -1, I(2) == 1, Lg(3), Lg(4), I(5), I(6), I(7) == 1, I(8) == 1);
+        }
+    }
+    public LandState? Land { get; private set; }
+    private static readonly TimeSpan LandCmdGap = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan LandBossAhead = TimeSpan.FromMinutes(3);
+    private DateTime _landCmdAt = DateTime.MinValue, _landCgAt = DateTime.MinValue;
+    private bool _landWent;
+    public bool GuildLandOn(AppSettings cfg) => Account.GuildLand ?? cfg.GuildLandOn;
+
+    // true = acc đang ở (hoặc đang vào) lãnh địa: các phần đổi chế độ / tháp đứng yên
+    private bool SuperviseGuildLand(DateTime now)
+    {
+        var cfg = SettingsProvider?.Invoke();
+        var L = Land;
+        if (cfg is null || Screen != "game" || Away || L is null) return false;
+        bool on = GuildLandOn(cfg) && Account.AutoMode;
+        bool bossSoon = BossHkSchedule(now) || BossHkSchedule(now + LandBossAhead) || HuntName.Length > 0;
+        if (L.In)
+        {
+            _landWent = true;
+            string why = !on ? "tắt tự động" : !L.Open ? "hết giờ mở" : bossSoon ? "sắp tới Boss Hoàng Kim" : !L.Worth ? "xong việc (Lửa trại đã đủ, không còn Cơ Giáp)" : "";
+            if (why.Length > 0)
+            {
+                if (now - _landCmdAt >= LandCmdGap)
+                {
+                    _landCmdAt = now;
+                    Log.Write($"[{Account.Id}] land: leave ({why})");
+                    Note(now, $"🏯 Rời Lãnh địa bang: {why}");
+                    Post(new { t = "land", arg = new { op = "ra" } });
+                }
+                return !on ? false : true;
+            }
+            if (L.CanCall && !L.CgUp && now - _landCgAt >= TimeSpan.FromSeconds(50))
+            {
+                _landCgAt = now;
+                Log.Write($"[{Account.Id}] land: call Cơ Giáp {L.N + 1}/{L.CgMax}");
+                Post(new { t = "land", arg = new { op = "cg" } });
+            }
+            return true;
+        }
+        if (_landWent)
+        {
+            // vừa rời: vòng 🔁 đưa về tháp ngay, thời gian trong lãnh địa không tính là đứng yên
+            _landWent = false;
+            _towerReturnAt = now;
+            _pendingAutoMode = null;
+            Stats.ResetActivity(now);
+        }
+        if (!on || bossSoon || !L.Worth) return false;
+        if (ModeCode is not (ModeRules.Tower or ModeRules.Farm) || _ldtBuyingSince is not null || EventRunning(now) || AssassinActive) return false;
+        if (now - _landCmdAt < LandCmdGap) return true; // đang vào: đừng để vòng 🔁 đưa lại vào tháp
+        _landCmdAt = now;
+        if (InTower == 1 || ModeCode == ModeRules.Tower)
+        {
+            // Game chỉ cho vào lãnh địa khi đã ra khỏi tháp
+            Log.Write($"[{Account.Id}] land: tower -> farm to enter");
+            _pendingAutoMode = ModeRules.Farm;
+            _lastAutoModeCmd = now;
+            RunCommand("mode", ModeRules.Farm);
+            return true;
+        }
+        var what = L.CgUp ? $"cùng bang đánh Cơ Giáp (còn {L.CgPct}% máu)" : L.CanCall && !L.LuaLeft ? $"gọi Cơ Giáp {L.N + 1}/{L.CgMax}"
+            : $"ngồi Lửa trại ({L.Used / 1_000_000:0}/{L.Cap / 1_000_000:0} triệu kinh nghiệm hôm nay)";
+        Log.Write($"[{Account.Id}] land: enter ({what})");
+        Note(now, $"🏯 Vào Lãnh địa bang: {what}");
+        Post(new { t = "land", arg = new { op = "vao" } });
+        return true;
+    }
+
+    private void OnLandResult(JsonElement m, DateTime now)
+    {
+        var r = Str(m, "r");
+        var op = Str(m, "op");
+        Log.Write($"[{Account.Id}] land: {op} {r}");
+        if (r == "ok") return;
+        if (op == "vao" && r == "in-tower") { _landCmdAt = now - TimeSpan.FromSeconds(20); return; } // game chưa ra khỏi tháp: 10 giây sau thử lại
+        if (op == "cg" && r == "walking") { _landCgAt = now - TimeSpan.FromSeconds(30); return; }
+        if (r.StartsWith("error") || r == "fail") Note(now, $"🏯 Lãnh địa bang: {(op == "vao" ? "không vào được" : op == "ra" ? "không rời được" : "không gọi được Cơ Giáp")} ({r})", StatusLevel.Warn);
     }
 
     // ---------- "Tài khoản đang ở nơi khác" ----------
