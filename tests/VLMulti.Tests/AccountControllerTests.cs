@@ -956,6 +956,37 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Jewelry_is_swapped_by_activity_only_when_switched_on()
+    {
+        var (ctl, page, cfg) = Make();
+        ctl.BossHkSchedule = _ => false;
+        cfg.EventTeacher = false;
+        cfg.DailyKnbBuy = false;
+        List<string> Modes() => page.Sent.Where(m => m.GetProperty("t").GetString() == "jewel").Select(m => m.GetProperty("arg").GetProperty("mode").GetString()!).ToList();
+        var t = Run(ctl, T0, 5 * 60, Tower(900));
+        Assert.Empty(Modes()); // mặc định tắt
+
+        cfg.JewelSwapOn = true;
+        t = Run(ctl, t, 10, Tower(900));
+        Assert.Equal(new[] { "power" }, Modes()); // tháp → sức mạnh ngay
+        ctl.OnPageMessage("""{"t":"jewelResult","r":"ok","mode":"power","changed":"Băng Hàn Huyền Thiên Băng Hỏa Bội","exp":150}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("💍 Đổi trang sức Sức mạnh"));
+        // Chết trong tháp, Luyện Công 30 giây rồi vào lại → không đổi
+        t = Run(ctl, t, 30, Status("game", mode: "farm"));
+        t = Run(ctl, t, 60, Tower(900));
+        Assert.Single(Modes());
+        // Ở Luyện Công lâu → Hồng Ảnh
+        t = Run(ctl, t, 90, Status("game", mode: "farm"));
+        Assert.Equal(new[] { "power", "exp" }, Modes());
+        ctl.OnPageMessage("""{"t":"jewelResult","r":"ok","mode":"exp","changed":"Hồng ảnh Mục Túc","exp":182}""", t);
+        Assert.Equal("exp", ctl.JewelMode);
+        // Tắt riêng acc này → không đổi nữa
+        ctl.Account.JewelSwap = false;
+        Run(ctl, t, 60, Tower(901));
+        Assert.Equal(2, Modes().Count);
+    }
+
+    [Fact]
     public void Items_with_innate_skills_are_locked_before_selling_junk()
     {
         var (ctl, page, cfg) = Make();

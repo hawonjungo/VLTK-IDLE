@@ -401,6 +401,8 @@ function openAccMenu(id) {
   openModal(a.name, h('div', { class: 'sheet-list' }, [
     item('Ảnh nhanh', '', () => { closeModal(); openSnapshot(a.id, a.name); }),
     item('Nhật ký đầy đủ', '', () => { closeModal(); logAcc = a.id; showView('log'); }),
+    item('💍 Đổi trang sức theo việc', a.jewelSwap == null ? `theo cài đặt chung (${state.settings?.jewelSwapOn ? 'bật' : 'tắt'})` : a.jewelSwap ? 'BẬT riêng acc này' : 'TẮT riêng acc này',
+      () => { closeModal(); act(`acc/${a.id}/jewel`, {}, 'Đã đổi'); }),
     item('Kéo quái khi leo tháp', (a.kite ? 'đang BẬT' : 'đang tắt') + (a.kiteDir || a.kiteDist || a.kiteInterval || a.kiteFlee != null || a.kiteCrowd != null || a.kitePause ? ' · cài riêng' : ' · theo cài đặt chung'), () => { closeModal(); openKiteSheet(a); }),
     item('Vòng tự động (luật)', a.autoMode ? 'đang BẬT' : 'đang tắt', () => { closeModal(); act(`acc/${a.id}/automode`); }),
     item('Tải lại trang game', '', () => { closeModal(); act(`acc/${a.id}/reload`, {}, 'Đang tải lại…'); }),
@@ -801,6 +803,7 @@ function renderSettings() {
   const gReserve = pick([0, 1000, 3000, 5000, 10000], s.guildDonateReserve ?? 3000, vanLabel);
   const gFurnace = box(!!s.guildFurnace), gWeek = box(s.guildWeekAlert !== false);
   const gKnbOn = box(!!s.guildKnbOn);
+  const jewelOn = box(!!s.jewelSwapOn);
   const gKnbAmount = pick([50, 100, 200, 300, 500], s.guildKnbAmount ?? 100, (n) => `${n0(n)} KNB`);
   const knbOn = box(!!s.knbSendOn), knbBig = box(s.knbOpenBig !== false);
   const knbMain = h('select', {}, [h('option', { value: '', text: '— Chọn —' })].concat((s.charNames || []).map((n) => {
@@ -910,13 +913,14 @@ function renderSettings() {
       h('label', { class: 'check-row' }, [gKnbOn, '💎 Tự góp KNB vào quỹ bang mỗi ngày (tắt = không bao giờ góp KNB)']),
       h('div', { class: 'form-grid' }, [h('label', { text: 'KNB mỗi ngày (cũng là mức "đủ" của thành viên trong sổ KNB)' }), gKnbAmount]),
       h('p', { class: 'note', text: 'Tính cả phần đã góp tay hôm nay; luôn chừa lại số KNB ở mục "Gửi KNB về acc chính › Mỗi acc giữ lại".' }),
+      h('label', { class: 'check-row' }, [jewelOn, '💍 Đổi trang sức theo việc: Luyện Công / Nhiệm Vụ đeo Hồng Ảnh (kinh nghiệm), Leo Tháp / Boss đeo trang sức sức mạnh (vốn có, HK Môn Phái). Chỉ đổi dây chuyền, 2 nhẫn, ngọc bội; riêng từng acc ở nút ⋯']),
       h('label', { class: 'check-row' }, [gFurnace, '🔥 Lò Đốt Đồ mỗi ngày: góp Hoàng Kim bộ chung (trừ món khoá); giữ Động Sát May mắn max và Hồng Ảnh Kinh nghiệm max, cất vào Rương']),
       h('label', { class: 'check-row' }, [gWeek, '⚠ Cảnh báo điều kiện tuần (điểm tuần, 15 người vào game, quỹ duy trì) vào thứ Bảy, Chủ Nhật']),
       h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', {
         guildShop: guild.checked, guildLdt: gLdt.checked, guildPhucDuyen: gFdl.checked, guildTtsp: gTtsp.checked, guildThbt: gThbt.checked,
         guildDonateCap: +gDonate.value, guildDailyAmount: +gDaily.value, guildDonateReserve: +gReserve.value,
         guildFurnace: gFurnace.checked, guildWeekAlert: gWeek.checked,
-        guildKnbOn: gKnbOn.checked, guildKnbAmount: +gKnbAmount.value,
+        guildKnbOn: gKnbOn.checked, guildKnbAmount: +gKnbAmount.value, jewelSwapOn: jewelOn.checked,
       }, 'Đã lưu cài đặt bang hội') }),
     ]),
     section('Mật khẩu acc game', [

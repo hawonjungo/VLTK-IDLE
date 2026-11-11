@@ -517,6 +517,9 @@ public sealed class AccountController
                 case "guildLogResult":
                     OnGuildLogResult(m, now);
                     break;
+                case "jewelResult":
+                    OnJewelResult(m, now);
+                    break;
                 case "lockInnateResult":
                     OnLockInnateResult(m, now);
                     break;
@@ -1168,6 +1171,7 @@ public sealed class AccountController
         SuperviseBuffs(now);
         SuperviseGuild(now);
         SuperviseLockInnate(now);
+        SuperviseJewel(now);
         SuperviseGuildLedger(now);
         SuperviseGuildKnb(now);
         SuperviseSellJunk(now);
@@ -1900,6 +1904,69 @@ public sealed class AccountController
         GuildLogResult?.Invoke(m.Clone());
     }
 
+    // 💍 Trang sức theo việc (bạn bật; chung hoặc riêng từng acc): Leo Tháp / Phó bản / Boss Hoàng Kim (từ 2 phút trước
+    // đợt) / truy sát / thuyền / Boss tuần → trang sức sức mạnh; Luyện Công / Nhiệm Vụ → Hồng Ảnh (kinh nghiệm). Chỉ đổi
+    // khi việc đã đổi ổn định: sang kinh nghiệm phải ở Luyện Công / Nhiệm Vụ 60 giây (chết trong tháp rồi vào lại ngay
+    // thì không đổi qua lại); sang sức mạnh thì đổi ngay.
+    public string JewelMode { get; private set; } = "";   // trang sức đang đeo theo tool: "exp" / "power" / ""
+    private string _jewelWant = "";
+    private DateTime _jewelWantSince, _jewelNextTry, _jewelAt;
+    private bool _jewelPending;
+
+    public bool JewelSwapOn(AppSettings cfg) => Account.JewelSwap ?? cfg.JewelSwapOn;
+
+    private string JewelWanted(DateTime now)
+    {
+        bool fight = ModeCode is ModeRules.Tower or ModeRules.Dungeon || BossHkSchedule(now) || BossHkSchedule(now + BossPrepAhead)
+                     || AssassinActive || EventRunning(now) || _eventPhase is not null || _assassinPhase;
+        if (fight) return "power";
+        return ModeCode is ModeRules.Farm or ModeRules.Quest ? "exp" : "";
+    }
+
+    private void SuperviseJewel(DateTime now)
+    {
+        var cfg = SettingsProvider?.Invoke();
+        if (cfg is null || !JewelSwapOn(cfg) || Screen != "game" || Away) return;
+        var want = JewelWanted(now);
+        if (want != _jewelWant) { _jewelWant = want; _jewelWantSince = now; }
+        if (want.Length == 0 || want == JewelMode) return;
+        if (want == "exp" && now - _jewelWantSince < TimeSpan.FromSeconds(60)) return;
+        if (_jewelPending && now - _jewelAt < TimeSpan.FromMinutes(1)) return;
+        _jewelPending = false;
+        if (now < _jewelNextTry || _ldtBuyingSince is not null) return;
+        _jewelAt = now;
+        _jewelPending = true;
+        Post(new { t = "jewel", arg = new { mode = want } });
+    }
+
+    private void OnJewelResult(JsonElement m, DateTime now)
+    {
+        _jewelPending = false;
+        var r = Str(m, "r");
+        var mode = Str(m, "mode");
+        var changed = Str(m, "changed");
+        Log.Write($"[{Account.Id}] jewel: {r} mode={mode} changed={changed} exp={Raw(m, "exp")}");
+        switch (r)
+        {
+            case "ok":
+                JewelMode = mode;
+                if (changed.Length > 0)
+                {
+                    var label = mode == "exp" ? "Kinh nghiệm (Hồng Ảnh)" : "Sức mạnh";
+                    Note(now, $"💍 Đổi trang sức {label}: {changed}" + (mode == "exp" ? $" · kinh nghiệm {Raw(m, "exp")}%" : ""), StatusLevel.Ok);
+                    GameLogSink?.Invoke(Account.Id, new[] { new GameLog.Entry(now, "quest", "", Account.CharName ?? "", $"💍 Trang sức {label}: {changed}") });
+                }
+                return;
+            case "bag-full":
+                _jewelNextTry = now + TimeSpan.FromMinutes(10);
+                Note(now, "💍 Không đổi được trang sức: hành trang đầy", StatusLevel.Warn);
+                return;
+            default:
+                _jewelNextTry = now + TimeSpan.FromMinutes(2);
+                return;
+        }
+    }
+
     // 🔒 Đồ có kỹ năng vốn có trong Hành trang chưa khoá → khoá ngay (trang tự tìm món, bấm Khóa trên thẻ món)
     public int InnateUnlocked { get; private set; }
     private bool _innatePending;
@@ -2019,7 +2086,7 @@ public sealed class AccountController
     private static readonly object[] GuildFurnaceKeep =
     {
         new { set = "Động Sát", attr = "lucky_v" },
-        new { set = "Hồng ảnh", attr = "expenhance_p" },
+        // Hồng Ảnh: trang giữ món % kinh nghiệm cao nhất mỗi loại trong túi (agent.js bestHongAnh), không theo luật này
     };
     private DateOnly _guildWeekAlertDay;
 

@@ -93,6 +93,9 @@ public sealed class AppSettings
     // mỗi ngày (tính cả phần đã góp tay hôm nay), vẫn chừa KnbKeep KNB. GuildKnbAmount cũng là mức "đủ" mỗi ngày của
     // thành viên trong sổ KNB của bang.
     public bool GuildKnbOn { get; set; }
+    // 💍 Đổi trang sức theo việc (mặc định tắt): Luyện Công / Nhiệm Vụ → Hồng Ảnh; tháp / boss → trang sức sức mạnh.
+    // Riêng từng acc: AccountSlot.JewelSwap (null = theo cài đặt chung)
+    public bool JewelSwapOn { get; set; }
     public int GuildKnbAmount { get; set; } = 100;
     // 💰 Gửi KNB (thư tặng) về acc chính KnbMainName, mỗi acc chừa KnbKeep KNB; chỉ chạy khi KnbSendOn và đã chọn acc chính.
     // KnbOpenBig: mở hết Đại Hồng Bao trước khi gửi
@@ -205,6 +208,8 @@ public sealed class AccountSlot
     public int? KiteFleeHp { get; set; }
     public int? KiteCrowd { get; set; }
     public int? KitePauseMs { get; set; }
+    // 💍 Đổi trang sức theo việc riêng acc này (null = theo cài đặt chung)
+    public bool? JewelSwap { get; set; }
 
     // Tự đổi chế độ theo luật (mặc định tắt)
     public bool AutoMode { get; set; }

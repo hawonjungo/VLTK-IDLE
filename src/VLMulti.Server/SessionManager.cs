@@ -190,6 +190,7 @@ public sealed class SessionManager : IAsyncDisposable
                     kite = acc.Kite,
                     kiteDir = acc.KiteDirection, kiteDist = acc.KiteDistance, kiteInterval = acc.KiteInterval, kiteFlee = acc.KiteFleeHp,
                     kiteCrowd = acc.KiteCrowd, kitePause = acc.KitePauseMs,
+                    jewelSwap = acc.JewelSwap,
                     autoMode = acc.AutoMode,
                     hasPassword = HasPassword(acc.Id),
                     savedUser = SavedUser(acc.Id),
@@ -285,6 +286,7 @@ public sealed class SessionManager : IAsyncDisposable
                     guildFurnace = _settings.GuildFurnace,
                     guildWeekAlert = _settings.GuildWeekAlert,
                     guildKnbOn = _settings.GuildKnbOn,
+                    jewelSwapOn = _settings.JewelSwapOn,
                     guildKnbAmount = _settings.GuildKnbAmount,
                     knbSendOn = _settings.KnbSendOn,
                     knbOpenBig = _settings.KnbOpenBig,
@@ -468,6 +470,15 @@ public sealed class SessionManager : IAsyncDisposable
             a.KitePauseMs = req.PauseMs;
             if (req.On is { } on && on != a.Kite) c.SetKite(on, DateTime.Now);
         });
+        SaveSettings();
+        return true;
+    }
+
+    // 💍 Đổi trang sức riêng acc: theo chung → bật → tắt → theo chung
+    public bool CycleJewelSwap(string id)
+    {
+        if (Find(id) is not { } s) return false;
+        s.Locked(c => c.Account.JewelSwap = c.Account.JewelSwap switch { null => true, true => false, false => null });
         SaveSettings();
         return true;
     }
@@ -698,6 +709,7 @@ public sealed class SessionManager : IAsyncDisposable
             if (u.GuildFurnace is { } gf) _settings.GuildFurnace = gf;
             if (u.GuildWeekAlert is { } gw) _settings.GuildWeekAlert = gw;
             if (u.GuildKnbOn is { } gko) _settings.GuildKnbOn = gko;
+            if (u.JewelSwapOn is { } jso) _settings.JewelSwapOn = jso;
             if (u.GuildKnbAmount is { } gka) _settings.GuildKnbAmount = gka;
             if (u.KnbMainName is { } km) _settings.KnbMainName = km;
             if (u.KnbSendOn is { } ks) _settings.KnbSendOn = ks;
@@ -819,4 +831,4 @@ public sealed record SettingsUpdate(
     bool? AutoSellJunk = null, int? AutoSellFreeSlots = null,
     int? GuildDailyAmount = null, int? GuildDonateReserve = null, bool? GuildFurnace = null,
     bool? GuildWeekAlert = null, string? KnbMainName = null, int? KnbKeep = null, bool? KnbSendOn = null, bool? KnbOpenBig = null,
-    int? KiteFleeHp = null, int? KiteCrowd = null, int? KitePauseMs = null, bool? GuildKnbOn = null, int? GuildKnbAmount = null);
+    int? KiteFleeHp = null, int? KiteCrowd = null, int? KitePauseMs = null, bool? GuildKnbOn = null, int? GuildKnbAmount = null, bool? JewelSwapOn = null);

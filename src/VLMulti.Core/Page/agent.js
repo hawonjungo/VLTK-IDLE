@@ -1146,9 +1146,13 @@
         const grp = BH && BH.lo && Array.isArray(BH.lo.grp) ? BH.lo.grp : [];
         const rules = arg.keep || [];
         const gold = (S && S.inv || []).filter((i) => i && i.set && i.set.kind === 'gold');
-        const keepers = gold.filter((i) => goldKeep(i, rules));
-        res.kept = keepers.map((i) => i.n);
-        const burn = gold.filter((i) => !i.lock && !hasInnate(i) && !keepers.includes(i) && grp.includes(+i.set.grp));
+        const keepers = gold.filter((i) => !isHongAnh(i) && goldKeep(i, rules));
+        // Hồng Ảnh: mỗi nhân vật giữ món % kinh nghiệm cao nhất mỗi loại (2 nhẫn tốt nhất), so cả đồ đang mặc; món giữ
+        // lại ở trong túi (để đổi trang sức) và được khoá; món kém hơn thì đốt
+        const haKeep = bestHongAnh(S).filter((i) => (S.inv || []).includes(i));
+        for (const it of haKeep) if (!it.lock) { try { window.H5.lockItem(it); } catch (_) {} await sleep(300); }
+        res.kept = keepers.map((i) => i.n).concat(haKeep.map((i) => i.n + ' (túi)'));
+        const burn = gold.filter((i) => !i.lock && !hasInnate(i) && !keepers.includes(i) && !haKeep.includes(i) && grp.includes(+i.set.grp));
         if (burn.length && typeof gop === 'function') {
           const before = gold.length;
           const p = gop(burn.slice(0, 200));
@@ -1599,6 +1603,72 @@
   const innateEquippedUnlocked = () => {
     try { const S = window.H5.G('S'); return Object.entries(S && S.eq || {}).filter(([, i]) => i && !i.lock && hasInnate(i)).map(([slot, it]) => ({ slot, it })); } catch (_) { return []; }
   };
+  // 💍 Trang sức theo việc (bạn bật trong Cài đặt): chỉ đổi 4 ô trang sức (dây chuyền, 2 nhẫn, ngọc bội), vũ khí / áo…
+  // giữ nguyên. "exp" = Hồng Ảnh % kinh nghiệm cao nhất; "power" = món có kỹ năng vốn có, rồi HK Môn Phái; ô nào không
+  // có món hợp thì giữ món đang đeo. Mặc bằng hàm "Mặc" của game (tự chọn ô theo loại món: d 3 nhẫn, 4 dây chuyền,
+  // 9 ngọc bội; nhẫn thì thay chiếc "yếu" hơn → muốn đúng 2 nhẫn thì tháo cả hai rồi đeo lần lượt).
+  const isHongAnh = (it) => !!(it && it.set && it.set.kind === 'gold' && /Hồng ảnh/i.test(it.n || ''));
+  const attrSum = (it, key) => { const JX = window.JX; return (it && it.mag || []).filter((x) => JX && JX.attr[x.a] === key).reduce((a, x) => a + (+((x.p || [])[0]) || 0), 0); };
+  const expOf = (it) => attrSum(it, 'expenhance_p');
+  const powerOf = (it) => {
+    if (!it || isHongAnh(it)) return 0;
+    const innate = attrSum(it, 'allskill_v');
+    const mp = it.set && it.set.kind === 'gold' && ((it.req || []).find((r) => r && r[0] === 39) || [0, -1])[1] >= 0;
+    return innate * 100 + (mp ? 50 : 0);
+  };
+  const JEWEL = [{ d: 4, slots: ['amulet'] }, { d: 9, slots: ['pendant'] }, { d: 3, slots: ['ring1', 'ring2'] }];
+  // Hồng Ảnh tốt nhất của nhân vật: 1 dây chuyền, 1 ngọc bội, 2 nhẫn (đang mặc + trong túi)
+  const bestHongAnh = (S) => {
+    const all = [...Object.values(S.eq || {}), ...(S.inv || [])].filter(isHongAnh);
+    return JEWEL.flatMap((j) => all.filter((i) => i.d === j.d).sort((a, b) => expOf(b) - expOf(a)).slice(0, j.slots.length));
+  };
+  const jewelFlow = async (arg) => {
+    if (flowBusy || anyWindowOpen()) return { r: 'busy' };
+    if (inBossHk() && arg.mode !== 'power') return { r: 'boss-hk' };
+    const G = window.H5.G, S = G('S');
+    const equip = G('equip'), unequip = G('unequip');
+    if (!S || typeof equip !== 'function' || typeof unequip !== 'function') return { r: 'no-fn' };
+    const want = {};
+    for (const j of JEWEL) {
+      const pool = [...j.slots.map((s) => S.eq[s]), ...(S.inv || []).filter((i) => i && i.d === j.d)].filter(Boolean);
+      const uniq = [...new Set(pool)];
+      const pick = arg.mode === 'exp'
+        ? uniq.filter(isHongAnh).sort((a, b) => expOf(b) - expOf(a))
+        : uniq.filter((i) => powerOf(i) > 0).sort((a, b) => powerOf(b) - powerOf(a));
+      // Thiếu món hợp thì lấp bằng món đang đeo (giữ nguyên), rồi món Hồng Ảnh tốt nhất
+      const worn = j.slots.map((s) => S.eq[s]).filter(Boolean);
+      const fill = [...pick, ...worn.filter((w) => !pick.includes(w)), ...uniq.filter(isHongAnh).sort((a, b) => expOf(b) - expOf(a))];
+      want[j.d] = [...new Set(fill)].slice(0, j.slots.length);
+    }
+    const changed = [];
+    const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+    const waitWorn = (it) => waitFor(() => Object.values(G('S').eq || {}).includes(it), 3000);
+    flowBusy = true;
+    try {
+      for (const j of JEWEL) {
+        const worn = j.slots.map((s) => S.eq[s]).filter(Boolean);
+        const target = want[j.d] || [];
+        if (!target.length || sameSet(worn, target)) continue;
+        const free = (globalThis.INV_MAX ?? 999) - (S.inv || []).length;
+        if (j.slots.length > 1) {
+          if (free < j.slots.length) return { r: 'bag-full', changed: changed.join(', ') };
+          for (const s of j.slots) if (G('S').eq[s]) { try { unequip(s); } catch (_) {} await waitFor(() => !G('S').eq[s], 3000); }
+          for (const it of target) { try { equip(it, true); } catch (_) {} if (await waitWorn(it)) changed.push(it.n); }
+        } else {
+          if (free < 1) return { r: 'bag-full', changed: changed.join(', ') };
+          const it = target[0];
+          if (worn[0] === it) continue;
+          try { equip(it, true); } catch (_) {}
+          if (await waitWorn(it)) changed.push(it.n);
+        }
+        await sleep(300);
+      }
+    } finally {
+      await closeModalSure();
+      flowBusy = false;
+    }
+    return { r: 'ok', mode: arg.mode, changed: changed.join(', '), exp: Math.round((G('R').P || {}).expPct || 0) };
+  };
   const lockInnateFlow = async () => {
     if (flowBusy || anyWindowOpen()) return { r: 'busy' };
     if (inBossHk()) return { r: 'boss-hk' };
@@ -1984,6 +2054,8 @@
       guildKnbFlow(m.arg || {}).then((res) => post({ t: 'guildKnbResult', ...res }), (err) => post({ t: 'guildKnbResult', r: 'error: ' + err.message }));
     } else if (m.t === 'guildLog') {
       guildLogFlow().then((res) => post({ t: 'guildLogResult', ...res }), (err) => post({ t: 'guildLogResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'jewel') {
+      jewelFlow(m.arg || {}).then((res) => post({ t: 'jewelResult', ...res }), (err) => post({ t: 'jewelResult', r: 'error: ' + err.message }));
     } else if (m.t === 'lockInnate') {
       lockInnateFlow().then((res) => post({ t: 'lockInnateResult', ...res }), (err) => post({ t: 'lockInnateResult', r: 'error: ' + err.message }));
     } else if (m.t === 'sellJunk') {

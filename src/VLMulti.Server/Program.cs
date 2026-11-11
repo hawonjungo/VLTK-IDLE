@@ -170,6 +170,7 @@ app.MapPost("/api/acc/{id}/click", (string id, ClickRequest req) => manager.Clic
 app.MapPost("/api/acc/{id}/reload", (string id) => manager.Reload(id) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/kite", (string id) => manager.ToggleKite(id) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/kite-config", (string id, KiteConfigRequest req) => manager.SetKiteConfig(id, req) ? Results.Ok() : Results.NotFound());
+app.MapPost("/api/acc/{id}/jewel", (string id) => manager.CycleJewelSwap(id) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/automode", (string id) => manager.ToggleAutoMode(id) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/select", (string id, ToggleRequest req) => manager.SetSelected(id, req.On) ? Results.Ok() : Results.NotFound());
 app.MapPost("/api/acc/{id}/enabled", async (string id, ToggleRequest req) =>
