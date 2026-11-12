@@ -22,6 +22,16 @@ public class MoneyParserTests
     public void Parses_decomposed_unicode() =>
         Assert.Equal(12_000, MoneyParser.Parse("1,2 vạn".Normalize(System.Text.NormalizationForm.FormD)));
 
+    // Trang đọc thẳng dữ liệu game: số lượng chia 10.000, phần lẻ sau dấu phẩy
+    [Fact]
+    public void Parses_values_read_from_game_state()
+    {
+        Assert.Equal(88_125_308, MoneyParser.Parse("8812,5308 vạn"));
+        var (knb, locked) = MoneyParser.ParseKnb("39242 🔒2593");
+        Assert.Equal(39_242, knb);
+        Assert.Equal(2_593, locked);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

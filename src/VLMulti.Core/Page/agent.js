@@ -427,7 +427,7 @@
       if (inTowerOrDungeon()) return 'need-farm';
       const btn = $('#u20menu > button[data-u="quest"]'), tab = $('#t-quest');
       if (!btn || !tab) return 'not-ready';
-      const lv = parseInt(txt('#lvS'), 10) || 0;
+      const lv = parseInt(lvText(), 10) || 0;
       btn.click();
       let went = '';
       try {
@@ -555,7 +555,7 @@
   };
   const kiteFloorDone = (R) => {
     const st = kiteSt.stat;
-    if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0, mounted: st.mounted || 0, movePct: st.nearTicks ? Math.round(100 * (st.moveTicks || 0) / st.nearTicks) : null });
+    if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0, mounted: st.mounted || 0, movePct: st.nearTicks ? Math.round(100 * (st.moveTicks || 0) / st.nearTicks) : null, pre: st.pre || 0, far: st.far || 0, mReach: st.mReach || 0 });
     kiteSt.stat = null;
   };
   const clearSpot = (x, y) => {
@@ -595,6 +595,9 @@
     // Chiêu chính dùng được khi cưỡi ngựa? (HORSE_LIM của game: 1 = không dùng được trên ngựa). Được → không cần tránh
     // lên ngựa, không bắt xuống ngựa (ví dụ Vân Long Kích, Huyền Âm Trảm); không được → giữ trong vòng an toàn.
     const horseOk = mainHorseOk(R);
+    // Đi xa cũng không bị lên ngựa: chiêu chính đánh được trên ngựa, hoặc "Tự lên ngựa" đang tắt (trong tháp tool tắt cho
+    // nhân vật có chiêu chính không dùng được trên ngựa) → bỏ giới hạn 330/390 để giữ ngựa
+    const freeMove = horseOk || (S && S.autoRide === false && !R.mounted);
     const jx = (ax, ay, bx, by) => Math.hypot(bx - ax, (by - ay) * 2) / JK;
     // Số liệu tầng
     if (R.tower.floor !== kiteSt.floor) {
@@ -620,7 +623,23 @@
     // Quái trong tầm đánh của nhân vật (đánh xa: tới tầm chiêu, ví dụ 512) – quái tháp ở xa vẫn ra chiêu trúng được (11/11:
     // đánh xa đứng yên đánh con quái cách 357 vì chỉ tính quái trong vòng 330, mất 89% máu)
     // Không cưỡi ngựa đánh được → tối đa 390 (đi khi con gần nhất xa hơn 400 là game cho lên ngựa)
-    const reach = horseOk ? Math.max(SAFE, Math.min(rad + 60, 600)) : Math.min(Math.max(SAFE, rad + 60), 390);
+    const reach = freeMove ? Math.max(SAFE, Math.min(rad + 60, 600)) : Math.min(Math.max(SAFE, rad + 60), 390);
+    // Trước khi quái mọc: game đặt quái quanh CHỖ nhân vật đứng (±260 ngang, ±220 dọc) và mỗi con ra đòn đầu sau 0–2 giây,
+    // đòn nhắm vào chỗ nhân vật đứng lúc ra đòn → đứng yên lúc quái vừa mọc là ăn trọn loạt đầu (12/11: chết ~6 giây sau khi
+    // vào tầng, mất 20–80% máu trong 2–5 giây đầu). ~0,5 giây trước khi quái mọc: bắt đầu một bước dài để lúc quái mọc
+    // nhân vật đang chạy (hướng về giữa bản đồ cho rộng chỗ né). Chỉ khi đi xa không bị lên ngựa.
+    if (!en.length) {
+      if (freeMove && R.spawnT > 0 && R.spawnT < 0.55 && kiteSt.preFloor !== R.tower.floor) {
+        kiteSt.preFloor = R.tower.floor;
+        const cx0 = W.w / 2, cy0 = W.h / 2;
+        let a = Math.random() * Math.PI * 2;
+        if (Math.hypot(cx0 - H.x, cy0 - H.y) > 300) a = Math.atan2(cy0 - H.y, cx0 - H.x) + (Math.random() - 0.5) * 1.2;
+        const L = melee ? 110 : 170;
+        if (st) st.pre = 1;
+        go(H.x + Math.cos(a) * L, H.y + Math.sin(a) * L * 0.6, 'pre');
+      }
+      return;
+    }
     const near = en.filter((e) => dist(e) <= reach);
     // Không có quái trong tầm → KHÔNG đi (đi lúc này là lên ngựa); Auto tự tới quái
     if (!near.length) return;
@@ -671,8 +690,17 @@
       const vx = H.x - t.x, vy = H.y - t.y, d = Math.hypot(vx, vy) || 1;
       const ux = vx / d, uy = vy / d;            // hướng từ quái → nhân vật
       const dj = dist(t);
-      const want = Math.max(150, Math.min(rad * 0.55, 260));
-      const fix = Math.max(-step, Math.min(step, (want - dj) * 0.4 * JK)) * (low ? 1.5 : 1);
+      // Tầm đánh của quái (game: e.reach; quái ra đòn khi cách ≤ reach + 4). Chiêu mình bắn xa hơn hẳn → đứng ngoài tầm
+      // quái mà vẫn trong tầm mình (ví dụ quái cận chiến 75, mình 512 → giữ ~360); không hơn được thì như cũ (150–260).
+      const mReach = Math.max(0, ...near.map((e) => +e.reach || 0));
+      const outrange = freeMove && rad - mReach >= 25;
+      const want = outrange ? Math.min(rad - 12, Math.max(mReach + 0.6 * (rad - mReach), Math.min(360, rad - 40)))
+        : Math.max(150, Math.min(rad * 0.55, 260));
+      if (st) { st.mReach = Math.max(st.mReach || 0, mReach); if (outrange) st.far = Math.round(want); }
+      // Quái đã vào gần tầm của nó → lùi nhanh (bước dài hơn), không thì chỉnh từ từ
+      const urgent = outrange && dj < mReach + 40;
+      const cap = urgent ? step * 1.8 : step;
+      const fix = Math.max(-cap, Math.min(cap, (want - dj) * (urgent ? 1 : 0.4) * JK)) * (low ? 1.5 : 1);
       tx = H.x + (-uy) * step * kiteSt.side + ux * fix;
       ty = H.y + (ux) * step * kiteSt.side + uy * fix;
       if (++kiteSt.sideSteps >= 5) { kiteSt.sideSteps = 0; kiteSt.side = -kiteSt.side; }
@@ -686,7 +714,7 @@
     }
     // Điểm đến phải còn quái trong vòng an toàn (không thì game cho lên ngựa) – trừ khi chiêu chính dùng được trên ngựa.
     // Không đạt → thử đi ngược chiều, rồi bước về phía con quái gần nhất (luôn an toàn); không đứng yên.
-    const ok = (x, y) => horseOk || near.some((e) => jx(x, y, e.x, e.y) <= SAFE);
+    const ok = (x, y) => freeMove || near.some((e) => jx(x, y, e.x, e.y) <= SAFE);
     if (!ok(tx, ty)) {
       kiteSt.side = -kiteSt.side;
       const bx = 2 * H.x - tx, by = 2 * H.y - ty;   // đối xứng qua vị trí hiện tại
@@ -768,7 +796,21 @@
   };
   // Ô KNB trên cùng ("17.2k 🔒1113"): dùng chung VLParse với mọi chỗ khác (trước đây chỗ này không hiểu "17.2k"
   // → acc trên 10 nghìn KNB bị coi là không có KNB, không mua được lệnh bài)
-  const knbNow = () => VLParse.knb(txt('#knbTop'));
+  // Tiền / KNB / cấp / kinh nghiệm: đọc thẳng dữ liệu game (S.gold lượng, S.knb, S.knbk, S.lvl, S.xp / J.exp). Giao diện
+  // 12/11 (bản điện thoại) không còn cập nhật các ô chữ #gold / #xpTxt / #knbTop → tool tưởng nhân vật đứng yên, tự tải
+  // lại liên tục. Không đọc được dữ liệu thì mới dùng ô chữ như trước.
+  const gs = () => { try { const S = window.H5 && window.H5.G && window.H5.G('S'); return S && typeof S === 'object' ? S : null; } catch (_) { return null; } };
+  const goldText = () => { const S = gs(); return S && Number.isFinite(+S.gold) && +S.gold > 0 ? String(+S.gold / 10000).replace('.', ',') + ' vạn' : txt('#gold'); };
+  const knbText = () => { const S = gs(); return S && Number.isFinite(+S.knb) ? `${+S.knb} 🔒${+S.knbk || 0}` : txt('#knbTop'); };
+  const lvText = () => { const S = gs(); return S && +S.lvl > 0 ? String(+S.lvl) : txt('#lvS'); };
+  const xpText = () => {
+    try {
+      const S = gs(), J = window.H5.G('J'), need = J && J.exp && J.exp[S.lvl - 1];
+      if (S && need > 0 && Number.isFinite(+S.xp)) return (Math.min(100, 100 * S.xp / need)).toFixed(2) + '%';
+    } catch (_) {}
+    return txt('#xpTxt');
+  };
+  const knbNow = () => VLParse.knb(knbText());
   const shopOpen = () => { const m = $('#modal'); return !!m && isVisible(m) && !!$('#mBody [data-kb="0"]'); };
   const openShop = async () => {
     if (shopOpen()) return true;
@@ -916,7 +958,7 @@
   };
 
   // Ngân lượng (vạn) ở ô #gold ("12.754 vạn")
-  const silverNow = () => VLParse.silver(txt('#gold'));
+  const silverNow = () => { const S = gs(); return S && Number.isFinite(+S.gold) && +S.gold > 0 ? Math.floor(+S.gold / 10000) : VLParse.silver(txt('#gold')); };
   // 🧧 Hồng Bao / Đại Hồng Bao lưu trên máy chủ (không nằm trong Hành trang, từ bản 1041): Hành trang › nút 🧧 (#bHbOpen,
   // title "Hồng Bao 315 · Đại Hồng Bao 4") → hộp "🧧 Hồng Bao" với nút data-hbo="hb"|"dhb" data-n="1"|"10"|"N" (Mở 1 / ×10 / ×tất cả)
   const hbCounts = () => {
@@ -2954,7 +2996,7 @@
       // "Nhân vật" ở đó không còn ra tên – acc mới thêm không có tên, 🐴 Ngựa / gửi KNB / duyệt bang không chạy)
       name: screen === 'charselect' ? charSelectName() : screen === 'game' ? gameCharName() : '',
       loginMsg: screen === 'login' ? loginMessage() : '',
-      lv: txt('#lvS'),
+      lv: lvText(),
       zone: txt('#u20zn'), // ví dụ "Thông Thiên Tháp · tầng 632"
       // Môn phái: game không còn ghi bằng chữ, chỉ còn biểu tượng phái ở ô cấp ("img/pl/wudang.png")
       sect: ((($('.lvbox') || {}).getAttribute?.('style') || '').match(/img\/pl\/([a-z0-9_-]+)\./i) || [])[1] || '',
@@ -2973,7 +3015,7 @@
       bag: screen === 'game' ? bag : '',                     // hòm đồ "18/120"
       // Đồ phổ đang giữ, mỗi dòng một món; chưa quét xong lần đầu thì không gửi
       dp: screen === 'game' && doPho ? doPho.join('\n') : undefined,
-      xp: screen === 'game' ? txt('#xpTxt') : '',            // kinh nghiệm cấp hiện tại "92.5%"
+      xp: screen === 'game' ? xpText() : '',                 // kinh nghiệm cấp hiện tại "92.50%" (từ dữ liệu game)
       trk: screen === 'game' ? trackerText() : '',
       // Truy sát đang mở: "<tên>|<% máu còn>" ("Sát Thủ · Bảo Triệt Sơn|79")
       // + "|1" khi boss của truy sát đang ở bên cạnh (game đã cho xuất hiện)
@@ -2983,8 +3025,8 @@
       innate: screen === 'game' ? innateUnlocked().length + innateEquippedUnlocked().length : 0, // đồ có kỹ năng vốn có chưa khoá
       jewelEmpty: screen === 'game' ? jewelEmpty() : 0, // ô trang sức trống mà trong túi có món đeo được
       ld: screen === 'game' ? ((f) => { try { return f(); } catch (_) { return ''; } })(ldStatus) : '', // 🏯 Lãnh địa bang (xem ldStatus)
-      gold: txt('#gold'),
-      knb: txt('#knbTop'),
+      gold: screen === 'game' ? goldText() : txt('#gold'),
+      knb: screen === 'game' ? knbText() : txt('#knbTop'),
       // Chế độ: theo nút đang sáng, nhưng nút lệch với trạng thái game quá 5 giây thì theo game (xem reportedMode)
       mode: realMode,
       modeText: realMode !== btnMode ? `${realMode} (nút: ${btnMode})` : on ? on.textContent.trim() : '',
