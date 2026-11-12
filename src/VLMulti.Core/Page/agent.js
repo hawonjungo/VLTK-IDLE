@@ -58,8 +58,15 @@
   // vì ở khung nhỏ cửa sổ có thể nằm ngoài vùng nhìn thấy mà vẫn đang mở.
   const isOpen = (el) => !!el && el.isConnected && getComputedStyle(el).display !== 'none';
   // Bảng/cửa sổ của game đang mở (bạn đang dùng) → các việc đọc định kỳ không đụng vào
+  // Cửa sổ Bang hội (game đổi giao diện 11–12/11): không còn mở trong hộp thoại chung #modal/#mBody mà trong cửa sổ riêng
+  // #xwBang (nội dung ở #bhMgr, nút đóng .bgx; đóng thì gỡ khỏi trang). Bản cũ: #mBody.
+  const guildWin = () => { const w = $('#xwBang'); return w && isVisible(w) ? w : null; };
+  const bhRoot = () => (guildWin() && $('#bhMgr')) || $('#bhMgr') || $('#mBody');
+  const bq = (sel) => { const r = bhRoot(); return r ? r.querySelector(sel) : null; };
+  const bqa = (sel) => { const r = bhRoot(); return r ? [...r.querySelectorAll(sel)] : []; };
+  const closeGuildWin = () => { const w = guildWin(); const x = w && (w.querySelector('.bgx') || w.querySelector('button')); if (x) x.click(); };
   const anyWindowOpen = () => ['#panel', '#modal'].some((sel) => { const el = $(sel); return !!el && isVisible(el); })
-    || isOpen($('#u2bagw')) || isOpen($('#u2chw'));
+    || isOpen($('#u2bagw')) || isOpen($('#u2chw')) || !!guildWin();
   // Đợt Boss Hoàng Kim (12:00 · 15:30 · 19:30 · 22:00 giờ Việt Nam, 30 phút, đệm 1 phút trước / 3 phút sau):
   // game tự đưa nhân vật đi đánh → không mở bảng, không kéo quái, để game làm
   const inBossHk = () => {
@@ -773,6 +780,7 @@
   const closeModal = () => { const c = $('#mClose'); if (c && isVisible(c)) c.click(); };
   // Đóng hộp thoại và chắc chắn nó đã đóng (lần mua hỏng từng để Kỳ Trân Các mở → mọi lượt sau báo "đang bận")
   const closeModalSure = async () => {
+    if (guildWin()) { closeGuildWin(); await waitFor(() => !guildWin(), 1500); }
     for (let i = 0; i < 3 && isVisible($('#modal')); i++) {
       closeModal();
       if (await waitFor(() => !isVisible($('#modal')), 1500)) return;
@@ -792,6 +800,10 @@
       leftoverAt = Date.now();
       post({ t: 'log', msg: 'leftover window closed: ' + ((($('#mBody') || {}).innerText || '').replace(/\s+/g, ' ').slice(0, 60)) });
       closeModal();
+    } else if (guildWin()) {
+      leftoverAt = Date.now();
+      post({ t: 'log', msg: 'leftover window closed: Bang hội' });
+      closeGuildWin();
     }
   }, 300);
   const ldtCard = () => { const b = $('#mBody [data-ktc="ldt"]'); return b ? b.closest('.u2card') : null; };
@@ -881,7 +893,8 @@
     const inv = $('#u20menu > button[data-u="inv"]');
     if (!inv) return false;
     if (!isOpen($('#u2bagw'))) inv.click();
-    return !!(await waitFor(() => $('#bHbOpen'), 2000));
+    // Đã mở: cửa sổ Hành trang hiện và có lưới ô đồ (giao diện 12/11 bỏ nút 🧧 #bHbOpen khỏi Hành trang – trước đây chờ nút đó)
+    return !!(await waitFor(() => isOpen($('#u2bagw')) && $('#t-inv'), 2000));
   };
   const closeBag = () => { const w = $('#u2bagw'), x = $('#u2bwx'); if (x && isOpen(w)) x.click(); };
   // Bấm món `img` trong Hành trang → hộp của món (tiêu đề khớp `title`) → nút `sel` (#kiUse "Dùng 1" / #kiUse10 "Mở ×10"),
@@ -917,9 +930,15 @@
     if (hbModalOpen()) return true;
     await closeModalSure();
     if (!(await openBag())) return false;
-    const b = await waitFor(() => { const x = $('#bHbOpen'); return x && isVisible(x) ? x : null; }, 2000);
-    if (!b) return false;
-    b.click();
+    const b = await waitFor(() => { const x = $('#bHbOpen'); return x && isVisible(x) ? x : null; }, 1000);
+    if (b) b.click();
+    else {
+      // Giao diện mới không còn nút 🧧 trong Hành trang: gọi thẳng hộp Hồng Bao của game (nếu game còn bật)
+      const HB = gameGet('HB'), sync = gameGet('hbSync'), modal = gameGet('hbModal');
+      if ((HB && HB.off) || typeof modal !== 'function') return false;
+      try { await (typeof sync === 'function' ? sync() : null); } catch (_) {}
+      try { modal(); } catch (_) { return false; }
+    }
     return !!(await waitFor(hbModalOpen, 3000));
   };
   // Nút mở nhiều nhất không quá `max` cái của loại `kind` (hb | dhb)
@@ -1054,9 +1073,9 @@
   // Món mua xong gửi vào 📨 Hộp thư ("Cửa hàng bang: 1 Lệnh Bài Dã Tẩu") → chỉ nhận đúng các thư đó, không bấm "Nhận tất cả"
   // (thư Chợ trả đồ phổ hết hạn bày bán… để bạn tự xử lý). Chưa vào bang (không có thẻ Cửa hàng) → 'no-guild'.
   const GUILD_CAT = { ldt: 'vp', fdl1: 'vp', ttsp: 'vp', thbt: 'vp', tn: 'vp', tdt: 'vp' };
-  const guildBtn = (id, sl) => $(`#mBody [data-bhmua="${id}"][data-sl="${sl}"]`);
+  const guildBtn = (id, sl) => bq(`[data-bhmua="${id}"][data-sl="${sl}"]`);
   const guildState = (id) => { const c = guildBtn(id, 1)?.closest('.u2card'); return c ? VLParse.guildItem(c.innerText) : null; };
-  const guildPts = () => VLParse.guildPoints(($('#mBody') || {}).innerText);
+  const guildPts = () => VLParse.guildPoints((bhRoot() || {}).innerText);
   // Bấm nút rồi đồng ý câu hỏi của game (chỉ khi câu hỏi đúng là về điểm cống hiến / góp)
   const pressAndAgree = async (btn, re) => {
     btn.click();
@@ -1101,12 +1120,12 @@
   // BH.d.toi (chức vụ, góp hôm nay / tối đa), BH.d.tv (thành viên, lần vào game cuối), BH.d.don (đơn xin vào).
   const gameGet = (name) => { try { return window.H5 && window.H5.G ? window.H5.G(name) : undefined; } catch (_) { return undefined; } };
   const openGuildTab = async (tab) => {
-    if (!$('#mBody [data-bht]')) {
+    if (!bq('[data-bht]') || !(guildWin() || isVisible($('#modal')))) {
       await closeModalSure();
       $('#u20menu > button[data-u="bang"]')?.click();
-      if (!(await waitFor(() => $('#mBody [data-bht]'), 3000))) return false;
+      if (!(await waitFor(() => bq('[data-bht]'), 3000))) return false;
     }
-    const t = $(`#mBody [data-bht="${tab}"]`);
+    const t = bq(`[data-bht="${tab}"]`);
     if (!t) return false;
     t.click();
     await sleep(500);
@@ -1182,7 +1201,7 @@
       }
       // 2. Lò Đốt Đồ: góp Hoàng Kim bộ chung trong Hành trang, trừ món khoá và món giữ lại (cất vào Rương)
       if (arg.furnace && (await openGuildTab('lo'))) {
-        await waitFor(() => /Lò đợt|Chưa có Hoàng Kim/.test(($('#mBody') || {}).innerText || ''), 4000);
+        await waitFor(() => /Lò đợt|Chưa có Hoàng Kim/.test((bhRoot() || {}).innerText || ''), 4000);
         const S = gameGet('S'), BH = gameGet('BH'), gop = gameGet('bhLoGop');
         const grp = BH && BH.lo && Array.isArray(BH.lo.grp) ? BH.lo.grp : [];
         const rules = arg.keep || [];
@@ -1324,17 +1343,17 @@
   const guildShop = async (arg, menu, res) => {
     try {
       menu.click();
-      if (!(await waitFor(() => $('#mBody [data-bht]'), 3000))) { res.r = 'no-window'; return; }
-      if (!$('#mBody [data-bht="shop"]')) { res.r = 'no-guild'; return; }
+      if (!(await waitFor(() => bq('[data-bht]'), 3000))) { res.r = 'no-window'; return; }
+      if (!bq('[data-bht="shop"]')) { res.r = 'no-guild'; return; }
       const showCat = async (cat) => {
-        $('#mBody [data-bht="shop"]').click();
-        if (!(await waitFor(() => $(`#mBody [data-bhsc="${cat}"]`), 2000))) return false;
-        $(`#mBody [data-bhsc="${cat}"]`).click();
-        return !!(await waitFor(() => $(`#mBody [data-bhmua][data-sl="1"]`) && guildPts() != null, 2000));
+        bq('[data-bht="shop"]').click();
+        if (!(await waitFor(() => bq(`[data-bhsc="${cat}"]`), 2000))) return false;
+        bq(`[data-bhsc="${cat}"]`).click();
+        return !!(await waitFor(() => bq(`[data-bhmua][data-sl="1"]`) && guildPts() != null, 2000));
       };
       // Góp `amount` vạn; trả về số điểm sau khi góp (null nếu không được)
       const donate = async (amount) => {
-        $('#mBody [data-bht="gop"]')?.click();
+        bq('[data-bht="gop"]')?.click();
         const input = await waitFor(() => $('#bhGopV'), 2000), btn = $('#bhGopVb');
         if (!input || !btn) return null;
         const before = guildPts();
@@ -1343,7 +1362,7 @@
         return await waitFor(() => { const p = guildPts(); return p != null && p > (before ?? 0) ? p : null; }, 4000);
       };
       const donateInfo = async () => {
-        $('#mBody [data-bht="gop"]')?.click();
+        bq('[data-bht="gop"]')?.click();
         await waitFor(() => $('#bhGopV'), 2000);
         const card = $('#bhGopV')?.closest('.u2card');
         return card ? VLParse.guildDonate(card.innerText) : null;
@@ -1353,7 +1372,7 @@
         const cat = GUILD_CAT[id] || 'vp';
         if (!(await showCat(cat))) { res.r = 'no-shop'; break; }
         let s = guildState(id);
-        if (!s) { reportUnreadable('guild-' + id, (guildBtn(id, 1)?.closest('.u2card') || $('#mBody') || {}).innerText || ''); continue; }
+        if (!s) { reportUnreadable('guild-' + id, (guildBtn(id, 1)?.closest('.u2card') || bhRoot() || {}).innerText || ''); continue; }
         if (s.locked || s.done >= s.max) continue;
         let points = guildPts() ?? 0;
         let want = s.max - s.done;
@@ -1373,7 +1392,7 @@
         let misses = 0;
         while (want > 0 && misses < 3) {
           // Nút nhiều nhất không quá số cần (×10, ×5, ×6…), không có thì từng cái
-          const sizes = [...document.querySelectorAll(`#mBody [data-bhmua="${id}"]`)].map((b) => +b.dataset.sl).filter((n) => n > 0 && n <= want);
+          const sizes = bqa(`[data-bhmua="${id}"]`).map((b) => +b.dataset.sl).filter((n) => n > 0 && n <= want);
           const sl = Math.max(1, ...sizes);
           const btn = guildBtn(id, sl);
           if (!btn || btn.disabled) break;
@@ -1387,7 +1406,7 @@
         }
       }
       res.points = guildPts();
-      $('#mBody [data-bht="bang"]')?.click(); // để bảng về mục mặc định như lúc bạn mở
+      bq('[data-bht="bang"]')?.click(); // để bảng về mục mặc định như lúc bạn mở
     } catch (err) {
       res.r = 'error: ' + err.message;
     } finally {
@@ -2175,6 +2194,9 @@
       guildKnbFlow(m.arg || {}).then((res) => post({ t: 'guildKnbResult', ...res }), (err) => post({ t: 'guildKnbResult', r: 'error: ' + err.message }));
     } else if (m.t === 'guildLog') {
       guildLogFlow().then((res) => post({ t: 'guildLogResult', ...res }), (err) => post({ t: 'guildLogResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'unstuck') {
+      // App thấy trang báo bận quá lâu: đóng mọi cửa sổ còn mở (không đụng việc đang chạy)
+      (async () => { const before = flowBusy; try { await closeModalSure(); closeBag(); } catch (_) {} post({ t: 'log', msg: `unstuck: flowBusy=${before} window=${anyWindowOpen()}` }); })();
     } else if (m.t === 'land') {
       landFlow(m.arg || {}).then((res) => post({ t: 'landResult', ...res }), (err) => post({ t: 'landResult', r: 'error: ' + err.message }));
     } else if (m.t === 'jewel') {

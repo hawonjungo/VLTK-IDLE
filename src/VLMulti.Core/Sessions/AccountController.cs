@@ -470,7 +470,9 @@ public sealed class AccountController
         {
             using var doc = JsonDocument.Parse(json);
             var m = doc.RootElement;
-            switch (m.GetProperty("t").GetString())
+            var kind = m.GetProperty("t").GetString() ?? "";
+            if (kind.EndsWith("Result") && kind != "cmdResult") TrackBusy(Str(m, "r") == "busy", now);
+            switch (kind)
             {
                 case "hello":
                     // Trang vừa tải (hoặc tải lại) → gửi lại trạng thái bắt thao tác
@@ -665,6 +667,9 @@ public sealed class AccountController
             changed |= ApplyMaintenance(s.TryGetProperty("bt", out var bt) && bt.ValueKind == JsonValueKind.Number && bt.GetInt32() == 1, now);
             var exp = Str(s, "xp");
             var tracker = Str(s, "trk");
+            // % kinh nghiệm tăng cũng là đang chạy (Luyện Công / nghỉ tháp tiền gần như không đổi – đêm 11/11 mọi acc nghỉ
+            // tháp bị coi là "đứng yên", tự tải lại ~2 lần mỗi giờ)
+            if (exp.Length > 0 && Exp.Length > 0 && exp != Exp) Stats.MarkProgress(now);
             changed |= exp != Exp || tracker != Tracker;
             (Exp, Tracker) = (exp, tracker);
             ApplyHunt(Str(s, "hunt"), now);
@@ -1168,7 +1173,7 @@ public sealed class AccountController
         {
             // Trong Lãnh địa bang game dừng luyện công: không đổi chế độ / vào tháp, không tính là đứng yên
             _stepWatch = null;
-            Stats.ResetActivity(now);
+            Stats.MarkProgress(now);
             if (Land is { In: true } land && StatusText != land.Text) SetStatus(land.Text, StatusLevel.Ok);
             SuperviseJewel(now);
             SuperviseBuffs(now);
@@ -1596,6 +1601,35 @@ public sealed class AccountController
     // khi vẫn đang lên tầng đều cũng bị đẩy ra.)
     private int? _deathFloor;
 
+    private int? _wallFloor;
+    private int _wallRests;
+
+    // Trang báo "đang bận" (một việc chưa xong / cửa sổ còn mở) liên tục: 10 phút → đóng các cửa sổ; 15 phút → tải lại.
+    // Đêm 11/11 một acc báo bận 7 tiếng liền (mọi việc trong túi đồ / bang dừng) tới khi tình cờ được tải lại.
+    private DateTime? _busySince;
+    private bool _busyUnstuckSent;
+
+    private void TrackBusy(bool busy, DateTime now)
+    {
+        if (!busy) { _busySince = null; _busyUnstuckSent = false; return; }
+        _busySince ??= now;
+        var long_ = now - _busySince.Value;
+        if (long_ >= TimeSpan.FromMinutes(15) && !BossHkSchedule(now))
+        {
+            Log.Write($"[{Account.Id}] busy {long_.TotalMinutes:0} min → reload");
+            Note(now, $"🔄 Trang báo bận {long_.TotalMinutes:0} phút liền – tải lại game", StatusLevel.Warn);
+            (_busySince, _busyUnstuckSent) = (null, false);
+            Stats.ResetActivity(now);
+            _page.Reload();
+        }
+        else if (long_ >= TimeSpan.FromMinutes(10) && !_busyUnstuckSent)
+        {
+            _busyUnstuckSent = true;
+            Log.Write($"[{Account.Id}] busy {long_.TotalMinutes:0} min → close windows");
+            Post(new { t = "unstuck" });
+        }
+    }
+
     private void OnTowerDeath(DateTime now)
     {
         var cfg = SettingsProvider?.Invoke() ?? new AppSettings();
@@ -1609,9 +1643,16 @@ public sealed class AccountController
         if (_lastTowerFloor is not null && _fastDeaths.Count >= cfg.TowerFastDeathCount)
         {
             _fastDeaths.Clear();
-            var rest = TimeSpan.FromMinutes(cfg.TowerRestMinutes);
+            // Kẹt "tường": nghỉ xong vào lại vẫn chết nhanh ở đúng tầng đó → nghỉ dài dần (×1, ×3, ×6; tối đa 60 phút hoặc
+            // mức bạn đặt nếu lớn hơn). Đêm 11/11 ba nhân vật chết 3 lần mỗi 13 phút suốt đêm ở cùng một tầng.
+            if (_wallFloor == _lastTowerFloor) _wallRests++; else (_wallFloor, _wallRests) = (_lastTowerFloor, 1);
+            int factor = _wallRests switch { 1 => 1, 2 => 3, _ => 6 };
+            var rest = TimeSpan.FromMinutes(Math.Min(cfg.TowerRestMinutes * factor, Math.Max(60, cfg.TowerRestMinutes)));
             _modeBlockedUntil[ModeRules.Tower] = now + rest;
-            Raise("tower-fast-death", $"Chết {cfg.TowerFastDeathCount} lần ở tầng {floor} – Luyện Công, {Minutes(rest)} nữa vào lại tháp");
+            if (_wallRests == 3)
+                Raise("tower-wall", $"Kẹt ở tầng {floor}: nghỉ rồi vào lại vẫn chết nhanh {_wallRests} lượt – từ giờ nghỉ {Minutes(rest)} mỗi lượt (Luyện Công) tới khi qua được tầng này. Nên nâng đồ / kỹ năng");
+            else
+                Raise("tower-fast-death", $"Chết {cfg.TowerFastDeathCount} lần ở tầng {floor} – Luyện Công, {Minutes(rest)} nữa vào lại tháp");
             SetStatus($"Nghỉ tháp tới {(now + rest):HH:mm}", StatusLevel.Warn);
             InfoChanged?.Invoke();
             return;

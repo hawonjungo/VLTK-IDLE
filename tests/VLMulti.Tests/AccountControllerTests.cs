@@ -330,6 +330,56 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Repeated_rests_at_the_same_wall_floor_get_longer()
+    {
+        var (ctl, _, cfg) = Make();
+        cfg.TowerRestMinutes = 10;
+        var problems = new List<string>();
+        ctl.Problem += (key, _) => problems.Add(key);
+        var t = Run(ctl, T0, 15, Status("game", mode: "farm"));
+        ctl.RequestMode("tower", t);
+        t = t.AddSeconds(70);
+        TimeSpan Rest(DateTime at) => TimeSpan.Parse(ctl.StatusText.Replace("Nghỉ tháp tới ", "")) - at.TimeOfDay;
+        for (int i = 0; i < 3; i++) t = DieInTower(ctl, t, 20, floor: 900);
+        Assert.InRange(Rest(t).TotalMinutes, 8, 11);
+        for (int i = 0; i < 3; i++) t = DieInTower(ctl, t, 20, floor: 900);
+        Assert.InRange(Rest(t).TotalMinutes, 28, 31);
+        Assert.DoesNotContain("tower-wall", problems);
+        for (int i = 0; i < 3; i++) t = DieInTower(ctl, t, 20, floor: 900);
+        Assert.InRange(Rest(t).TotalMinutes, 58, 61);
+        Assert.Contains("tower-wall", problems);
+        // Qua được tầng đó, kẹt tầng khác → lại từ 10 phút
+        for (int i = 0; i < 3; i++) t = DieInTower(ctl, t, 20, floor: 905);
+        Assert.InRange(Rest(t).TotalMinutes, 8, 11);
+    }
+
+    [Fact]
+    public void Exp_rising_in_the_field_is_not_idle()
+    {
+        var (ctl, page, _) = Make();
+        var problems = new List<string>();
+        ctl.Problem += (key, _) => problems.Add(key);
+        string St(double xp) => JsonSerializer.Serialize(new { t = "status", screen = "game", lv = "180", gold = "1 vạn", knb = "1 🔒1", mode = "farm", modeText = "farm",
+            zone = "Hoa Sơn", dt = "200/200", pb = "0/4", xp = $"{xp:0.0}%" });
+        var t = T0;
+        for (int i = 0; i < 40; i++) t = Run(ctl, t, 60, St(10 + i * 0.1)); // 40 phút, tiền không đổi, % kinh nghiệm tăng
+        Assert.DoesNotContain("idle", problems);
+        Assert.DoesNotContain(page.Sent, m => m.GetRawText().Contains("reload"));
+    }
+
+    [Fact]
+    public void Page_busy_for_a_long_time_closes_windows_then_reloads()
+    {
+        var (ctl, page, _) = Make();
+        var t = Run(ctl, T0, 15, Status("game", mode: "farm"));
+        for (int i = 0; i < 11; i++) { ctl.OnPageMessage("""{"t":"lockInnateResult","r":"busy"}""", t); t = t.AddMinutes(1); }
+        Assert.Contains(page.Sent, m => m.GetProperty("t").GetString() == "unstuck");
+        int reloads = page.Reloads;
+        for (int i = 0; i < 5; i++) { ctl.OnPageMessage("""{"t":"lockInnateResult","r":"busy"}""", t); t = t.AddMinutes(1); }
+        Assert.Equal(reloads + 1, page.Reloads);
+    }
+
+    [Fact]
     public void Switching_out_of_tower_yourself_is_not_a_death()
     {
         var (ctl, _, _) = Make();
