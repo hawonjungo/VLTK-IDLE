@@ -579,17 +579,37 @@
   };
   const kiteTick = () => {
     kiteSt.active = false;
+    // Ra khỏi tháp (chết, nghỉ, boss…) → vào lại cùng tầng vẫn chạy sẵn trước khi quái mọc (xét trước mọi điều kiện:
+    // ngoài tháp phần né tắt nên các lượt sau không chạy tới)
+    { const R0 = g('R'); if (!R0 || !R0.tower) kiteSt.preFloor = null; }
+    // Chẩn đoán 3 giây đầu mỗi lần vào tháp: vì sao chưa né (tắt / việc khác đang chạy / cửa sổ mở / chế độ / quái…)
+    try {
+      const R1 = g('R'), S1 = g('S');
+      if (R1 && R1.tower && !kiteSt.entryAt) { kiteSt.entryAt = Date.now(); kiteSt.entryLog = []; }
+      if (!R1 || !R1.tower) kiteSt.entryAt = 0;
+      if (kiteSt.entryAt && kiteSt.entryLog) {
+        const el = Date.now() - kiteSt.entryAt;
+        if (el <= 3000) {
+          const a1 = $('#ctrlBtn');
+          kiteSt.entryLog.push([Math.round(el / 100), kiteCfg && kiteCfg.on ? 1 : 0, a1 && a1.classList.contains('on') ? 1 : 0, flowBusy ? 1 : 0, anyWindowOpen() ? 1 : 0,
+            S1 && S1.mode, (R1.enemies || []).filter((e) => e && !e.dead && e.hp > 0).length, Math.round((+R1.spawnT || 0) * 10) / 10, R1.mounted ? 1 : 0, S1 && S1.autoRide === false ? 0 : 1].join(','));
+        } else {
+          post({ t: 'log', msg: 'kite entry ' + R1.tower.floor + ' [t,cfg,auto,busy,win,mode,en,spawnT,mounted,autoRide]: ' + kiteSt.entryLog.filter((_, i) => i % 3 === 0).join(' | ') });
+          kiteSt.entryLog = null;
+        }
+      }
+    } catch (_) {}
     const c = kiteCfg;
     if (!c || !c.on) return;
     const auto = $('#ctrlBtn');
     // Không tắt theo khung giờ Boss Hoàng Kim: lúc game kéo đi đánh boss nhân vật không ở trong tháp (R.tower) nên phần né
     // tự nghỉ; đánh xong quay lại tháp thì né ngay (11/11: hạ boss lúc 12:02 rồi đứng yên trong tháp tới 12:33)
-    if (!auto || !auto.classList.contains('on') || flowBusy || anyWindowOpen()) return;
+    // Trong tháp vẫn né khi có việc khác đang chạy / cửa sổ đang mở (né chỉ ra lệnh đi, không bấm gì trên bảng): 12/11 vào
+    // tháp đúng lúc cửa hàng bang đang mở → đứng yên lúc quái mọc. Ngoài tháp thì nhường như cũ.
     const H = g('H'), R = g('R'), W = g('WORLD'), S = g('S');
+    if (!auto || !auto.classList.contains('on') || ((flowBusy || anyWindowOpen()) && !(R && R.tower))) return;
     if (!H || !R || !W || !R.tower || R.dg || R.sat || R.deadT > 0 || (S && S.mode !== 'tower')) {
       if (kiteSt.stat && R && (R.deadT > 0 || !R.tower)) { kiteSt.stat.died = 1; if (R.deadT > 0) kiteSt.diedFloor = kiteSt.stat.floor; kiteFloorDone(R); }
-      // Ra khỏi tháp (chết, nghỉ, boss…) → vào lại cùng tầng vẫn chạy sẵn trước khi quái mọc
-      if (!R || !R.tower) kiteSt.preFloor = null;
       kiteSt.floor = null; return;
     }
     const now = Date.now();

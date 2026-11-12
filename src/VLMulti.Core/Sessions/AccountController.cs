@@ -2809,7 +2809,9 @@ public sealed class AccountController
         var crowd = Account.KiteCrowd ?? s.KiteCrowd;
         var pauseMs = Account.KitePauseMs ?? s.KitePauseMs;
         // Kiểu "Hàng dọc": trang tự chạy theo vị trí thật (agent.js kiteTick); app chỉ gửi cấu hình khi đổi / 30 giây một lần
-        bool lineOn = dir == KiteDirections.Line && Account.Kite && Screen == "game" && ModeCode == "tower";
+        // Gửi sẵn cả khi chưa ở tháp (trang tự chỉ né trong tháp): trước đây chờ app thấy chế độ Leo Tháp mới bật → 2–3 giây
+        // đầu mỗi lần vào tháp không né, đúng lúc quái mọc (12/11: các lần chết ngay sau khi vào lại tháp)
+        bool lineOn = dir == KiteDirections.Line && Account.Kite && Screen == "game";
         var cfg = lineOn ? $"{dist}|{pauseMs}ms|{flee}|>{crowd}" : "off";
         if (cfg != _kiteCfgSent || (lineOn && now - _kiteCfgAt > TimeSpan.FromSeconds(30)))
         {

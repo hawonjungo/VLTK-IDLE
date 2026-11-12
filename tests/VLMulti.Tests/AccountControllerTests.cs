@@ -176,8 +176,12 @@ public class AccountControllerTests
         Assert.Equal(4, c.GetProperty("crowd").GetInt32());      // riêng: chạy khi hơn 4 con ở gần
         Assert.Equal(30, c.GetProperty("fleeHp").GetInt32());
         Assert.DoesNotContain("kite", page.Commands); // trang tự chạy, app không ra lệnh từng bước
+        // Ra khỏi tháp vẫn giữ cấu hình (trang tự chỉ né trong tháp) → vào lại tháp là né ngay
+        t = Run(ctl, t, 6, Status("game", mode: "farm"));
+        Assert.True(LastCfg()!.Value.GetProperty("on").GetBoolean());
+        ctl.SetKite(false, t);
         Run(ctl, t, 6, Status("game", mode: "farm"));
-        Assert.Equal(JsonValueKind.Null, LastCfg()!.Value.ValueKind); // ra khỏi tháp → tắt
+        Assert.Equal(JsonValueKind.Null, LastCfg()!.Value.ValueKind); // tắt né → tắt
     }
 
     [Fact]
