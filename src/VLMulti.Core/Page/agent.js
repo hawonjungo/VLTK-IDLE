@@ -1896,6 +1896,58 @@
     return { r: 'bad-op', op: arg.op };
   };
 
+  // 🎁 Đấu giá Đồ phổ bí ẩn của bang (Lò Đốt Đồ đủ món → đấu giá 30 phút). Dữ liệu qua cầu nối của game, không mở bảng:
+  // xhRpc('bh_lo') → {co, chuc, hen_max, now, knb, dg: [{id, dot, tao, mo, het, hen, gia, buoc, so_lan, xong, ket, nguoi,
+  // cua_toi, duoc}]}; ra giá xhRpc('bh_dg_gia', {id, gia}) (giá sàn 9.999, mỗi lần +5% – buoc là mức thấp nhất được ra;
+  // bị vượt hoàn KNB ngay; người thắng bị đốt KNB); hẹn giờ xhRpc('bh_dg_hen', {id, t}) (Bang chủ / Phó, 1 lần, mốc 15
+  // phút, sớm nhất ~5 phút sau). Không ai ra giá thì mất món → luôn ra giá sàn; chỉ trả thêm khi người khác vượt giá,
+  // đúng mức thấp nhất, không quá arg.max; mình đang giữ giá cao nhất thì không làm gì.
+  const auctionFlow = async (arg) => {
+    const rpc = gameGet('xhRpc');
+    if (typeof rpc !== 'function') return { r: 'no-rpc' };
+    let n;
+    try { n = await rpc('bh_lo'); } catch (e) { return { r: 'error: ' + String((e && e.message) || e).slice(0, 80) }; }
+    if (!n || !n.co) return { r: 'no-guild' };
+    const now = +n.now || Date.now();
+    const S = gameGet('S');
+    let knb = Math.max(+(S && S.knb) || 0, +n.knb || 0);
+    const max = Math.max(0, +arg.max || 0);
+    const items = [];
+    for (const f of n.dg || []) {
+      const it = { id: +f.id, dot: f.dot | 0, mo: +f.mo || 0, het: +f.het || 0, gia: +f.gia || 0, buoc: +f.buoc || 0, lan: f.so_lan | 0,
+        mine: !!f.cua_toi, other: !!(f.nguoi && !f.cua_toi), duoc: !!f.duoc, ket: f.ket || '', st: '' };
+      if (f.xong) it.st = 'done';
+      else if (+f.mo > now) {
+        it.st = 'wait';
+        const boss = n.chuc === 'chu' || n.chuc === 'pho';
+        if (!f.hen && boss && arg.schedule) {
+          const g = 9e5, v = Math.ceil((now + 3e5) / g) * g, last = +f.tao + (+n.hen_max || 24) * 36e5;
+          if (v <= last && v < +f.mo) {
+            try { await rpc('bh_dg_hen', { id: f.id, t: v }); it.st = 'scheduled'; it.mo = v; }
+            catch (e) { it.err = String((e && e.message) || e).slice(0, 100); }
+          }
+        }
+      } else if (now < +f.het) {
+        const next = +f.buoc;
+        if (!f.duoc) it.st = 'not-allowed';
+        else if (f.cua_toi) it.st = 'leading';
+        else if (!(next > 0)) it.st = 'unknown';
+        else if (next > max) it.st = 'over-max';
+        else if (knb < next) it.st = 'no-knb';
+        else {
+          try {
+            const r = await rpc('bh_dg_gia', { id: f.id, gia: next });
+            it.st = 'bid'; it.bid = next; knb -= next;
+            if (r && r.msg) it.msg = String(r.msg).slice(0, 100);
+          } catch (e) { it.st = 'bid-failed'; it.err = String((e && e.message) || e).slice(0, 100); }
+        }
+      } else it.st = 'closing';
+      items.push(it);
+    }
+    if (items.some((i) => i.st === 'bid')) { try { const k = gameGet('knbSync'); if (typeof k === 'function') k().catch(() => {}); } catch (_) {} }
+    return { r: 'ok', knb, now, items };
+  };
+
   // Ô trang sức đang trống và món trong túi để lấp (mỗi ô một món; nhẫn tối đa 2)
   const jewelFillers = () => {
     const G = window.H5.G, S = G('S');
@@ -2349,6 +2401,8 @@
       guildKnbFlow(m.arg || {}).then((res) => post({ t: 'guildKnbResult', ...res }), (err) => post({ t: 'guildKnbResult', r: 'error: ' + err.message }));
     } else if (m.t === 'guildLog') {
       guildLogFlow().then((res) => post({ t: 'guildLogResult', ...res }), (err) => post({ t: 'guildLogResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'auction') {
+      auctionFlow(m.arg || {}).then((res) => post({ t: 'auctionResult', ...res }), (err) => post({ t: 'auctionResult', r: 'error: ' + err.message }));
     } else if (m.t === 'unstuck') {
       // App thấy trang báo bận quá lâu: đóng mọi cửa sổ còn mở (không đụng việc đang chạy)
       (async () => { const before = flowBusy; try { await closeModalSure(); closeBag(); } catch (_) {} post({ t: 'log', msg: `unstuck: flowBusy=${before} window=${anyWindowOpen()}` }); })();

@@ -100,6 +100,11 @@ public sealed class AppSettings
     // kinh nghiệm mỗi ngày rồi về tháp (xem AccountController.SuperviseGuildLand). Riêng từng acc: AccountSlot.GuildLand.
     public bool GuildLandOn { get; set; } = true;
     public int GuildKnbAmount { get; set; } = 100;
+    // 🎁 Tự đấu giá Đồ phổ bí ẩn của bang (mặc định tắt; chỉ acc chính nhận KNB – KnbMainName – ra giá): luôn ra giá sàn để
+    // không mất món, chỉ trả thêm khi bị người khác vượt giá, tối đa AuctionMaxKnb; Bang chủ / Phó thì Lò đủ món là hẹn
+    // mở phiên ở mốc sớm nhất. Xem AccountController.SuperviseAuction.
+    public bool AuctionOn { get; set; }
+    public int AuctionMaxKnb { get; set; } = 18000;
     // 💰 Gửi KNB (thư tặng) về acc chính KnbMainName, mỗi acc chừa KnbKeep KNB; chỉ chạy khi KnbSendOn và đã chọn acc chính.
     // KnbOpenBig: mở hết Đại Hồng Bao trước khi gửi
     public bool KnbSendOn { get; set; }
@@ -171,6 +176,7 @@ public sealed class AppSettings
         GuildDonateDaily = GuildDailyAmount > 0;
         KnbKeep = Math.Clamp(KnbKeep, 0, 1_000_000);
         GuildKnbAmount = Math.Clamp(GuildKnbAmount, 10, 2000);
+        AuctionMaxKnb = Math.Clamp(AuctionMaxKnb, 9999, 100000);
         KnbMainName = (KnbMainName ?? "").Trim();
         AutoSellFreeSlots = Math.Clamp(AutoSellFreeSlots, 1, 200);
     }

@@ -289,6 +289,8 @@ public sealed class SessionManager : IAsyncDisposable
                     guildKnbOn = _settings.GuildKnbOn,
                     jewelSwapOn = _settings.JewelSwapOn,
                     guildLandOn = _settings.GuildLandOn,
+                    auctionOn = _settings.AuctionOn,
+                    auctionMaxKnb = _settings.AuctionMaxKnb,
                     guildKnbAmount = _settings.GuildKnbAmount,
                     knbSendOn = _settings.KnbSendOn,
                     knbOpenBig = _settings.KnbOpenBig,
@@ -713,6 +715,8 @@ public sealed class SessionManager : IAsyncDisposable
             if (u.GuildKnbOn is { } gko) _settings.GuildKnbOn = gko;
             if (u.JewelSwapOn is { } jso) _settings.JewelSwapOn = jso;
             if (u.GuildLandOn is { } glo) _settings.GuildLandOn = glo;
+            if (u.AuctionOn is { } ao) _settings.AuctionOn = ao;
+            if (u.AuctionMaxKnb is { } am) _settings.AuctionMaxKnb = am;
             if (u.GuildKnbAmount is { } gka) _settings.GuildKnbAmount = gka;
             if (u.KnbMainName is { } km) _settings.KnbMainName = km;
             if (u.KnbSendOn is { } ks) _settings.KnbSendOn = ks;
@@ -869,4 +873,4 @@ public sealed record SettingsUpdate(
     int? GuildDailyAmount = null, int? GuildDonateReserve = null, bool? GuildFurnace = null,
     bool? GuildWeekAlert = null, string? KnbMainName = null, int? KnbKeep = null, bool? KnbSendOn = null, bool? KnbOpenBig = null,
     int? KiteFleeHp = null, int? KiteCrowd = null, int? KitePauseMs = null, bool? GuildKnbOn = null, int? GuildKnbAmount = null, bool? JewelSwapOn = null,
-    bool? GuildLandOn = null);
+    bool? GuildLandOn = null, bool? AuctionOn = null, int? AuctionMaxKnb = null);

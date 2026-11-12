@@ -525,6 +525,9 @@ public sealed class AccountController
                 case "landResult":
                     OnLandResult(m, now);
                     break;
+                case "auctionResult":
+                    OnAuctionResult(m, now);
+                    break;
                 case "lockInnateResult":
                     OnLockInnateResult(m, now);
                     break;
@@ -1203,10 +1206,82 @@ public sealed class AccountController
         SuperviseJewel(now);
         SuperviseGuildLedger(now);
         SuperviseGuildKnb(now);
+        SuperviseAuction(now);
         SuperviseSellJunk(now);
         SuperviseKnbTransfer(now);
         SuperviseStuck(now);
         SuperviseRecovery(now);
+    }
+
+    // ---------- 🎁 Đấu giá Đồ phổ bí ẩn của bang ----------
+    // Chỉ acc chính (nhận KNB của các acc khác) ra giá; bạn bật (mặc định tắt). Mỗi phút xem một lần, có phiên đang mở / sắp
+    // mở thì 15 giây một lần (bị vượt giá thì trả lại ngay; 2 phút cuối game kéo dài thêm 2 phút). Luôn chừa đủ mức tối đa
+    // KNB trên acc chính (góp KNB vào bang không đụng tới).
+    private DateTime _auctionAt = DateTime.MinValue;
+    private bool _auctionPending, _auctionLive;
+    private readonly Dictionary<int, string> _auctionSeen = new();
+    public bool IsKnbMain(AppSettings cfg) => cfg.KnbMainName.Length > 0 && Account.CharName == cfg.KnbMainName;
+    private int AuctionReserve(AppSettings cfg) => cfg.AuctionOn && IsKnbMain(cfg) ? cfg.AuctionMaxKnb : 0;
+
+    private void SuperviseAuction(DateTime now)
+    {
+        var cfg = SettingsProvider?.Invoke();
+        if (cfg is null || !cfg.AuctionOn || !IsKnbMain(cfg) || Screen != "game" || Away || Maintenance) return;
+        if (_auctionPending && now - _auctionAt < TimeSpan.FromMinutes(1)) return;
+        if (now - _auctionAt < (_auctionLive ? TimeSpan.FromSeconds(15) : TimeSpan.FromSeconds(60))) return;
+        _auctionAt = now;
+        _auctionPending = true;
+        Post(new { t = "auction", arg = new { max = cfg.AuctionMaxKnb, schedule = true } });
+    }
+
+    private void OnAuctionResult(JsonElement m, DateTime now)
+    {
+        _auctionPending = false;
+        var r = Str(m, "r");
+        if (r != "ok") { Log.Write($"[{Account.Id}] auction: {r}"); _auctionLive = false; return; }
+        var cfg = SettingsProvider?.Invoke() ?? new AppSettings();
+        bool live = false;
+        if (!m.TryGetProperty("items", out var items) || items.ValueKind != JsonValueKind.Array) { _auctionLive = false; return; }
+        foreach (var it in items.EnumerateArray())
+        {
+            int I(string k) => it.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? (int)v.GetDouble() : 0;
+            long L(string k) => it.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? (long)v.GetDouble() : 0;
+            bool B(string k) => it.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.True;
+            int id = I("id");
+            var st = Str(it, "st");
+            int dot = I("dot"), gia = I("gia"), buoc = I("buoc"), bid = I("bid");
+            var what = $"Đồ phổ bí ẩn (Lò đợt {dot})";
+            string At(long ms) => DateTimeOffset.FromUnixTimeMilliseconds(ms).ToOffset(TimeSpan.FromHours(7)).ToString("HH:mm");
+            if (st is "wait" or "scheduled" or "open" or "bid" or "leading" or "over-max" or "no-knb" or "not-allowed" or "bid-failed" or "closing") live = true;
+            // Mỗi phiên: chỉ báo khi trạng thái đổi (ra giá thì luôn ghi)
+            var key = st == "bid" ? $"bid{bid}" : st == "leading" ? $"leading{gia}" : st;
+            if (_auctionSeen.TryGetValue(id, out var prev) && prev == key) continue;
+            bool first = !_auctionSeen.ContainsKey(id);
+            _auctionSeen[id] = key;
+            string? text = null, alert = null;
+            switch (st)
+            {
+                case "scheduled": text = $"🎁 Đấu giá {what}: đã hẹn mở lúc {At(L("mo"))} (30 phút)"; break;
+                case "wait": text = $"🎁 Đấu giá {what}: mở lúc {At(L("mo"))}"; break;
+                case "bid": text = gia > 0 ? $"🎁 Đấu giá {what}: bị vượt giá ({gia:N0} KNB) – trả {bid:N0} KNB" : $"🎁 Đấu giá {what}: ra giá sàn {bid:N0} KNB"; break;
+                case "leading": text = $"🎁 Đấu giá {what}: đang giữ giá cao nhất {gia:N0} KNB"; break;
+                case "over-max": alert = $"Đấu giá {what}: người khác trả {gia:N0} KNB, mức tiếp theo {buoc:N0} vượt mức tối đa {cfg.AuctionMaxKnb:N0} – đã dừng"; break;
+                case "no-knb": alert = $"Đấu giá {what}: không đủ KNB để ra {buoc:N0} KNB"; break;
+                case "not-allowed": alert = $"Đấu giá {what}: {Account.CharName} không góp Lò đợt này nên không được ra giá"; break;
+                case "bid-failed": alert = $"Đấu giá {what}: ra giá không được ({Str(it, "err")})"; break;
+                case "done":
+                    if (first && !B("mine")) break; // phiên cũ đã xong từ trước khi theo dõi
+                    text = B("mine") ? $"🎉 Thắng đấu giá {what}: {gia:N0} KNB – món gửi qua Hộp thư"
+                         : gia > 0 ? $"🎁 Đấu giá {what}: người khác thắng với {gia:N0} KNB" : $"🎁 Đấu giá {what}: không ai ra giá";
+                    break;
+            }
+            if (text is null && alert is null) continue;
+            Log.Write($"[{Account.Id}] auction #{id}: {st} gia={gia} buoc={buoc} bid={bid} {Str(it, "err")}");
+            if (alert is not null) Raise("auction", alert);
+            else Note(now, text!, st is "done" && B("mine") ? StatusLevel.Ok : StatusLevel.Ok);
+            GameLogSink?.Invoke(Account.Id, new[] { new GameLog.Entry(now, st == "done" && B("mine") ? "rare" : "auction", "", Account.CharName ?? "", text ?? "⚠ " + alert) });
+        }
+        _auctionLive = live;
     }
 
     // ---------- 🏯 Lãnh địa bang: Cơ Giáp + Lửa trại ----------
@@ -2006,7 +2081,7 @@ public sealed class AccountController
         if (now < _guildKnbNextTry || _ldtBuyingSince is not null || EventRunning(now)) return;
         _guildKnbAt = now;
         _guildKnbPending = true;
-        Post(new { t = "guildKnb", arg = new { amount = cfg.GuildKnbAmount, keep = cfg.KnbKeep } });
+        Post(new { t = "guildKnb", arg = new { amount = cfg.GuildKnbAmount, keep = cfg.KnbKeep + AuctionReserve(cfg) } });
     }
 
     private void OnGuildKnbResult(JsonElement m, DateTime now)

@@ -303,3 +303,13 @@ p.warn { color: var(--warn); font-weight: 600; }
 .gl-datau .gl-text { color: var(--ok, inherit); }
 
 .gl-milestone .gl-text, .gl-boss .gl-text { font-weight: 600; }
+
+/* Cài đặt: thẻ */
+.set-tabs { display: flex; gap: 6px; overflow-x: auto; white-space: nowrap; padding: 2px 0 8px; margin-bottom: 8px; border-bottom: 1px solid var(--line, #333); -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.set-tabs::-webkit-scrollbar { display: none; }
+.set-tab { flex: none; border: 1px solid var(--line, #444); background: transparent; color: inherit; border-radius: 16px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+.set-tab.on { background: var(--accent, #c9a14a); color: #111; border-color: transparent; font-weight: 600; }
+.set-panel > .btn.primary { margin-top: 4px; }
+.set-sub { margin: 2px 0 8px 26px; padding-left: 10px; border-left: 2px solid var(--line, #444); }
+.set-sub.hidden { display: none; }
+.check-row .note { margin: 2px 0 0; }

@@ -1116,6 +1116,42 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Auction_runs_only_on_the_main_account_when_switched_on()
+    {
+        var (ctl, page, cfg) = Make();
+        cfg.EventTeacher = false;
+        cfg.DailyKnbBuy = false;
+        cfg.KnbMainName = "Chính";
+        var written = new List<GameLog.Entry>();
+        ctl.GameLogSink = (_, list) => written.AddRange(list);
+        var problems = new List<string>();
+        ctl.Problem += (key, _) => problems.Add(key);
+        string St(string name) => JsonSerializer.Serialize(new { t = "status", screen = "game", name, lv = "180", gold = "1 vạn", knb = "20000 🔒1", mode = "farm", modeText = "farm",
+            zone = "Hoa Sơn", dt = "200/200", pb = "0/4", ldtHave = "0", ldtUsed = "160/160", ldtBuy = "100/100", st = "0/60" });
+        int Asks() => page.Sent.Count(m => m.GetProperty("t").GetString() == "auction");
+        var t = Run(ctl, T0, 90, St("Chính"));
+        Assert.Equal(0, Asks()); // mặc định tắt
+        cfg.AuctionOn = true;
+        t = Run(ctl, t, 70, St("Chính"));
+        Assert.True(Asks() >= 1);
+        var arg = page.Sent.Last(m => m.GetProperty("t").GetString() == "auction").GetProperty("arg");
+        Assert.Equal(18000, arg.GetProperty("max").GetInt32());
+        // Ra giá sàn, rồi bị vượt giá quá mức tối đa → báo một lần
+        ctl.OnPageMessage("""{"t":"auctionResult","r":"ok","items":[{"id":7,"dot":2,"st":"bid","gia":0,"buoc":9999,"bid":9999}]}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("ra giá sàn 9.999 KNB") || e.Text.Contains("ra giá sàn 9,999 KNB"));
+        ctl.OnPageMessage("""{"t":"auctionResult","r":"ok","items":[{"id":7,"dot":2,"st":"over-max","gia":18500,"buoc":19425}]}""", t);
+        ctl.OnPageMessage("""{"t":"auctionResult","r":"ok","items":[{"id":7,"dot":2,"st":"over-max","gia":18500,"buoc":19425}]}""", t);
+        Assert.Single(problems, k => k == "auction");
+        Assert.Contains(written, e => e.Kind == "auction");
+        // Acc khác (không phải acc chính) không đấu giá
+        var (ctl2, page2, cfg2) = Make();
+        cfg2.KnbMainName = "Chính";
+        cfg2.AuctionOn = true;
+        Run(ctl2, T0, 150, St("Phụ"));
+        Assert.DoesNotContain(page2.Sent, m => m.GetProperty("t").GetString() == "auction");
+    }
+
+    [Fact]
     public void Items_with_innate_skills_are_locked_before_selling_junk()
     {
         var (ctl, page, cfg) = Make();

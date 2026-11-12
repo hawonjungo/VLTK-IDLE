@@ -478,7 +478,7 @@ $('#horseBtn').addEventListener('click', openHorses);
 // ---------- 📜 Nhật ký game ----------
 // Mỗi dòng game ghi về chính nhân vật (kèm tầng / bản đồ), lọc theo nhân vật, loại, ngày; "💎 Đồ hiếm" gộp các nhân vật của bạn
 const GAMELOG_KINDS = [['', 'Mọi loại'], ['rare', '💎 Đồ hiếm'], ['boss', '👑 Boss'], ['assassin', '🗡 Sát Thủ'],
-  ['milestone', '🏆 Mốc 100 tầng'], ['tower', '🗼 Tháp'], ['death', '💀 Gục ngã'], ['quest', '🗺 Đi làm nhiệm vụ'], ['datau', '📜 Thưởng Dã Tẩu'], ['land', '🏯 Lãnh địa bang']];
+  ['milestone', '🏆 Mốc 100 tầng'], ['tower', '🗼 Tháp'], ['death', '💀 Gục ngã'], ['quest', '🗺 Đi làm nhiệm vụ'], ['datau', '📜 Thưởng Dã Tẩu'], ['land', '🏯 Lãnh địa bang'], ['auction', '🎁 Đấu giá']];
 const vnToday = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
 let logSel = { who: 'rare', kind: '', day: '', hideXp: true };
 // Thưởng Dã Tẩu chỉ có kinh nghiệm ("🎁 Dã Tẩu #2491 (…): 3% kinh nghiệm")
@@ -836,105 +836,133 @@ function renderSettings() {
     ]);
   });
 
-  $('#settingsBody').replaceChildren(
-    section('Chung', [
-      toggleRow('Kêu và thông báo khi có cảnh báo mới', notifyOn, toggleNotify),
-      h('div', { class: 'set-row' }, [
-        h('span', {}, [h('span', { text: 'Tạm dừng server' }), h('div', { class: 'note', text: 'Thoát game cả 4 acc để chơi ở máy khác (bản PC, điện thoại). Đăng xuất trang này không dừng game.' })]),
-        h('button', { class: 'btn small' + (state.paused ? ' on' : ''), text: state.paused ? 'Chạy lại' : 'Tạm dừng', onclick: () => {
-          if (!state.paused && !confirm('Tạm dừng server? Cả 4 acc sẽ thoát game cho tới khi bạn bấm Chạy lại.')) return;
-          act('pause', { on: !state.paused }, state.paused ? 'Đang mở lại các acc…' : 'Đã tạm dừng – các acc đã thoát game').then(() => setTimeout(renderSettings, 500));
-        } }),
+  // Các mục con chỉ hiện khi công tắc chính bật
+  const sub = (master, children) => {
+    const d = h('div', { class: 'set-sub' + (master.checked ? '' : ' hidden') }, children);
+    master.addEventListener('change', () => d.classList.toggle('hidden', !master.checked));
+    return d;
+  };
+  const check = (input, label, note) => h('label', { class: 'check-row' }, [input, h('span', {}, [h('span', { text: label }), note ? h('div', { class: 'note', text: note }) : null])]);
+  const grid = (...pairs) => h('div', { class: 'form-grid' }, pairs.flatMap(([l, c]) => [h('label', { text: l }), c]));
+  const save = (text, payload, done) => h('button', { class: 'btn primary', text, onclick: () => { const p = payload(); if (p) act('settings', p, done); } });
+  const auctionOn = box(!!s.auctionOn);
+  const auctionMax = pick([10000, 12000, 15000, 18000, 20000], s.auctionMaxKnb ?? 18000, (n) => `${n0(n)} KNB`);
+
+  const tabs = [
+    ['chung', '⚙ Chung', () => [
+      section('Chung', [
+        toggleRow('Kêu và thông báo khi có cảnh báo mới', notifyOn, toggleNotify),
+        h('div', { class: 'set-row' }, [
+          h('span', {}, [h('span', { text: 'Tạm dừng server' }), h('div', { class: 'note', text: 'Thoát game cả 4 acc để chơi ở máy khác. Đăng xuất trang này không dừng game.' })]),
+          h('button', { class: 'btn small' + (state.paused ? ' on' : ''), text: state.paused ? 'Chạy lại' : 'Tạm dừng', onclick: () => {
+            if (!state.paused && !confirm('Tạm dừng server? Cả 4 acc sẽ thoát game cho tới khi bạn bấm Chạy lại.')) return;
+            act('pause', { on: !state.paused }, state.paused ? 'Đang mở lại các acc…' : 'Đã tạm dừng – các acc đã thoát game').then(() => setTimeout(renderSettings, 500));
+          } }),
+        ]),
+        toggleRow('Tự hồi phục (tải lại, tự đăng nhập)', state.autoRecover, () => act('auto-recover', { on: !state.autoRecover }).then(() => setTimeout(renderSettings, 300))),
+        h('div', { class: 'set-row' }, [h('span', { text: 'Bấm "Vào Game" ở mọi acc' }), h('button', { class: 'btn small', text: 'Vào Game', onclick: () => act('enter-all', {}, 'Đã bấm Vào Game ở mọi acc') })]),
       ]),
-      toggleRow('Tự hồi phục (tải lại, tự đăng nhập)', state.autoRecover, () => act('auto-recover', { on: !state.autoRecover }).then(() => setTimeout(renderSettings, 300))),
-      h('div', { class: 'set-row' }, [h('span', { text: 'Bấm "Vào Game" ở mọi acc' }), h('button', { class: 'btn small', text: 'Vào Game', onclick: () => act('enter-all', {}, 'Đã bấm Vào Game ở mọi acc') })]),
-    ]),
-    section('Kéo quái khi Leo Tháp', [
-      h('p', { class: 'note', text: 'Bật riêng từng acc ở nút ⋯ trên acc. Chỉ chạy khi đang ở Thông Thiên Tháp và Auto đang bật.' }),
-      h('p', { class: 'note', text: 'Đây là cài đặt chung; từng acc có thể cài riêng ở nút ⋯ › Kéo quái.' }),
-      h('div', { class: 'form-grid' }, [h('label', { text: 'Kiểu kéo' }), dir, h('label', { text: 'Mỗi lần chạy' }), dist, h('label', { text: 'Dừng đánh / chu kỳ' }), interval, h('label', { text: 'Máu thấp thì chạy xa' }), kiteFlee]),
-    ]),
-    section('Vòng tự động', [
-      h('p', { class: 'note', text: 'Bấm 🔁 Auto để bắt đầu vòng. Chết 3 lần ở cùng một tầng thì Luyện Công, nghỉ tháp theo số phút bên dưới (chết ở các tầng khác nhau không tính).' }),
-      h('label', { class: 'check-row' }, [quest, '1. Dã Tẩu còn làm được → Nhiệm Vụ']),
-      h('label', { class: 'check-row' }, [dg, '2. Còn lượt Phó bản → Phó Bản']),
-      h('label', { class: 'check-row' }, [boat, '3. Còn chuyến thuyền → Đi thuyền']),
-      h('label', { class: 'check-row' }, [weekBoss, '4. Còn lượt Boss tuần → Khiêu chiến, nhận rương tuần']),
-      h('label', { class: 'check-row' }, [assassin, '5. Còn Lệnh Bài Sát Thủ → gọi Sát Thủ']),
-      h('div', { class: 'form-grid' }, [h('label', { text: '6. Xong hết thì' }), fallback, h('label', { text: 'Nghỉ tháp (phút)' }), rest]),
-      h('button', { class: 'btn primary', text: 'Lưu cài đặt', onclick: () => act('settings', {
-        kiteDirection: dir.value, kiteDistance: +dist.value, kiteInterval: +interval.value, kiteFleeHp: +kiteFlee.value,
-        autoDungeon: dg.checked, autoQuest: quest.checked, autoFallback: fallback.value, towerRest: +rest.value, autoAssassin: assassin.checked,
-        autoBoat: boat.checked, autoWeekBoss: weekBoss.checked,
-      }, 'Đã lưu cài đặt') }),
-    ]),
-    section('Sự kiện', [
-      h('p', { class: 'note', text: '🌹 Tri Ân Nhà Giáo (tới hết 20/11): mỗi ngày tặng Thầy Đồ đủ 40 Bó Hoa (mức tối đa có điểm), tự ghép thêm khi sắp hết. Giấy Gói mua bằng lượng, không bao giờ tiêu KNB.' }),
-      h('label', { class: 'check-row' }, [teacher, 'Tặng Bó Hoa mỗi ngày (cả 4 acc)']),
-      h('label', { class: 'check-row' }, [teacherEx, 'Đổi nguyên liệu thừa: Đại Hồng Bao → Tiên Thảo Lộ Đặc Biệt → Hồng Bao (chừa đủ để tặng tới hết sự kiện)']),
-      h('div', { class: 'form-grid' }, [h('label', { text: 'Chi Giấy Gói tối đa (vạn/acc/ngày)' }), teacherCap]),
-      h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', {
-        eventTeacher: teacher.checked, eventTeacherCap: +teacherCap.value, eventTeacherExchange: teacherEx.checked,
-      }, 'Đã lưu cài đặt sự kiện') }),
-    ]),
-    section('Việc mỗi ngày', [
-      h('p', { class: 'note', text: 'Chạy lúc rảnh ở cả 4 acc, không phụ thuộc vòng tự động.' }),
-      h('label', { class: 'check-row' }, [dailyKnb, '💰 Đổi vạn → KNB tới giới hạn 1.000 KNB/ngày (thiếu vạn thì mở Hồng Bao)']),
-      h('p', { class: 'note', text: '✨ Giữ trạng thái có lợi: trạng thái tắt hoặc còn dưới 5 phút thì dùng 1 cái trong Hành trang, luôn chừa 10 cái mỗi loại.' }),
-      h('label', { class: 'check-row' }, [buffTtl, '🌿 Tiên Thảo Lộ (+50% kinh nghiệm)']),
-      h('label', { class: 'check-row' }, [buffTtlSp, '🌺 Tiên Thảo Lộ Đặc Biệt (+100% kinh nghiệm)']),
-      h('label', { class: 'check-row' }, [buffQht, '🍶 Quế Hoa Tửu (+20 may mắn)']),
-      h('label', { class: 'check-row' }, [sellJunk, '💰 Hành trang sắp đầy thì bấm "Bán thừa" của game (món không khớp ⚙ Nhặt đồ, không khoá)']),
-      h('div', { class: 'form-grid' }, [h('label', { text: 'Bán khi còn ≤ ô trống' }), sellFree]),
-      h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', {
-        dailyKnb: dailyKnb.checked, buffTtl: buffTtl.checked, buffTtlSpecial: buffTtlSp.checked, buffQht: buffQht.checked,
-        autoSellJunk: sellJunk.checked, autoSellFreeSlots: +sellFree.value,
-      }, 'Đã lưu việc mỗi ngày') }),
-    ]),
-    section('💰 Gửi KNB về acc chính', [
-      h('p', { class: 'note', text: 'Mỗi ngày một lần (sau khi đổi vạn → KNB) các acc khác mở Đại Hồng Bao rồi gửi thư tặng phần KNB trên mức giữ lại về acc chính; acc chính tự nhận thư mỗi 30 phút. Chỉ gửi cho nhân vật trong danh sách acc.' }),
-      h('label', { class: 'check-row' }, [knbOn, 'Bật gửi KNB về acc chính']),
-      h('div', { class: 'form-grid' }, [h('label', { text: 'Acc chính' }), knbMain, h('label', { text: 'Mỗi acc giữ lại' }), knbKeep]),
-      h('label', { class: 'check-row' }, [knbBig, '🧧 Mở hết Đại Hồng Bao trước khi gửi']),
-      h('button', { class: 'btn primary', text: 'Lưu', onclick: () => {
-        if (knbOn.checked && !knbMain.value) { toast('Chọn acc chính trước'); return; }
-        act('settings', { knbSendOn: knbOn.checked, knbMainName: knbMain.value, knbKeep: +knbKeep.value, knbOpenBig: knbBig.checked }, 'Đã lưu gửi KNB');
-      } }),
-    ]),
-    section('Bang hội', [
-      h('p', { class: 'note', text: 'Acc chưa vào bang thì bỏ qua. Cửa hàng: mua bằng điểm cống hiến mỗi ngày (món tuần khi tuần còn lượt), đồ gửi về Hộp thư được tự nhận (chỉ thư "Cửa hàng bang").' }),
-      h('label', { class: 'check-row' }, [guild, '🏯 Mua ở cửa hàng bang mỗi ngày']),
-      h('label', { class: 'check-row' }, [gLdt, 'Lệnh Bài Dã Tẩu (20 điểm · 10/ngày)']),
-      h('label', { class: 'check-row' }, [gFdl, 'Bình Phúc Duyên Lộ (Tiểu) (100 điểm · 10/ngày)']),
-      h('label', { class: 'check-row' }, [gTtsp, 'Tiên Thảo Lộ Đặc Biệt (300 điểm · 5/tuần)']),
-      h('label', { class: 'check-row' }, [gThbt, 'Tinh Hồng Bảo Thạch (60 điểm · 6/tuần)']),
-      h('div', { class: 'form-grid' }, [h('label', { text: 'Thiếu điểm mua cửa hàng thì góp tối đa' }), gDonate]),
-      h('p', { class: 'note', text: '💰 Cống hiến mỗi ngày: góp tới mức đã chọn (tính cả phần đã góp hôm nay); thiếu vạn thì mở Hồng Bao, hết Hồng Bao thì chừa lại số vạn bên dưới.' }),
-      h('div', { class: 'form-grid' }, [h('label', { text: 'Cống hiến mỗi ngày' }), gDaily, h('label', { text: 'Hết Hồng Bao thì chừa lại' }), gReserve]),
-      h('label', { class: 'check-row' }, [gKnbOn, '💎 Tự góp KNB vào quỹ bang mỗi ngày (tắt = không bao giờ góp KNB)']),
-      h('div', { class: 'form-grid' }, [h('label', { text: 'KNB mỗi ngày (cũng là mức "đủ" của thành viên trong sổ KNB)' }), gKnbAmount]),
-      h('p', { class: 'note', text: 'Tính cả phần đã góp tay hôm nay; luôn chừa lại số KNB ở mục "Gửi KNB về acc chính › Mỗi acc giữ lại".' }),
-      h('label', { class: 'check-row' }, [jewelOn, '💍 Đổi trang sức theo việc: Luyện Công / Nhiệm Vụ đeo Hồng Ảnh (kinh nghiệm), Leo Tháp / Boss đeo trang sức sức mạnh (vốn có, HK Môn Phái). Chỉ đổi dây chuyền, 2 nhẫn, ngọc bội; riêng từng acc ở nút ⋯']),
-      h('label', { class: 'check-row' }, [landOn, '🏯 Lãnh địa bang (thứ 4, thứ 7): sau Boss Hoàng Kim tự vào lãnh địa, cùng bang đánh Cơ Giáp (Bang chủ / Phó / Trưởng lão tự gọi), ngồi Lửa trại tới đủ kinh nghiệm hôm nay rồi về tháp']),
-      h('label', { class: 'check-row' }, [gFurnace, '🔥 Lò Đốt Đồ mỗi ngày: góp Hoàng Kim bộ chung (trừ món khoá); giữ Động Sát May mắn max và Hồng Ảnh Kinh nghiệm max, cất vào Rương']),
-      h('label', { class: 'check-row' }, [gWeek, '⚠ Cảnh báo điều kiện tuần (điểm tuần, 15 người vào game, quỹ duy trì) vào thứ Bảy, Chủ Nhật']),
-      h('button', { class: 'btn primary', text: 'Lưu', onclick: () => act('settings', {
-        guildShop: guild.checked, guildLdt: gLdt.checked, guildPhucDuyen: gFdl.checked, guildTtsp: gTtsp.checked, guildThbt: gThbt.checked,
-        guildDonateCap: +gDonate.value, guildDailyAmount: +gDaily.value, guildDonateReserve: +gReserve.value,
-        guildFurnace: gFurnace.checked, guildWeekAlert: gWeek.checked,
-        guildKnbOn: gKnbOn.checked, guildKnbAmount: +gKnbAmount.value, jewelSwapOn: jewelOn.checked,
-        guildLandOn: landOn.checked,
-      }, 'Đã lưu cài đặt bang hội') }),
-    ]),
-    section('Mật khẩu acc game', [
-      h('p', { class: 'note', text: 'Mật khẩu được mã hoá và chỉ lưu trên máy chủ này, dùng để tự đăng nhập lại.' }),
-      ...forms,
-    ]),
-    section('Máy chủ', [
-      h('p', { class: 'note', text: `Khung ${state.server.viewport} · tối đa ${state.server.fps || '∞'} khung/giây` }),
-      h('button', { class: 'btn', text: 'Đăng xuất trang web', onclick: async () => { await api('logout', {}); showLogin(); } }),
-    ]),
-  );
+      section('Mật khẩu acc game', [h('p', { class: 'note', text: 'Mã hoá, chỉ lưu trên máy chủ này, dùng để tự đăng nhập lại.' }), ...forms]),
+      section('Máy chủ', [
+        h('p', { class: 'note', text: `Khung ${state.server.viewport} · tối đa ${state.server.fps || '∞'} khung/giây` }),
+        h('button', { class: 'btn', text: 'Đăng xuất trang web', onclick: async () => { await api('logout', {}); showLogin(); } }),
+      ]),
+    ]],
+    ['thap', '🗼 Leo tháp', () => [
+      section('Né quái', [
+        h('p', { class: 'note', text: 'Bật riêng từng acc ở nút ⋯ › Kéo quái (cũng cài riêng được ở đó). Chỉ chạy trong Thông Thiên Tháp khi Auto bật.' }),
+        grid(['Kiểu', dir], ['Mỗi bước', dist], ['Chu kỳ', interval], ['Máu thấp thì chạy xa', kiteFlee]),
+      ]),
+      section('Chết trong tháp', [
+        h('p', { class: 'note', text: 'Chết 3 lần ở cùng một tầng → Luyện Công, nghỉ đúng số phút này rồi vào lại.' }),
+        grid(['Nghỉ tháp', rest]),
+      ]),
+      save('Lưu', () => ({ kiteDirection: dir.value, kiteDistance: +dist.value, kiteInterval: +interval.value, kiteFleeHp: +kiteFlee.value, towerRest: +rest.value }), 'Đã lưu Leo tháp'),
+    ]],
+    ['vong', '🔁 Vòng tự động', () => [
+      section('Thứ tự việc', [
+        h('p', { class: 'note', text: 'Bấm 🔁 Auto trên acc để bắt đầu vòng.' }),
+        check(quest, '1. Nhiệm Vụ (Dã Tẩu còn làm được)'),
+        check(dg, '2. Phó Bản (còn lượt)'),
+        check(boat, '3. Đi thuyền (còn chuyến)'),
+        check(weekBoss, '4. Boss tuần (còn lượt, nhận rương tuần)'),
+        check(assassin, '5. Sát Thủ (còn Lệnh Bài)'),
+        grid(['6. Xong hết thì', fallback]),
+      ]),
+      section('Sự kiện', [
+        check(teacher, '🌹 Tri Ân Nhà Giáo: tặng đủ 40 Bó Hoa mỗi ngày', 'Tới hết 20/11. Giấy Gói mua bằng lượng, không tiêu KNB.'),
+        sub(teacher, [
+          check(teacherEx, 'Đổi nguyên liệu thừa (Đại Hồng Bao → Tiên Thảo Lộ Đặc Biệt → Hồng Bao)'),
+          grid(['Chi Giấy Gói tối đa / acc / ngày', teacherCap]),
+        ]),
+      ]),
+      save('Lưu', () => ({ autoDungeon: dg.checked, autoQuest: quest.checked, autoFallback: fallback.value, autoAssassin: assassin.checked,
+        autoBoat: boat.checked, autoWeekBoss: weekBoss.checked, eventTeacher: teacher.checked, eventTeacherCap: +teacherCap.value, eventTeacherExchange: teacherEx.checked }), 'Đã lưu vòng tự động'),
+    ]],
+    ['ngay', '📅 Mỗi ngày', () => [
+      section('Đổi KNB', [check(dailyKnb, '💰 Đổi vạn → KNB tới 1.000 KNB/ngày', 'Thiếu vạn thì mở Hồng Bao.')]),
+      section('Buff', [
+        h('p', { class: 'note', text: 'Tắt hoặc còn dưới 5 phút thì dùng 1 cái, luôn chừa 10 cái mỗi loại.' }),
+        check(buffTtl, '🌿 Tiên Thảo Lộ (+50% kinh nghiệm)'),
+        check(buffTtlSp, '🌺 Tiên Thảo Lộ Đặc Biệt (+100% kinh nghiệm)'),
+        check(buffQht, '🍶 Quế Hoa Tửu (+20 may mắn)'),
+      ]),
+      section('Hành trang', [
+        check(sellJunk, '💰 Sắp đầy thì "Bán thừa"', 'Món không khớp ⚙ Nhặt đồ, không khoá.'),
+        sub(sellJunk, [grid(['Bán khi còn ≤ ô trống', sellFree])]),
+        check(jewelOn, '💍 Đổi trang sức theo việc', 'Luyện Công / Nhiệm Vụ đeo Hồng Ảnh; Leo Tháp / Boss đeo trang sức sức mạnh. Riêng từng acc ở nút ⋯.'),
+      ]),
+      save('Lưu', () => ({ dailyKnb: dailyKnb.checked, buffTtl: buffTtl.checked, buffTtlSpecial: buffTtlSp.checked, buffQht: buffQht.checked,
+        autoSellJunk: sellJunk.checked, autoSellFreeSlots: +sellFree.value, jewelSwapOn: jewelOn.checked }), 'Đã lưu việc mỗi ngày'),
+    ]],
+    ['bang', '🏯 Bang hội', () => [
+      section('Cửa hàng bang', [
+        check(guild, '🛒 Mua mỗi ngày bằng điểm cống hiến', 'Đồ gửi về Hộp thư được tự nhận (chỉ thư "Cửa hàng bang").'),
+        sub(guild, [
+          check(gLdt, 'Lệnh Bài Dã Tẩu (20 điểm · 10/ngày)'),
+          check(gFdl, 'Bình Phúc Duyên Lộ (Tiểu) (100 điểm · 10/ngày)'),
+          check(gTtsp, 'Tiên Thảo Lộ Đặc Biệt (300 điểm · 5/tuần)'),
+          check(gThbt, 'Tinh Hồng Bảo Thạch (60 điểm · 6/tuần)'),
+          grid(['Thiếu điểm thì góp tối đa', gDonate]),
+        ]),
+      ]),
+      section('Cống hiến', [
+        grid(['Góp vạn mỗi ngày', gDaily], ['Hết Hồng Bao thì chừa lại', gReserve]),
+        check(gKnbOn, '💎 Góp KNB vào quỹ bang mỗi ngày', 'Tắt = không bao giờ góp KNB. Tính cả phần góp tay hôm nay.'),
+        sub(gKnbOn, [grid(['KNB mỗi ngày', gKnbAmount])]),
+      ]),
+      section('Lò · Lãnh địa · Đấu giá', [
+        check(gFurnace, '🔥 Lò Đốt Đồ mỗi ngày', 'Góp Hoàng Kim bộ chung (trừ món khoá); giữ Hồng Ảnh tốt nhất mỗi món, Động Sát max.'),
+        check(landOn, '🏯 Lãnh địa bang (thứ 4, thứ 7)', 'Sau Boss Hoàng Kim: đánh Cơ Giáp, ngồi Lửa trại tới đủ kinh nghiệm rồi về tháp.'),
+        check(auctionOn, '🎁 Tự đấu giá Đồ phổ bí ẩn', `Chỉ acc chính (${s.knbMainName || 'chưa chọn ở thẻ 💰 KNB'}) ra giá. Luôn ra giá sàn 9.999 để không mất món; chỉ trả thêm khi bị người khác vượt giá. Lò đủ món thì Bang chủ / Phó tự hẹn mở sớm nhất.`),
+        sub(auctionOn, [grid(['Tối đa', auctionMax])]),
+        check(gWeek, '⚠ Cảnh báo điều kiện tuần (thứ Bảy, Chủ Nhật)'),
+      ]),
+      save('Lưu', () => {
+        if (auctionOn.checked && !s.knbMainName) { toast('Chọn acc chính ở thẻ 💰 KNB trước'); return null; }
+        return { guildShop: guild.checked, guildLdt: gLdt.checked, guildPhucDuyen: gFdl.checked, guildTtsp: gTtsp.checked, guildThbt: gThbt.checked,
+          guildDonateCap: +gDonate.value, guildDailyAmount: +gDaily.value, guildDonateReserve: +gReserve.value,
+          guildFurnace: gFurnace.checked, guildWeekAlert: gWeek.checked, guildKnbOn: gKnbOn.checked, guildKnbAmount: +gKnbAmount.value,
+          guildLandOn: landOn.checked, auctionOn: auctionOn.checked, auctionMaxKnb: +auctionMax.value };
+      }, 'Đã lưu bang hội'),
+    ]],
+    ['knb', '💰 KNB', () => [
+      section('Gửi KNB về acc chính', [
+        h('p', { class: 'note', text: 'Mỗi ngày một lần các acc khác gửi thư tặng phần KNB trên mức giữ lại về acc chính; acc chính tự nhận thư. Chỉ gửi cho nhân vật của bạn.' }),
+        check(knbOn, 'Bật gửi KNB về acc chính'),
+        grid(['Acc chính', knbMain]),
+        sub(knbOn, [grid(['Mỗi acc giữ lại', knbKeep]), check(knbBig, '🧧 Mở hết Đại Hồng Bao trước khi gửi')]),
+      ]),
+      save('Lưu', () => {
+        if (knbOn.checked && !knbMain.value) { toast('Chọn acc chính trước'); return null; }
+        return { knbSendOn: knbOn.checked, knbMainName: knbMain.value, knbKeep: +knbKeep.value, knbOpenBig: knbBig.checked };
+      }, 'Đã lưu gửi KNB'),
+    ]],
+  ];
+  const cur = tabs.some(([k]) => k === prefs.get('setTab', 'chung')) ? prefs.get('setTab', 'chung') : 'chung';
+  const bar = h('div', { class: 'set-tabs' }, tabs.map(([k, label]) => h('button', { class: 'set-tab' + (k === cur ? ' on' : ''), text: label, onclick: () => { prefs.set('setTab', k); renderSettings(); } })));
+  const panel = tabs.find(([k]) => k === cur)[2]();
+  $('#settingsBody').replaceChildren(bar, h('div', { class: 'set-panel' }, panel));
 }
 
 // ---------- Cảnh báo: chuông + kêu + thông báo của hệ điều hành ----------
