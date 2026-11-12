@@ -1152,6 +1152,71 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Reborn_at_level_200_leaves_tower_then_farms_until_level_80()
+    {
+        var (ctl, page, cfg) = Make();
+        cfg.EventTeacher = false;
+        cfg.DailyKnbBuy = false;
+        var written = new List<GameLog.Entry>();
+        ctl.GameLogSink = (_, list) => written.AddRange(list);
+        string St(string lv, int cs, string mode, int inTower) => JsonSerializer.Serialize(new { t = "status", screen = "game", name = "A", lv, gold = "1 vạn", knb = "1 🔒1",
+            mode, modeText = mode, zone = inTower == 1 ? "Thông Thiên Tháp · tầng 900" : "Hoa Sơn", dt = "200/200", pb = "0/4", ldtHave = "0", ldtUsed = "160/160", ldtBuy = "100/100",
+            st = "0/60", inTower, cs });
+        int Reborns() => page.Sent.Count(m => m.GetProperty("t").GetString() == "reborn");
+        List<string> Modes() => page.Sent.Where(m => m.GetProperty("t").GetString() == "cmd" && m.GetProperty("name").GetString() == "mode")
+            .Select(m => m.GetProperty("arg").GetString()!).ToList();
+        ctl.RequestMode("tower", T0);
+        var t = Run(ctl, T0, 60, St("200", 1, "tower", 1));
+        Assert.Equal(0, Reborns()); // mặc định tắt
+        Assert.DoesNotContain("farm", Modes());
+
+        cfg.RebornOn = true;
+        t = Run(ctl, t, 9, St("200", 1, "tower", 1));
+        Assert.Equal("farm", Modes().Last()); // ra Luyện Công trước
+        t = Run(ctl, t, 9, St("200", 1, "farm", 0));
+        Assert.DoesNotContain(ctl.Activity.Items, e => e.Text.Contains("Chết"));
+        Assert.Equal(1, Reborns());
+        ctl.OnPageMessage("""{"t":"rebornResult","r":"ok","n":2,"lv":1,"slots":"372,375,176,169"}""", t);
+        Assert.Contains(written, e => e.Kind == "reborn");
+
+        // Cấp thấp sau chuyển sinh: không về tháp
+        t = Run(ctl, t, 600, St("40", 2, "farm", 0));
+        Assert.Equal(1, Reborns());
+        Assert.DoesNotContain("tower", Modes().Skip(1));
+        // Trên cấp 80: về tháp như cũ
+        Run(ctl, t, 120, St("81", 2, "farm", 0));
+        Assert.Equal("tower", Modes().Last());
+    }
+
+    [Fact]
+    public void Reborn_stops_at_the_game_maximum()
+    {
+        var (ctl, page, cfg) = Make();
+        cfg.RebornOn = true;
+        string St(int cs) => JsonSerializer.Serialize(new { t = "status", screen = "game", name = "A", lv = "200", gold = "1 vạn", knb = "1 🔒1", mode = "farm", modeText = "farm",
+            zone = "Hoa Sơn", inTower = 0, cs });
+        Run(ctl, T0, 120, St(10));
+        Assert.DoesNotContain(page.Sent, m => m.GetProperty("t").GetString() == "reborn");
+    }
+
+    [Fact]
+    public void New_horse_species_in_the_bag_are_stored_without_waiting_for_the_horse_round()
+    {
+        var (ctl, page, _) = Make();
+        string St(int hst) => JsonSerializer.Serialize(new { t = "status", screen = "game", name = "A", lv = "150", gold = "1 vạn", knb = "1 🔒1", mode = "farm", modeText = "farm",
+            zone = "Hoa Sơn", inTower = 0, cs = 0, hst });
+        int Stores() => page.Sent.Count(m => m.GetProperty("t").GetString() == "horseStore");
+        var t = Run(ctl, T0, 180, St(0));
+        Assert.Equal(0, Stores());
+        t = Run(ctl, t, 60, St(2));
+        Assert.Equal(1, Stores());
+        ctl.OnPageMessage("""{"t":"horseStoreResult","r":"ok","stored":"Đích Lô, Siêu Quang","full":0}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("Đích Lô"));
+        Run(ctl, t, 300, St(2));
+        Assert.Equal(1, Stores()); // 30 phút mới thử lại
+    }
+
+    [Fact]
     public void Items_with_innate_skills_are_locked_before_selling_junk()
     {
         var (ctl, page, cfg) = Make();

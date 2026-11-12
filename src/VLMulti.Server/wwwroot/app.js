@@ -478,7 +478,7 @@ $('#horseBtn').addEventListener('click', openHorses);
 // ---------- 📜 Nhật ký game ----------
 // Mỗi dòng game ghi về chính nhân vật (kèm tầng / bản đồ), lọc theo nhân vật, loại, ngày; "💎 Đồ hiếm" gộp các nhân vật của bạn
 const GAMELOG_KINDS = [['', 'Mọi loại'], ['rare', '💎 Đồ hiếm'], ['boss', '👑 Boss'], ['assassin', '🗡 Sát Thủ'],
-  ['milestone', '🏆 Mốc 100 tầng'], ['tower', '🗼 Tháp'], ['death', '💀 Gục ngã'], ['quest', '🗺 Đi làm nhiệm vụ'], ['datau', '📜 Thưởng Dã Tẩu'], ['land', '🏯 Lãnh địa bang'], ['auction', '🎁 Đấu giá']];
+  ['milestone', '🏆 Mốc 100 tầng'], ['tower', '🗼 Tháp'], ['death', '💀 Gục ngã'], ['quest', '🗺 Đi làm nhiệm vụ'], ['datau', '📜 Thưởng Dã Tẩu'], ['land', '🏯 Lãnh địa bang'], ['auction', '🎁 Đấu giá'], ['reborn', '🔄 Chuyển sinh']];
 const vnToday = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
 let logSel = { who: 'rare', kind: '', day: '', hideXp: true };
 // Thưởng Dã Tẩu chỉ có kinh nghiệm ("🎁 Dã Tẩu #2491 (…): 3% kinh nghiệm")
@@ -805,6 +805,7 @@ function renderSettings() {
   const gKnbOn = box(!!s.guildKnbOn);
   const jewelOn = box(!!s.jewelSwapOn);
   const landOn = box(s.guildLandOn !== false);
+  const rebornOn = box(!!s.rebornOn);
   const gKnbAmount = pick([50, 100, 200, 300, 500], s.guildKnbAmount ?? 100, (n) => `${n0(n)} KNB`);
   const knbOn = box(!!s.knbSendOn), knbBig = box(s.knbOpenBig !== false);
   const knbMain = h('select', {}, [h('option', { value: '', text: '— Chọn —' })].concat((s.charNames || []).map((n) => {
@@ -907,13 +908,16 @@ function renderSettings() {
         check(buffTtlSp, '🌺 Tiên Thảo Lộ Đặc Biệt (+100% kinh nghiệm)'),
         check(buffQht, '🍶 Quế Hoa Tửu (+20 may mắn)'),
       ]),
+      section('Nhân vật', [
+        check(rebornOn, '🔄 Tự chuyển sinh ở cấp 200', 'Tới tối đa 10 lần. Bật "Tự cộng điểm" của game, đặt lại 4 ô kỹ năng khi học lại được. Sau chuyển sinh Luyện Công tới hết cấp 80 rồi mới vào tháp.'),
+      ]),
       section('Hành trang', [
         check(sellJunk, '💰 Sắp đầy thì "Bán thừa"', 'Món không khớp ⚙ Nhặt đồ, không khoá.'),
         sub(sellJunk, [grid(['Bán khi còn ≤ ô trống', sellFree])]),
         check(jewelOn, '💍 Đổi trang sức theo việc', 'Luyện Công / Nhiệm Vụ đeo Hồng Ảnh; Leo Tháp / Boss đeo trang sức sức mạnh. Riêng từng acc ở nút ⋯.'),
       ]),
       save('Lưu', () => ({ dailyKnb: dailyKnb.checked, buffTtl: buffTtl.checked, buffTtlSpecial: buffTtlSp.checked, buffQht: buffQht.checked,
-        autoSellJunk: sellJunk.checked, autoSellFreeSlots: +sellFree.value, jewelSwapOn: jewelOn.checked }), 'Đã lưu việc mỗi ngày'),
+        autoSellJunk: sellJunk.checked, autoSellFreeSlots: +sellFree.value, jewelSwapOn: jewelOn.checked, rebornOn: rebornOn.checked }), 'Đã lưu việc mỗi ngày'),
     ]],
     ['bang', '🏯 Bang hội', () => [
       section('Cửa hàng bang', [

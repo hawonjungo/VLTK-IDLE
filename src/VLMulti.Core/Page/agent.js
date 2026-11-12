@@ -2082,6 +2082,86 @@
   };
   // arg.op: 'scan' (nhận thư ngựa, mở rương, cất loài mới, đọc bộ sưu tập + ngựa thừa) ·
   // 'send' { to, uids, allowed } · 'take' { from } (nhận thư ngựa rồi cất loài mới)
+  // Ngựa loài mới (chưa có trong bộ sưu tập) đang nằm ở Hành trang trong khi Mã Trường còn chỗ – đọc thẳng dữ liệu game,
+  // không mở bảng. App thấy > 0 thì gửi 'horseStore' để cất (kể cả con đang khoá: game cho cất ngựa khoá).
+  const horseStoreCount = () => {
+    try {
+      const S = g('S'), own = g('hcOwned'), key = g('hcKey'), max = +g('STABLE_MAX') || 0;
+      if (!S || typeof own !== 'function' || typeof key !== 'function' || !max) return 0;
+      const st = Array.isArray(S.stable) ? S.stable.length : 0;
+      if (st >= max) return 0;
+      const have = own(), seen = new Set();
+      let n = 0;
+      for (const i of S.inv || []) {
+        if (!i || i.d !== 10) continue;
+        const k = key(i);
+        if (!k || have.has(k) || seen.has(k)) continue;
+        seen.add(k);
+        n++;
+      }
+      return Math.min(n, max - st);
+    } catch (_) { return 0; }
+  };
+
+  // ---------- 🔄 Chuyển sinh (cấp 200, tối đa 10 lần) ----------
+  // Game: doReborn() hỏi lại bằng hộp #askBox ("Chuyển sinh: về cấp 1, giữ trang bị…", nút [data-a="1"]) rồi gọi máy chủ
+  // nv.chuyensinh: về cấp 1, tẩy điểm tiềm năng / kỹ năng (giữ võ công 90), bỏ trống 4 ô kỹ năng. Trước khi làm: bật
+  // "Tự cộng điểm" của game (S.autoPts – game tự cộng tiềm năng và kỹ năng mỗi 5 giây khi còn điểm) và lưu 4 ô kỹ năng
+  // để đặt lại khi học lại được (restoreSlots). Không làm khi đang ở Tháp / Phó bản (game cũng không cho).
+  const rebornNow = () => { try { const S = g('S'); return S && S.rw && S.rw.stat ? (+S.rw.stat.reborn || 0) : -1; } catch (_) { return -1; } };
+  const SLOT_KEY = 'vl.rebSlots';
+  const rebornFlow = async () => {
+    if (flowBusy) return { r: 'busy' };
+    if (inBossHk()) return { r: 'boss-hk' };
+    const S = g('S'), doReborn = g('doReborn'), LV = +g('REBORN_LV') || 200, MAX = +g('REBORN_MAX') || 10;
+    if (!S || typeof doReborn !== 'function') return { r: 'no-fn' };
+    const before = rebornNow();
+    if (before < 0) return { r: 'no-state' };
+    if (+S.lvl < LV) return { r: 'low-level', lv: +S.lvl };
+    if (before >= MAX) return { r: 'max', n: before };
+    const gm = gameModeNow();
+    if (gm && (gm.tower || gm.dg)) return { r: 'in-run' };
+    flowBusy = true;
+    try {
+      await closeModalSure();
+      closeBag();
+      const slots = (S.slots || []).map((x) => +x || 0);
+      try { localStorage.setItem(SLOT_KEY, JSON.stringify({ slots, at: Date.now() })); } catch (_) {}
+      if (S.autoPts !== true) { S.autoPts = true; try { g('save')(); } catch (_) {} }
+      const p = Promise.resolve(doReborn()).catch(() => {});
+      const box = await waitFor(() => { const b = $('#askBox'); return b && /Chuyển sinh/.test(b.textContent || '') ? b : null; }, 4000);
+      if (!box) return { r: 'no-confirm' };
+      const ok = box.querySelector('[data-a="1"]');
+      if (!ok || !/Chuyển sinh/.test(ok.textContent || '')) { box.querySelector('[data-a="0"]')?.click(); return { r: 'wrong-confirm' }; }
+      ok.click();
+      await Promise.race([p, sleep(15000)]);
+      const done = await waitFor(() => rebornNow() > before, 10000);
+      if (!done) return { r: 'not-done' };
+      return { r: 'ok', n: rebornNow(), lv: +g('S').lvl, slots: slots.join(',') };
+    } finally {
+      flowBusy = false;
+    }
+  };
+  // Sau chuyển sinh: kỹ năng cũ học lại được (game tự cộng điểm) thì đặt lại đúng ô như trước. Hết việc hoặc quá 7 ngày thì thôi.
+  let slotsAt = 0;
+  const restoreSlots = () => {
+    if (Date.now() - slotsAt < 20000 || flowBusy) return;
+    slotsAt = Date.now();
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(SLOT_KEY) || 'null'); } catch (_) {}
+    if (!saved || !Array.isArray(saved.slots)) return;
+    const S = g('S'), assign = g('assignSlot');
+    if (!S || typeof assign !== 'function' || !S.sk) return;
+    let left = 0;
+    saved.slots.forEach((id, i) => {
+      if (!(id > 0)) return;
+      if ((S.slots || [])[i] === id) return;
+      if (!(S.sk[id] > 0)) { left++; return; }
+      try { assign(i, id); } catch (_) { left++; }
+    });
+    if (!left || Date.now() - (+saved.at || 0) > 7 * 864e5) { try { localStorage.removeItem(SLOT_KEY); } catch (_) {} }
+  };
+
   const horseFlow = async (arg) => {
     if (flowBusy || anyWindowOpen()) return { r: 'busy' };
     if (inBossHk()) return { r: 'boss-hk' };
@@ -2430,6 +2510,12 @@
       lockInnateFlow().then((res) => post({ t: 'lockInnateResult', ...res }), (err) => post({ t: 'lockInnateResult', r: 'error: ' + err.message }));
     } else if (m.t === 'sellJunk') {
       sellJunkFlow().then((res) => post({ t: 'sellJunkResult', ...res }), (err) => post({ t: 'sellJunkResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'reborn') {
+      rebornFlow().then((res) => post({ t: 'rebornResult', ...res }), (err) => post({ t: 'rebornResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'horseStore') {
+      // Chỉ cất loài mới vào Mã Trường (không nhận thư, không mở rương, không bán) – kết quả riêng, không lẫn với lượt 🐴
+      horseFlow({ op: 'take', from: [] }).then((res) => post({ t: 'horseStoreResult', r: res.r, stored: (res.stored || []).join(', '), full: res.stableFull ? 1 : 0 }),
+        (err) => post({ t: 'horseStoreResult', r: 'error: ' + err.message }));
     } else if (m.t === 'horse') {
       horseFlow(m.arg || {}).then((res) => post({ t: 'horseResult', ...res }), (err) => post({ t: 'horseResult', r: 'error: ' + err.message }));
     } else if (m.t === 'buffs') {
@@ -3148,6 +3234,7 @@
   });
 
   const report = () => {
+    try { if (screenOf() === 'game') restoreSlots(); } catch (_) {}
     try { handleTabLock(); } catch (err) { post({ t: 'log', msg: 'tab lock failed: ' + err.message }); }
     try { logDialogs(); } catch (err) { post({ t: 'log', msg: 'dialog scan failed: ' + err.message }); }
     const screen = screenOf();
@@ -3214,6 +3301,8 @@
       mode: realMode,
       modeText: realMode !== btnMode ? `${realMode} (nút: ${btnMode})` : on ? on.textContent.trim() : '',
       inTower: screen === 'game' ? ((gm) => (gm ? (gm.tower ? 1 : 0) : -1))(gameModeNow()) : -1,
+      cs: screen === 'game' ? rebornNow() : -1,            // số lần đã chuyển sinh (-1 = chưa đọc được)
+      hst: screen === 'game' ? horseStoreCount() : 0,     // ngựa loài mới ở Hành trang chờ cất vào Mã Trường
     };
     const json = JSON.stringify(s);
     if (json !== last || Date.now() - lastAt > 10000) {

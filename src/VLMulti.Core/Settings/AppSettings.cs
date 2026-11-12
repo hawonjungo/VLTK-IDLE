@@ -104,6 +104,10 @@ public sealed class AppSettings
     // không mất món, chỉ trả thêm khi bị người khác vượt giá, tối đa AuctionMaxKnb; Bang chủ / Phó thì Lò đủ món là hẹn
     // mở phiên ở mốc sớm nhất. Xem AccountController.SuperviseAuction.
     public bool AuctionOn { get; set; }
+    // 🔄 Tự chuyển sinh (mặc định tắt): acc đạt cấp 200 (kinh nghiệm không còn tính) thì chuyển sinh, tới tối đa 10 lần của game.
+    // Bật "Tự cộng điểm" của game, đặt lại 4 ô kỹ năng khi học lại được; cấp ≤ 80 sau chuyển sinh thì Luyện Công, không vào tháp.
+    // Xem AccountController.SuperviseReborn.
+    public bool RebornOn { get; set; }
     public int AuctionMaxKnb { get; set; } = 18000;
     // 💰 Gửi KNB (thư tặng) về acc chính KnbMainName, mỗi acc chừa KnbKeep KNB; chỉ chạy khi KnbSendOn và đã chọn acc chính.
     // KnbOpenBig: mở hết Đại Hồng Bao trước khi gửi

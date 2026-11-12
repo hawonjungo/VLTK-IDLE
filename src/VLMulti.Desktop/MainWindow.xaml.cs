@@ -707,7 +707,7 @@ public partial class MainWindow : Window
         _setKnb = null!, _setBuffTtl = null!, _setBuffTtlSp = null!, _setBuffQht = null!,
         _setGuild = null!, _setGuildLdt = null!, _setGuildFdl = null!, _setGuildTtsp = null!, _setGuildThbt = null!;
     private TextBox _setGuildDonate = null!;
-    private CheckBox _setGuildKnbOn = null!, _setJewel = null!, _setLand = null!, _setAuction = null!;
+    private CheckBox _setGuildKnbOn = null!, _setJewel = null!, _setLand = null!, _setAuction = null!, _setReborn = null!;
     private ComboBox _setGuildKnbAmount = null!, _setAuctionMax = null!;
     private CheckBox _setSellJunk = null!, _setGuildFurnace = null!, _setGuildWeek = null!, _setKnbOn = null!, _setKnbBig = null!;
     private ComboBox _setGuildDaily = null!, _setGuildReserve = null!, _setKnbMain = null!, _setKnbKeep = null!;
@@ -797,6 +797,7 @@ public partial class MainWindow : Window
         body.Add(_setBuffQht = Box("🍶 Quế Hoa Tửu (+20 may mắn)"));
         body.Add(_setSellJunk = Box("💰 Hành trang sắp đầy thì bấm \"Bán thừa\" của game (món không khớp ⚙ Nhặt đồ, không khoá)"));
         body.Add(FormRow("Bán khi còn ≤ ô trống", _setSellFree = Number("1–200 ô")));
+        body.Add(_setReborn = Box("🔄 Tự chuyển sinh ở cấp 200 (tới 10 lần): bật Tự cộng điểm của game, đặt lại ô kỹ năng; Luyện Công tới hết cấp 80 rồi mới vào tháp"));
         body.Add(_setJewel = Box("💍 Đổi trang sức theo việc: Luyện Công / Nhiệm Vụ đeo Hồng Ảnh, Leo Tháp / Boss đeo trang sức sức mạnh (chỉ dây chuyền, 2 nhẫn, ngọc bội)"));
         body.Add(Section("💰 Gửi KNB về acc chính"));
         body.Add(Note("Mỗi ngày một lần (sau khi đổi vạn → KNB) các acc khác gửi thư tặng phần KNB trên mức giữ lại về acc chính; acc chính tự nhận thư mỗi 30 phút."));
@@ -874,6 +875,7 @@ public partial class MainWindow : Window
         _setGuildFurnace.IsChecked = _settings.GuildFurnace;
         _setGuildKnbOn.IsChecked = _settings.GuildKnbOn;
         _setJewel.IsChecked = _settings.JewelSwapOn;
+        _setReborn.IsChecked = _settings.RebornOn;
         _setLand.IsChecked = _settings.GuildLandOn;
         SelectValue(_setGuildKnbAmount, _settings.GuildKnbAmount);
         _setGuildWeek.IsChecked = _settings.GuildWeekAlert;
@@ -927,6 +929,7 @@ public partial class MainWindow : Window
         _settings.GuildFurnace = _setGuildFurnace.IsChecked == true;
         _settings.GuildKnbOn = _setGuildKnbOn.IsChecked == true;
         _settings.JewelSwapOn = _setJewel.IsChecked == true;
+        _settings.RebornOn = _setReborn.IsChecked == true;
         _settings.GuildLandOn = _setLand.IsChecked == true;
         if (_setGuildKnbAmount.SelectedItem is ComboBoxItem { Tag: int knbAmt }) _settings.GuildKnbAmount = knbAmt;
         _settings.GuildWeekAlert = _setGuildWeek.IsChecked == true;

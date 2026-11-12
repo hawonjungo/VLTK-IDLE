@@ -534,6 +534,12 @@ public sealed class AccountController
                 case "sellJunkResult":
                     OnSellJunkResult(m, now);
                     break;
+                case "rebornResult":
+                    OnRebornResult(m, now);
+                    break;
+                case "horseStoreResult":
+                    OnHorseStoreResult(m, now);
+                    break;
                 case "horseResult":
                     Log.Write($"[{Account.Id}] horse {Str(m, "op")}: {Str(m, "r")} stored={Str(m, "stored")} sent={Str(m, "sent")} failed={Str(m, "failed")}");
                     HorseResult?.Invoke(m.Clone());
@@ -678,6 +684,8 @@ public sealed class AccountController
             ApplyHunt(Str(s, "hunt"), now);
             ApplyGoldBoss(Str(s, "gbw"), now);
             InTower = s.TryGetProperty("inTower", out var it) && it.ValueKind == JsonValueKind.Number ? it.GetInt32() : -1;
+            Reborn = s.TryGetProperty("cs", out var cs) && cs.ValueKind == JsonValueKind.Number ? cs.GetInt32() : -1;
+            HorsesToStore = s.TryGetProperty("hst", out var hst) && hst.ValueKind == JsonValueKind.Number ? hst.GetInt32() : 0;
             InnateUnlocked = s.TryGetProperty("innate", out var inn) && inn.ValueKind == JsonValueKind.Number ? inn.GetInt32() : 0;
             JewelEmpty = s.TryGetProperty("jewelEmpty", out var je) && je.ValueKind == JsonValueKind.Number ? je.GetInt32() : 0;
             Land = LandState.Parse(Str(s, "ld"));
@@ -1207,6 +1215,8 @@ public sealed class AccountController
         SuperviseGuildLedger(now);
         SuperviseGuildKnb(now);
         SuperviseAuction(now);
+        SuperviseReborn(now);
+        SuperviseHorseStore(now);
         SuperviseSellJunk(now);
         SuperviseKnbTransfer(now);
         SuperviseStuck(now);
@@ -1630,7 +1640,8 @@ public sealed class AccountController
     // ---------- Luật tự đổi chế độ (acc có bật 🔁) ----------
 
     private bool IsModeBlocked(string mode, DateTime now) =>
-        _modeBlockedUntil.TryGetValue(mode, out var until) && now < until;
+        (mode == ModeRules.Tower && TowerHeldForReborn(SettingsProvider?.Invoke()))
+        || (_modeBlockedUntil.TryGetValue(mode, out var until) && now < until);
 
     // Chế độ đổi mà không phải do luật yêu cầu:
     //  - Tháp → Luyện Công mà bạn không vừa bấm đổi: chết trong tháp (game đẩy ra Luyện Công) → xem OnTowerDeath
@@ -1753,7 +1764,7 @@ public sealed class AccountController
     // → bấm lại Leo Tháp (trang tự bấm Luyện Công rồi Leo Tháp nếu nút đã sáng)
     private void SuperviseTowerPresence(DateTime now)
     {
-        bool absent = Screen == "game" && ModeCode == ModeRules.Tower && InTower == 0 && !AssassinActive;
+        bool absent = Screen == "game" && ModeCode == ModeRules.Tower && InTower == 0 && !AssassinActive && !IsModeBlocked(ModeRules.Tower, now);
         if (!absent) { _towerAbsentSince = null; return; }
         _towerAbsentSince ??= now;
         if (now - _towerAbsentSince < TimeSpan.FromMinutes(2) || now - _towerAbsentFixAt < TimeSpan.FromMinutes(3)) return;
@@ -2259,6 +2270,110 @@ public sealed class AccountController
             GameLogSink?.Invoke(Account.Id, new[] { new GameLog.Entry(now, "rare", "", Account.CharName ?? "", $"🔒 Tự khoá đồ có kỹ năng vốn có: {locked}") });
         }
         if (failed.Length > 0) Raise("innate-lock", $"Không khoá được đồ có kỹ năng vốn có: {failed} – hãy khoá tay");
+    }
+
+    // ---------- 🔄 Chuyển sinh ----------
+    // Cấp 200 thì kinh nghiệm không còn tính → bạn bật thì chuyển sinh (tới tối đa 10 lần của game). Trang làm (rebornFlow):
+    // bật "Tự cộng điểm" của game, lưu 4 ô kỹ năng để đặt lại khi học lại được, bấm Chuyển sinh và xác nhận. Game không cho
+    // chuyển sinh trong Tháp / Phó bản → đang ở tháp thì ra Luyện Công trước. Sau chuyển sinh, tới hết cấp 80 thì chỉ Luyện
+    // Công (không vào tháp ở tầng cũ khi còn yếu), trên cấp 80 thì về tháp như cũ.
+    public const int RebornLevel = 200, RebornMaxTimes = 10, RebornTowerLevel = 80;
+    public int Reborn { get; private set; } = -1;   // số lần đã chuyển sinh (-1 = chưa đọc được)
+    public int HorsesToStore { get; private set; }  // ngựa loài mới ở Hành trang chờ cất vào Mã Trường
+    private DateTime _rebornAt = DateTime.MinValue, _rebornFarmAt = DateTime.MinValue;
+    private bool _rebornPending, _rebornHoldNoted;
+
+    public bool RebornLowLevel => Reborn > 0 && Stats.Level is { } lv && lv <= RebornTowerLevel;
+    public bool RebornDue(AppSettings? cfg) =>
+        cfg is { RebornOn: true } && Reborn is >= 0 and < RebornMaxTimes && Stats.Level is { } lv && lv >= RebornLevel;
+    private bool TowerHeldForReborn(AppSettings? cfg) => RebornLowLevel || RebornDue(cfg);
+
+    private void SuperviseReborn(DateTime now)
+    {
+        if (Screen != "game" || Away || Maintenance) return;
+        var cfg = SettingsProvider?.Invoke();
+        bool due = RebornDue(cfg);
+        if (!TowerHeldForReborn(cfg)) { _rebornHoldNoted = false; return; }
+
+        // Đang ở tháp: ra Luyện Công (đánh dấu là lệnh của app, không tính là chết trong tháp)
+        if (ModeCode == ModeRules.Tower)
+        {
+            if (AssassinActive || EventRunning(now) || now - _rebornFarmAt < TimeSpan.FromMinutes(3)) return;
+            _rebornFarmAt = now;
+            _pendingAutoMode = ModeRules.Farm;
+            _lastAutoModeCmd = now;
+            if (!_rebornHoldNoted)
+            {
+                _rebornHoldNoted = true;
+                Note(now, due ? $"🔄 Cấp {RebornLevel}: ra Luyện Công để chuyển sinh"
+                              : $"🔄 Mới chuyển sinh, cấp {Stats.Level}: Luyện Công tới hết cấp {RebornTowerLevel} rồi mới vào tháp");
+            }
+            Log.Write($"[{Account.Id}] reborn: tower -> farm (lv {Stats.Level}, reborn {Reborn}, due {due})");
+            RunCommand("mode", ModeRules.Farm);
+            return;
+        }
+        if (!due) return;
+        if (BossHkSchedule(now + TimeSpan.FromMinutes(10)) || _auctionLive || AssassinActive || EventRunning(now)) return;
+        if (InTower == 1 || ModeCode == ModeRules.Dungeon || _ldtBuyingSince is not null) return;
+        if (_rebornPending && now - _rebornAt < TimeSpan.FromMinutes(2)) return;
+        if (now - _rebornAt < TimeSpan.FromMinutes(5)) return;
+        _rebornAt = now;
+        _rebornPending = true;
+        Log.Write($"[{Account.Id}] reborn: lv {Stats.Level}, reborn {Reborn} → chuyển sinh");
+        Post(new { t = "reborn" });
+    }
+
+    private void OnRebornResult(JsonElement m, DateTime now)
+    {
+        _rebornPending = false;
+        var r = Str(m, "r");
+        Log.Write($"[{Account.Id}] reborn: {r} n={Raw(m, "n")} lv={Raw(m, "lv")} slots={Str(m, "slots")}");
+        switch (r)
+        {
+            case "ok":
+                if (int.TryParse(Raw(m, "n"), out var n)) Reborn = n;
+                var text = $"🔄 Chuyển sinh lần {Raw(m, "n")}: về cấp 1, game tự cộng điểm; Luyện Công tới hết cấp {RebornTowerLevel} rồi về tháp";
+                Note(now, text, StatusLevel.Ok);
+                GameLogSink?.Invoke(Account.Id, new[] { new GameLog.Entry(now, "reborn", "", Account.CharName ?? "", text) });
+                _rebornHoldNoted = false;
+                break;
+            case "busy" or "boss-hk" or "in-run":
+                _rebornAt = now - TimeSpan.FromMinutes(4); // thử lại sau 1 phút
+                break;
+            case "low-level" or "max":
+                break;
+            default:
+                _rebornAt = now + TimeSpan.FromMinutes(25); // 30 phút nữa thử lại
+                Raise("reborn", $"Chưa chuyển sinh được ({r}) – 30 phút nữa thử lại");
+                break;
+        }
+    }
+
+    // ---------- 🐴 Cất ngựa loài mới vào Mã Trường ----------
+    // Trang đếm ngựa loài mới (chưa có trong bộ sưu tập) đang nằm ở Hành trang khi Mã Trường còn chỗ (status "hst", đọc dữ
+    // liệu game, không mở bảng). Có thì cất vào – kể cả con đang khoá. Không phải đợi lượt 🐴 (chỉ chạy mỗi ngày một lần).
+    private DateTime _horseStoreAt = DateTime.MinValue;
+
+    private void SuperviseHorseStore(DateTime now)
+    {
+        if (HorsesToStore <= 0 || Screen != "game" || Away || Maintenance) return;
+        if (now - _screenSince < TimeSpan.FromMinutes(2) || now - _horseStoreAt < TimeSpan.FromMinutes(30)) return;
+        if (_ldtBuyingSince is not null || EventRunning(now) || AssassinActive) return;
+        _horseStoreAt = now;
+        Post(new { t = "horseStore" });
+    }
+
+    private void OnHorseStoreResult(JsonElement m, DateTime now)
+    {
+        var r = Str(m, "r");
+        var stored = Str(m, "stored");
+        Log.Write($"[{Account.Id}] horse store: {r} stored={stored} full={Raw(m, "full")}");
+        if (r is "busy" or "boss-hk") { _horseStoreAt = now - TimeSpan.FromMinutes(28); return; } // 2 phút nữa thử lại
+        if (r == "ok" && stored.Length > 0)
+        {
+            Note(now, $"🐴 Cất loài mới vào Mã Trường: {stored}", StatusLevel.Ok);
+            GameLogSink?.Invoke(Account.Id, new[] { new GameLog.Entry(now, "quest", "", Account.CharName ?? "", $"🐴 Cất vào Mã Trường: {stored}") });
+        }
     }
 
     private void SuperviseSellJunk(DateTime now)

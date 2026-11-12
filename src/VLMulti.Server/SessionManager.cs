@@ -291,6 +291,7 @@ public sealed class SessionManager : IAsyncDisposable
                     guildLandOn = _settings.GuildLandOn,
                     auctionOn = _settings.AuctionOn,
                     auctionMaxKnb = _settings.AuctionMaxKnb,
+                    rebornOn = _settings.RebornOn,
                     guildKnbAmount = _settings.GuildKnbAmount,
                     knbSendOn = _settings.KnbSendOn,
                     knbOpenBig = _settings.KnbOpenBig,
@@ -717,6 +718,7 @@ public sealed class SessionManager : IAsyncDisposable
             if (u.GuildLandOn is { } glo) _settings.GuildLandOn = glo;
             if (u.AuctionOn is { } ao) _settings.AuctionOn = ao;
             if (u.AuctionMaxKnb is { } am) _settings.AuctionMaxKnb = am;
+            if (u.RebornOn is { } rbo) _settings.RebornOn = rbo;
             if (u.GuildKnbAmount is { } gka) _settings.GuildKnbAmount = gka;
             if (u.KnbMainName is { } km) _settings.KnbMainName = km;
             if (u.KnbSendOn is { } ks) _settings.KnbSendOn = ks;
@@ -768,9 +770,10 @@ public sealed class SessionManager : IAsyncDisposable
         return (members, names);
     }
 
-    // 🐴 Ngồi Lửa trại trong Lãnh địa bang thì rảnh: mỗi ngày một lần, khi mọi acc đang trong game đều ngồi Lửa trại
-    // (không có Cơ Giáp) được 1 phút → tự quét và chuyển ngựa giữa các nhân vật của bạn (không mở Rương Ngựa, không
-    // tự bán con thừa không acc nào cần (trừ ngựa Thần).
+    // 🐴 Lượt Mã Trường tự động mỗi ngày một lần: quét, chuyển ngựa giữa các nhân vật của bạn, bán con thừa không acc nào
+    // cần (trừ ngựa Thần). Thứ 4 / thứ 7 (bật Lãnh địa bang): khi mọi acc đang trong game đều ngồi Lửa trại (không có Cơ
+    // Giáp) được 1 phút, không mở Rương Ngựa. Ngày khác (hoặc tới 23:10 mà chưa ngồi Lửa trại): từ 13:00 giờ VN, ngoài
+    // đợt Boss Hoàng Kim, không acc nào trong Lãnh địa → chạy và mở Rương Ngựa.
     private DateOnly _horseLandDay;
     private DateTime? _horseLandSince;
 
@@ -788,7 +791,25 @@ public sealed class SessionManager : IAsyncDisposable
                 inGame++;
                 if (c.Land is { In: true, CgUp: false }) sitting++;
             });
-        if (!on || inGame < 2 || sitting < inGame) { _horseLandSince = null; return; }
+        var vn = now.ToUniversalTime().AddHours(7);
+        bool landDay = on && (vn.DayOfWeek is DayOfWeek.Wednesday or DayOfWeek.Saturday) && vn.TimeOfDay < new TimeSpan(23, 10, 0);
+        if (!landDay)
+        {
+            _horseLandSince = null;
+            if (inGame < 2 || sitting > 0 || vn.Hour < 13) return;
+            var utc = now.ToUniversalTime();
+            if (Core.GameData.BossHkSchedule.IsActive(utc) || Core.GameData.BossHkSchedule.IsActive(utc.AddMinutes(20))) return;
+            _horseLandDay = day;
+            var (dm, dn) = HorseParty();
+            Log.Write($"horse: lượt mỗi ngày – tự quét {dm.Count} acc, mở Rương Ngựa");
+            _ = Task.Run(async () =>
+            {
+                if (await _horses.ScanAsync(dm, dn, openChests: true) && _horses.Plan.Count + _horses.Sales.Count > 0)
+                    await _horses.SendAsync(dm, dn);
+            });
+            return;
+        }
+        if (inGame < 2 || sitting < inGame) { _horseLandSince = null; return; }
         _horseLandSince ??= now;
         if (now - _horseLandSince < TimeSpan.FromMinutes(1)) return;
         _horseLandDay = day;
@@ -874,4 +895,4 @@ public sealed record SettingsUpdate(
     int? GuildDailyAmount = null, int? GuildDonateReserve = null, bool? GuildFurnace = null,
     bool? GuildWeekAlert = null, string? KnbMainName = null, int? KnbKeep = null, bool? KnbSendOn = null, bool? KnbOpenBig = null,
     int? KiteFleeHp = null, int? KiteCrowd = null, int? KitePauseMs = null, bool? GuildKnbOn = null, int? GuildKnbAmount = null, bool? JewelSwapOn = null,
-    bool? GuildLandOn = null, bool? AuctionOn = null, int? AuctionMaxKnb = null);
+    bool? GuildLandOn = null, bool? AuctionOn = null, int? AuctionMaxKnb = null, bool? RebornOn = null);
