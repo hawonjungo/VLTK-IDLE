@@ -1738,7 +1738,10 @@
   };
   const horseScan = () => {
     const coll = VLParse.horseCollection(($('#mBody') || {}).innerText);
-    const spares = horseRows().filter((h) => h.spare).map(({ uid, key, name, where, locked }) => ({ uid, key, name, where, locked }));
+    const rows = horseRows();
+    const spares = rows.filter((h) => h.spare).map(({ uid, key, name, where, locked, than }) => ({ uid, key, name, where, locked, than: !!than }));
+    // Mã Trường đầy, không còn con trùng để dọn chỗ: con loài mới còn nằm ở Hành trang → app xét gửi cho acc thiếu hoặc bán
+    if (stableFull()) for (const h of rows) if (h.where === 'bag' && !h.dup) spares.push({ uid: h.uid, key: h.key, name: h.name, where: h.where, locked: h.locked, than: !!h.than, stuck: true });
     return { coll, spares, stable: stableNow() };
   };
   // Thẻ món trong Hành trang: mở / khoá (#bLock "🔓Mở khóa" khi đang khoá, "🔒Khóa" khi không)
@@ -2100,8 +2103,21 @@
         // vẫn là con trùng game không giữ lại, không khoá. Game bán ngay, không hỏi lại (thấy hộp hỏi về KNB thì huỷ).
         for (const uid of arg.uids || []) {
           if (!(await openStable())) { res.failed.push(uid + ':no-stable'); continue; }
-          const h = horseRows().find((x) => x.uid === uid);
-          if (!h || !h.spare || h.locked) { res.failed.push(uid + ':not-spare'); continue; }
+          let h = horseRows().find((x) => x.uid === uid);
+          // Bán: con trùng loài (game không giữ lại) hoặc con loài mới kẹt ở Hành trang vì Mã Trường đầy; không bao giờ bán
+          // ngựa Thần (✦) hay con đang cưỡi. Con đang khoá: lấy ra Hành trang, mở khoá rồi mới bán (game không bán con khoá).
+          const ridden = (() => { try { const e = g('S').eq || {}; return e.horse && String(e.horse.uid) === String(uid); } catch (_) { return false; } })();
+          const stuck = h && h.where === 'bag' && !h.dup && stableFull();
+          if (!h || h.than || ridden || !(h.spare || stuck)) { res.failed.push(uid + ':not-spare'); continue; }
+          if (h.locked) {
+            if (h.where === 'st' && !(await moveHorse(uid, 'data-sout'))) { res.failed.push(uid + ':take-out'); continue; }
+            await closeModalSure();
+            if (!(await openBag()) || !(await setLocked(uid, false))) { closeBag(); res.failed.push(uid + ':unlock'); continue; }
+            closeBag();
+            if (!(await openStable())) { res.failed.push(uid + ':no-stable'); continue; }
+            h = horseRows().find((x) => x.uid === uid);
+            if (!h || h.locked) { res.failed.push(uid + ':still-locked'); continue; }
+          }
           const b = $(`#mBody [data-hsell="${uid}"]`);
           if (!b) { res.failed.push(uid + ':no-button'); continue; }
           b.click();
@@ -2132,7 +2148,7 @@
           const uid = queue[qi];
           if (!(await openStable())) { res.failed.push(uid + ':no-stable'); continue; }
           const h = horseRows().find((x) => x.uid === uid);
-          if (!h || !h.spare) { res.failed.push(uid + ':gone'); continue; }
+          if (!h || !(h.spare || (h.where === 'bag' && !h.dup && stableFull()))) { res.failed.push(uid + ':gone'); continue; }
           if (h.where === 'st') {
             horseMsgs.length = 0;
             if (!(await moveHorse(uid, 'data-sout'))) {

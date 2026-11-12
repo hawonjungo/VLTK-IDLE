@@ -1073,7 +1073,7 @@ public partial class MainWindow : Window
             var sell = string.Join("\n", sales.GroupBy(x => x.CharName).Select(g => $"• {g.Key}: "
                 + string.Join(", ", g.GroupBy(x => x.Horse.Name).Select(x => x.Count() > 1 ? $"{x.Key} ×{x.Count()}" : x.Key))));
             var ok = MessageBox.Show(this,
-                $"{lines}\n\nChuyển {plan.Count} con qua thư tặng (0 KNB) và bán {sales.Count} con thừa mà không acc nào cần (không bán con đang khoá)?"
+                $"{lines}\n\nChuyển {plan.Count} con qua thư tặng (0 KNB) và bán {sales.Count} con thừa mà không acc nào cần (kể cả con đang khoá, giữ ngựa Thần)?"
                 + (plan.Count > 0 ? $"\n\nChuyển:\n{list}" : "") + (sales.Count > 0 ? $"\n\nBán:\n{sell}" : ""),
                 "🐴 Mã Trường", MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (ok != MessageBoxResult.Yes)

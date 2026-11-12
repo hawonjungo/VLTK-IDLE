@@ -760,7 +760,8 @@ public sealed class SessionManager : IAsyncDisposable
             if (screen != "game" || string.IsNullOrWhiteSpace(acc.CharName)) continue;
             members.Add(new HorseMember(acc.Id, acc.CharName!,
                 msg => s.Locked(c => c.PostRaw(msg)),
-                text => s.Locked(c => c.Note(DateTime.Now, text, StatusLevel.Ok))));
+                text => s.Locked(c => c.Note(DateTime.Now, text, StatusLevel.Ok)),
+                text => s.Locked(c => c.WriteGameLog("quest", text))));
         }
         List<string> names;
         lock (_gate) names = _settings.Accounts.Select(a => a.CharName ?? "").Where(n => n.Length > 0).Distinct().ToList();
@@ -769,7 +770,7 @@ public sealed class SessionManager : IAsyncDisposable
 
     // 🐴 Ngồi Lửa trại trong Lãnh địa bang thì rảnh: mỗi ngày một lần, khi mọi acc đang trong game đều ngồi Lửa trại
     // (không có Cơ Giáp) được 1 phút → tự quét và chuyển ngựa giữa các nhân vật của bạn (không mở Rương Ngựa, không
-    // bán – bán con thừa vẫn để bạn xem và xác nhận ở nút 🐴).
+    // tự bán con thừa không acc nào cần (trừ ngựa Thần).
     private DateOnly _horseLandDay;
     private DateTime? _horseLandSince;
 
@@ -796,8 +797,8 @@ public sealed class SessionManager : IAsyncDisposable
         Log.Write($"horse: ngồi Lửa trại – tự quét {members.Count} acc");
         _ = Task.Run(async () =>
         {
-            if (await _horses.ScanAsync(members, names, openChests: false) && _horses.Plan.Count > 0)
-                await _horses.SendAsync(members, names, sell: false);
+            if (await _horses.ScanAsync(members, names, openChests: false) && _horses.Plan.Count + _horses.Sales.Count > 0)
+                await _horses.SendAsync(members, names);
         });
     }
 

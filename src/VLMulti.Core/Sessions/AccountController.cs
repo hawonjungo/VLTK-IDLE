@@ -1684,6 +1684,10 @@ public sealed class AccountController
     private DateTime? _busySince;
     private bool _busyUnstuckSent;
 
+    // Ghi một dòng vào 📜 Log của acc (dùng cho việc chạy chung nhiều acc, ví dụ 🐴 Mã Trường)
+    public void WriteGameLog(string kind, string text) =>
+        GameLogSink?.Invoke(Account.Id, new[] { new GameLog.Entry(_lastNow == default ? DateTime.Now : _lastNow, kind, "", Account.CharName ?? "", text) });
+
     private void TrackBusy(bool busy, DateTime now)
     {
         if (!busy) { _busySince = null; _busyUnstuckSent = false; return; }

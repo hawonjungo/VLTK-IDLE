@@ -8,7 +8,8 @@ namespace VLMulti.Core.Sessions;
 // → acc cho mở khoá (nếu cần) và gửi thư tặng (0 KNB) → acc nhận lấy thư rồi cất vào Mã Trường.
 // Chỉ gửi giữa các nhân vật của bạn (trang cũng tự kiểm tra lại tên người nhận).
 
-public sealed record HorseSpare(string Uid, string Key, string Name, string Where, bool Locked);
+// Than: ngựa Thần (✦) – không bao giờ bán. Stuck: loài mới nằm ở Hành trang vì Mã Trường đầy (không phải con trùng).
+public sealed record HorseSpare(string Uid, string Key, string Name, string Where, bool Locked, bool Than = false, bool Stuck = false);
 
 public sealed record HorseAccount(
     string Id, string CharName, string Result,
@@ -37,7 +38,7 @@ public sealed record HorseAccount(
             {
                 var uid = Str(s, "uid");
                 if (uid.Length == 0) continue;
-                spares.Add(new HorseSpare(uid, Str(s, "key"), Str(s, "name"), Str(s, "where"), Bool(s, "locked")));
+                spares.Add(new HorseSpare(uid, Str(s, "key"), Str(s, "name"), Str(s, "where"), Bool(s, "locked"), Bool(s, "than"), Bool(s, "stuck")));
             }
         var stored = Str(m, "stored").Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
         var sold = Str(m, "sold").Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
@@ -79,7 +80,8 @@ public static class HorsePlanner
         return moves;
     }
 
-    // Ngựa thừa không acc nào của bạn còn thiếu loài đó, không nằm trong danh sách chuyển và không khoá → bán.
+    // Ngựa thừa không acc nào khác của bạn còn thiếu loài đó, không nằm trong danh sách chuyển → bán, kể cả con đang khoá
+    // (trang mở khoá trước). Gồm con loài mới kẹt ở Hành trang vì Mã Trường đầy. Không bao giờ bán ngựa Thần.
     // Chỉ khi đã quét được đủ mọi nhân vật của bạn (thiếu một acc thì không biết acc đó cần gì → không bán con nào).
     public static List<HorseSale> Sales(IReadOnlyList<HorseAccount> accounts, IReadOnlyList<HorseMove> moves, IReadOnlyList<string> ownNames)
     {
@@ -87,7 +89,7 @@ public static class HorsePlanner
         if (ownNames.Count == 0 || ownNames.Any(n => !ok.Any(a => a.CharName == n))) return new List<HorseSale>();
         var moving = moves.Select(m => (m.FromId, m.Horse.Uid)).ToHashSet();
         return ok.SelectMany(a => a.Spares
-                .Where(s => !s.Locked && !moving.Contains((a.Id, s.Uid))
+                .Where(s => !s.Than && !moving.Contains((a.Id, s.Uid))
                     && !ok.Any(o => o.Id != a.Id && o.Missing.Contains(s.Key)))
                 .Select(s => new HorseSale(a.Id, a.CharName, s)))
             .ToList();
@@ -95,7 +97,7 @@ public static class HorsePlanner
 }
 
 // Một acc tham gia: gửi tin vào trang của acc đó (bên gọi lo khoá), ghi nhật ký của acc
-public sealed record HorseMember(string Id, string CharName, Action<object> Post, Action<string> Note);
+public sealed record HorseMember(string Id, string CharName, Action<object> Post, Action<string> Note, Action<string>? GameLog = null);
 
 public sealed class HorseCoordinator
 {
@@ -242,7 +244,8 @@ public sealed class HorseCoordinator
                 {
                     var names = string.Join(", ", sold.GroupBy(n => n).Select(x => x.Count() > 1 ? $"{x.Key} ×{x.Count()}" : x.Key));
                     AddLine($"💰 {mb.CharName}: bán {sold.Count} con thừa ({names})");
-                    mb.Note($"🐴 Bán {sold.Count} ngựa thừa không acc nào cần");
+                    mb.Note($"🐴 Bán {sold.Count} ngựa thừa không acc nào cần: {names}");
+                    mb.GameLog?.Invoke($"🐴 Bán ngựa (mọi acc đã có loài này): {names}");
                 }
                 if (sold.Count < g.Count())
                 {

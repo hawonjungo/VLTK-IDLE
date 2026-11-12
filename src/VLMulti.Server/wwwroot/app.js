@@ -447,7 +447,7 @@ async function renderHorses() {
     }))));
   }
   if (st.phase === 'ready' && nSell) {
-    parts.push(h('h3', { text: `Bán ngựa thừa không acc nào cần (${nSell} con, không bán con đang khoá)` }));
+    parts.push(h('h3', { text: `Bán ngựa thừa không acc nào cần (${nSell} con, kể cả con đang khoá; giữ ngựa Thần)` }));
     parts.push(h('div', { class: 'horse-plan' }, st.sales.map((x) => h('div', { text: `${x.name}: ${x.horses}` }))));
   }
   const actions = [];

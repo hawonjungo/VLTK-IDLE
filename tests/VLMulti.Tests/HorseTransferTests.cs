@@ -9,7 +9,7 @@ public class HorseTransferTests
     private static HorseAccount Acc(string id, string name, string[] missing, params HorseSpare[] spares) =>
         new(id, name, "ok", 40, 62, 1, 14, missing, spares, 0, Array.Empty<string>(), 0, false, false);
 
-    private static HorseSpare Spare(string uid, string key, string where = "bag", bool locked = false) => new(uid, key, key, where, locked);
+    private static HorseSpare Spare(string uid, string key, string where = "bag", bool locked = false, bool than = false, bool stuck = false) => new(uid, key, key, where, locked, than, stuck);
 
     [Fact]
     public void Plan_gives_missing_species_from_other_accounts_spares()
@@ -54,17 +54,19 @@ public class HorseTransferTests
     }
 
     [Fact]
-    public void Sales_only_unlocked_spares_nobody_needs_and_not_being_moved()
+    public void Sales_spares_nobody_needs_including_locked_but_never_than_horses()
     {
         var a = Acc("acc1", "A", new[] { "sư tử" },
             Spare("1", "hoàng mã"),                 // không ai thiếu → bán
             Spare("2", "tuyệt ảnh"),                // B thiếu → không bán (đang chuyển)
             Spare("3", "tuyệt ảnh"),                // B thiếu → không bán (con thứ hai vẫn có người cần)
-            Spare("4", "bạch mã", locked: true));   // khoá → không bán
-        var b = Acc("acc2", "B", new[] { "tuyệt ảnh" }, Spare("5", "sư tử"), Spare("6", "hắc mã"));
+            Spare("4", "bạch mã", locked: true),    // khoá nhưng không ai cần → bán (trang mở khoá trước)
+            Spare("7", "kim tinh hổ vương", locked: true, than: true)); // ngựa Thần → giữ
+        // B: Mã Trường đầy, con "ô vân" (loài mới với B) kẹt ở Hành trang; A đã có loài đó → bán
+        var b = Acc("acc2", "B", new[] { "tuyệt ảnh" }, Spare("5", "sư tử"), Spare("6", "hắc mã"), Spare("8", "ô vân", stuck: true));
         var plan = HorsePlanner.Plan(new[] { a, b });
         var sales = HorsePlanner.Sales(new[] { a, b }, plan, new[] { "A", "B" });
-        Assert.Equal(new[] { "1", "6" }, sales.Select(s => s.Horse.Uid).OrderBy(x => x));
+        Assert.Equal(new[] { "1", "4", "6", "8" }, sales.Select(s => s.Horse.Uid).OrderBy(x => x));
     }
 
     [Fact]
