@@ -543,7 +543,7 @@ public sealed class AccountController
                     break;
                 case "kiteFloor":
                     // Số liệu né liên tục từng tầng (để so và chỉnh): thời gian, máu mất, số lần nhích, máu thấp nhất
-                    Log.Write($"[{Account.Id}] kite floor {Raw(m, "floor")}: {Raw(m, "secs")}s lost={Raw(m, "lost")} steps={Raw(m, "steps")} min={Raw(m, "minPct")}% {(Raw(m, "melee") == "1" ? "melee" : "ranged")} ngựa={Raw(m, "mounted")} đi={Raw(m, "movePct")}% trước={Raw(m, "pre")} xa={Raw(m, "far")} tầmquái={Raw(m, "mReach")} đòn={Raw(m, "atkPs")}/s ({Raw(m, "atkPct")}%)");
+                    Log.Write($"[{Account.Id}] kite floor {Raw(m, "floor")}: {Raw(m, "secs")}s lost={Raw(m, "lost")} steps={Raw(m, "steps")} min={Raw(m, "minPct")}% {(Raw(m, "melee") == "1" ? "melee" : "ranged")} ngựa={Raw(m, "mounted")} đi={Raw(m, "movePct")}% trước={Raw(m, "pre")} xa={Raw(m, "far")} tầmquái={Raw(m, "mReach")} đòn={Raw(m, "atkPs")}/s ({Raw(m, "atkPct")}%) nguy={Raw(m, "danger")}s");
                     break;
                 case "gameToast":
                     OnGameToast(Str(m, "text"), now);
@@ -1643,14 +1643,13 @@ public sealed class AccountController
         if (_lastTowerFloor is not null && _fastDeaths.Count >= cfg.TowerFastDeathCount)
         {
             _fastDeaths.Clear();
-            // Kẹt "tường": nghỉ xong vào lại vẫn chết nhanh ở đúng tầng đó → nghỉ dài dần (×1, ×3, ×6; tối đa 60 phút hoặc
-            // mức bạn đặt nếu lớn hơn). Đêm 11/11 ba nhân vật chết 3 lần mỗi 13 phút suốt đêm ở cùng một tầng.
+            // Nghỉ đúng mức bạn đặt (Luyện Công kiếm ít kinh nghiệm – không kéo dài). Kẹt "tường" (nghỉ xong vào lại vẫn chết
+            // nhanh ở đúng tầng đó 3 lượt) → báo một lần để bạn nâng đồ / kỹ năng.
             if (_wallFloor == _lastTowerFloor) _wallRests++; else (_wallFloor, _wallRests) = (_lastTowerFloor, 1);
-            int factor = _wallRests switch { 1 => 1, 2 => 3, _ => 6 };
-            var rest = TimeSpan.FromMinutes(Math.Min(cfg.TowerRestMinutes * factor, Math.Max(60, cfg.TowerRestMinutes)));
+            var rest = TimeSpan.FromMinutes(cfg.TowerRestMinutes);
             _modeBlockedUntil[ModeRules.Tower] = now + rest;
             if (_wallRests == 3)
-                Raise("tower-wall", $"Kẹt ở tầng {floor}: nghỉ rồi vào lại vẫn chết nhanh {_wallRests} lượt – từ giờ nghỉ {Minutes(rest)} mỗi lượt (Luyện Công) tới khi qua được tầng này. Nên nâng đồ / kỹ năng");
+                Raise("tower-wall", $"Kẹt ở tầng {floor}: nghỉ rồi vào lại vẫn chết nhanh {_wallRests} lượt liền – nên nâng đồ / kỹ năng (vẫn nghỉ {Minutes(rest)} mỗi lượt như cài đặt)");
             else
                 Raise("tower-fast-death", $"Chết {cfg.TowerFastDeathCount} lần ở tầng {floor} – Luyện Công, {Minutes(rest)} nữa vào lại tháp");
             SetStatus($"Nghỉ tháp tới {(now + rest):HH:mm}", StatusLevel.Warn);

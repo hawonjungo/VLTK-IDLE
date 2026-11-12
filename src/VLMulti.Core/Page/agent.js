@@ -375,6 +375,7 @@
     mode: async (code) => {
       const opt = $(`#mswMenu button[data-msw="${CSS.escape(code)}"]`);
       if (!opt) return 'not-in-game';
+      if (code === 'tower') await groundForTower();
       if (opt.classList.contains('on')) {
         // Nút "Leo Tháp" vẫn sáng nhưng nhân vật đã bị đưa ra Luyện Công (chết trong tháp, bản game 08/11 không làm
         // mới nút) → bấm Luyện Công rồi Leo Tháp lại để game thật sự vào tháp
@@ -560,7 +561,7 @@
   };
   const kiteFloorDone = (R) => {
     const st = kiteSt.stat;
-    if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0, mounted: st.mounted || 0, movePct: st.nearTicks ? Math.round(100 * (st.moveTicks || 0) / st.nearTicks) : null, pre: st.pre || 0, far: st.far || 0, mReach: st.mReach || 0,
+    if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0, mounted: st.mounted || 0, movePct: st.nearTicks ? Math.round(100 * (st.moveTicks || 0) / st.nearTicks) : null, pre: st.pre || 0, far: st.far || 0, mReach: st.mReach || 0, danger: Math.round((st.danger || 0) / 10),
       atkPs: st.nearTicks ? Math.round(100 * (st.atk || 0) / (st.nearTicks * 0.1)) / 100 : null,
       atkPct: st.nearTicks && st.rate ? Math.round(100 * (st.atk || 0) / (st.nearTicks * 0.1) / st.rate) : null });
     kiteSt.stat = null;
@@ -586,7 +587,9 @@
     if (!auto || !auto.classList.contains('on') || flowBusy || anyWindowOpen()) return;
     const H = g('H'), R = g('R'), W = g('WORLD'), S = g('S');
     if (!H || !R || !W || !R.tower || R.dg || R.sat || R.deadT > 0 || (S && S.mode !== 'tower')) {
-      if (kiteSt.stat && R && (R.deadT > 0 || !R.tower)) { kiteSt.stat.died = 1; kiteFloorDone(R); }
+      if (kiteSt.stat && R && (R.deadT > 0 || !R.tower)) { kiteSt.stat.died = 1; if (R.deadT > 0) kiteSt.diedFloor = kiteSt.stat.floor; kiteFloorDone(R); }
+      // Ra khỏi tháp (chết, nghỉ, boss…) → vào lại cùng tầng vẫn chạy sẵn trước khi quái mọc
+      if (!R || !R.tower) kiteSt.preFloor = null;
       kiteSt.floor = null; return;
     }
     const now = Date.now();
@@ -594,6 +597,12 @@
     const rad = (R.P && R.P.main && +R.P.main.rad) || (melee ? 90 : 400);
     const m = c.margin ?? 220;
     const lifePct = R.P && R.P.life > 0 ? 100 * (R.life || 0) / R.P.life : 100;
+    // Nguy hiểm: máu tụt ≥ 25% trong 3 giây gần nhất, hoặc tầng này vừa chết → 4 giây giữ xa ngoài tầm quái
+    const hist = kiteSt.hist || (kiteSt.hist = []);
+    hist.push({ t: now, p: lifePct });
+    while (hist.length && now - hist[0].t > 3000) hist.shift();
+    if (Math.max(...hist.map((h) => h.p)) - lifePct >= 25 || (R.tower && kiteSt.diedFloor === R.tower.floor)) kiteSt.dangerUntil = now + 4000;
+    const danger = now < (kiteSt.dangerUntil || 0);
     const low = c.fleeHp && lifePct < c.fleeHp;
     // Cận chiến: bước dài hơn (75) để ra khỏi vùng chém, nhịp nhanh hơn (0,2 giây)
     const step = Math.max(30, Math.min(melee ? Math.max(c.step ?? 75, 75) : (c.step ?? 60), 90)) * (low ? 1.3 : 1);
@@ -668,7 +677,7 @@
     // dùng được trên ngựa
     if (!horseOk && R.mounted && now - (kiteSt.dismountAt || 0) > 1000) {
       const rb = $('#rideBtn');
-      if (rb && /Xuống ngựa/.test(rb.textContent)) { kiteSt.dismountAt = now; rb.click(); kiteSt.dismounts = (kiteSt.dismounts || 0) + 1; return; }
+      if (rb && /Xuống ngựa/.test(rb.textContent)) { kiteSt.dismountAt = now; rb.click(); kiteSt.dismounts = (kiteSt.dismounts || 0) + 1; } // vẫn né tiếp trong lúc xuống ngựa
     }
     // Phản xạ: con quái gần vừa ra chiêu → nhích ngay, không chờ nhịp
     const swing = near.some((e) => e.act === 'at' && (e.actT ?? 1) < 0.15);
@@ -716,9 +725,15 @@
       // quái mà vẫn trong tầm mình (ví dụ quái cận chiến 75, mình 512 → giữ ~360); không hơn được thì như cũ (150–260).
       const mReach = Math.max(0, ...near.map((e) => +e.reach || 0));
       const outrange = freeMove && rad - mReach >= 25;
-      const want = outrange ? Math.min(rad - 12, Math.max(mReach + 0.6 * (rad - mReach), Math.min(360, rad - 40)))
+      let want = outrange ? Math.min(rad - 12, Math.max(mReach + 0.6 * (rad - mReach), Math.min(360, rad - 40)))
         : Math.max(150, Math.min(rad * 0.55, 260));
-      if (st) { st.mReach = Math.max(st.mReach || 0, mReach); if (outrange) st.far = Math.round(want); }
+      // Thú nuôi chỉ đánh quái cách nhân vật < 400 (game: PET_RANGE) → bình thường giữ ≤ 375 cho thú nuôi đánh; chỉ khi
+      // nguy hiểm mới lùi hẳn ra ngoài tầm quái
+      const petOn = !!(R.petPos && !R.petPos.dead);
+      if (petOn && !danger && want > 375) want = Math.max(Math.min(375, rad - 12), 150);
+      if (st && danger) st.danger = (st.danger || 0) + 1;
+      if (st) st.far = Math.round(want);
+      if (st) st.mReach = Math.max(st.mReach || 0, mReach);
       // Quái đã vào gần tầm của nó → lùi nhanh (bước dài hơn), không thì chỉnh từ từ
       const urgent = outrange && dj < mReach + 40;
       const cap = urgent ? step * 1.8 : step;
@@ -810,12 +825,28 @@
   // xuống ngựa (0,6 giây) mới đánh được, trên ngựa không đánh / không hút sinh lực. Vào tháp → tắt "Tự lên ngựa"
   // (S.autoRide) và xuống ngựa nếu đang cưỡi; ra khỏi tháp → bật lại (chỉ khi chính tool đã tắt, nhớ trong trình duyệt
   // của acc). Tắt "Tự lên ngựa" mà còn ngồi ngựa thì game không tự xuống để đánh nữa → luôn xuống ngựa khi ở tháp.
-  let rideAt = 0;
+  let rideAt = 0, rideHoldUntil = 0;
+  // Trước khi bấm Leo Tháp (chiêu chính không dùng được trên ngựa): tắt "Tự lên ngựa" và xuống ngựa ngay ở ngoài, để vào
+  // tháp là đứng dưới đất né được ngay (12/11: vào tháp còn trên ngựa → mất ~0,6 giây xuống ngựa đúng lúc quái mọc, tầng
+  // đầu tiên sau mỗi lần vào tháp hay chết ngay). Giữ tắt 8 giây để vòng kiểm tra ngựa ngoài tháp không bật lại.
+  const groundForTower = async () => {
+    try {
+      const S = g('S'), R = g('R');
+      if (!S || !R || mainHorseOk(R)) return;
+      rideHoldUntil = Date.now() + 8000;
+      if (S.autoRide !== false) { S.autoRide = false; try { localStorage.setItem('vlRideOff', '1'); } catch (_) {} }
+      if (R.mounted) {
+        const rb = $('#rideBtn');
+        if (rb && /Xuống ngựa/.test(rb.textContent)) { rb.click(); await waitFor(() => !g('R').mounted, 1500); }
+      }
+    } catch (_) {}
+  };
   setInterval(() => {
     try {
       let S, R;
       try { S = window.H5.G('S'); R = window.H5.G('R'); } catch (_) { return; }
       if (!S || !R || !S.name) return;
+      if (!R.tower && Date.now() < rideHoldUntil) return; // vừa xuống ngựa để vào tháp
       const key = 'vlRideOff';
       // Chiêu chính dùng được trên ngựa → cứ cưỡi (nhanh hơn, né tốt hơn); bật lại nếu tool đã tắt trước đó
       if (R.tower && mainHorseOk(R)) {

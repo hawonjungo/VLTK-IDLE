@@ -330,7 +330,7 @@ public class AccountControllerTests
     }
 
     [Fact]
-    public void Repeated_rests_at_the_same_wall_floor_get_longer()
+    public void Rests_stay_at_the_setting_and_a_wall_floor_is_reported_once()
     {
         var (ctl, _, cfg) = Make();
         cfg.TowerRestMinutes = 10;
@@ -343,10 +343,10 @@ public class AccountControllerTests
         for (int i = 0; i < 3; i++) t = DieInTower(ctl, t, 20, floor: 900);
         Assert.InRange(Rest(t).TotalMinutes, 8, 11);
         for (int i = 0; i < 3; i++) t = DieInTower(ctl, t, 20, floor: 900);
-        Assert.InRange(Rest(t).TotalMinutes, 28, 31);
+        Assert.InRange(Rest(t).TotalMinutes, 8, 11);
         Assert.DoesNotContain("tower-wall", problems);
         for (int i = 0; i < 3; i++) t = DieInTower(ctl, t, 20, floor: 900);
-        Assert.InRange(Rest(t).TotalMinutes, 58, 61);
+        Assert.InRange(Rest(t).TotalMinutes, 8, 11);
         Assert.Contains("tower-wall", problems);
         // Qua được tầng đó, kẹt tầng khác → lại từ 10 phút
         for (int i = 0; i < 3; i++) t = DieInTower(ctl, t, 20, floor: 905);
