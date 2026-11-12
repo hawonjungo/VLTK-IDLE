@@ -537,7 +537,12 @@
   // Ghi số liệu từng tầng (máu mất, số lần nhích, thời gian) để so và chỉnh: post "kiteFloor".
   let kiteCfg = null;
   const kiteSt = { floor: null, side: 1, lastClick: 0, target: null, from: null, steps: 0, sideSteps: 0, stuckLog: 0,
-    stat: null };
+    stat: null, active: false, skipHold: false, pending: null, inTarget: null };
+  // Nhịp đòn (mỗi khung hình): game HOÃN đòn đánh ở khung hình nhân vật đang đi theo lệnh bấm (R.atkT ≤ 0 mà vừa di chuyển
+  // → chờ). Né liên tục 98–100% thời gian thì gần như không ra đòn (12/11 đo 10 giây trong tháp: ra 13–43% số đòn của
+  // chiêu, mất hút sinh lực). Vì vậy: đòn sắp sẵn sàng → dừng đúng 1 khung hình cho đòn ra → đòn vừa ra thì đi tiếp ngay
+  // bước né đang dở (trong lúc chiêu hồi). Bước ngắn theo nhịp đòn nhưng đường đi vẫn liền mạch.
+  const kf = { last: 0, hold: 0, prevAtk: NaN, noHoldUntil: 0 };
   const g = (n) => { try { return window.H5.G(n); } catch (_) { return undefined; } };
   const clickWorld = (tx, ty) => {
     const arena = $('#arena'), CAM = g('CAM'), AR = g('AR');
@@ -555,7 +560,9 @@
   };
   const kiteFloorDone = (R) => {
     const st = kiteSt.stat;
-    if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0, mounted: st.mounted || 0, movePct: st.nearTicks ? Math.round(100 * (st.moveTicks || 0) / st.nearTicks) : null, pre: st.pre || 0, far: st.far || 0, mReach: st.mReach || 0 });
+    if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0, mounted: st.mounted || 0, movePct: st.nearTicks ? Math.round(100 * (st.moveTicks || 0) / st.nearTicks) : null, pre: st.pre || 0, far: st.far || 0, mReach: st.mReach || 0,
+      atkPs: st.nearTicks ? Math.round(100 * (st.atk || 0) / (st.nearTicks * 0.1)) / 100 : null,
+      atkPct: st.nearTicks && st.rate ? Math.round(100 * (st.atk || 0) / (st.nearTicks * 0.1) / st.rate) : null });
     kiteSt.stat = null;
   };
   const clearSpot = (x, y) => {
@@ -570,6 +577,7 @@
     try { const id = R && R.P && R.P.main && R.P.main.id; const lim = g('HORSE_LIM'); return !(lim && id && lim[id] === 1); } catch (_) { return false; }
   };
   const kiteTick = () => {
+    kiteSt.active = false;
     const c = kiteCfg;
     if (!c || !c.on) return;
     const auto = $('#ctrlBtn');
@@ -629,6 +637,16 @@
     // vào tầng, mất 20–80% máu trong 2–5 giây đầu). ~0,5 giây trước khi quái mọc: bắt đầu một bước dài để lúc quái mọc
     // nhân vật đang chạy (hướng về giữa bản đồ cho rộng chỗ né). Chỉ khi đi xa không bị lên ngựa.
     if (!en.length) {
+      // Vừa vào tháp còn ngồi ngựa / "Tự lên ngựa" chưa tắt (chiêu chính không dùng được trên ngựa) → tắt và xuống ngựa ngay
+      // trong lúc chờ quái mọc (1,2 giây), không chờ vòng kiểm tra ngựa (12/11: lần chết ngay lúc quái mọc đều là tầng
+      // đầu tiên sau khi vào tháp – lúc đó chưa chạy sẵn được vì còn trên ngựa)
+      if (!horseOk && S) {
+        if (S.autoRide !== false) { S.autoRide = false; try { localStorage.setItem('vlRideOff', '1'); } catch (_) {} }
+        if (R.mounted && now - (kiteSt.dismountAt || 0) > 1000) {
+          const rb = $('#rideBtn');
+          if (rb && /Xuống ngựa/.test(rb.textContent)) { kiteSt.dismountAt = now; rb.click(); }
+        }
+      }
       if (freeMove && R.spawnT > 0 && R.spawnT < 0.55 && kiteSt.preFloor !== R.tower.floor) {
         kiteSt.preFloor = R.tower.floor;
         const cx0 = W.w / 2, cy0 = W.h / 2;
@@ -644,6 +662,8 @@
     // Không có quái trong tầm → KHÔNG đi (đi lúc này là lên ngựa); Auto tự tới quái
     if (!near.length) return;
     kiteSt.nearNow = true;
+    kiteSt.active = true;
+    if (st) st.rate = (R.P && R.P.main && +R.P.main.rate) || st.rate || 0;
     // Lỡ đang ngồi ngựa mà quái ở gần → xuống ngựa (nút của game), mỗi giây tối đa một lần – chỉ khi chiêu chính không
     // dùng được trên ngựa
     if (!horseOk && R.mounted && now - (kiteSt.dismountAt || 0) > 1000) {
@@ -652,6 +672,8 @@
     }
     // Phản xạ: con quái gần vừa ra chiêu → nhích ngay, không chờ nhịp
     const swing = near.some((e) => e.act === 'at' && (e.actT ?? 1) < 0.15);
+    // Nguy hiểm (máu thấp, hoặc con quái sát người trong tầm của nó vừa ra đòn) → nhịp này không dừng để đánh, chạy tiếp
+    kiteSt.skipHold = !!low || near.some((e) => e.act === 'at' && (e.actT ?? 1) < 0.15 && dist(e) <= (+e.reach || 75) + 20);
     // Ra lệnh bước tiếp TRƯỚC khi tới nơi (~70% thời gian đi hết bước, theo tốc độ hiện tại) → không có khoảnh khắc đứng
     // yên giữa 2 bước (đứng yên là lúc quái chốt vị trí và đánh trúng)
     let speed = 150;
@@ -731,7 +753,9 @@
       let x = x0, y = y0;
       if (IN && typeof iw === 'function') {
         try { [x, y] = iw(x0, y0); } catch (_) {}
-        IN.tmp = true; IN.target = { x, y }; R.pickTarget = null;
+        R.pickTarget = null;
+        if (kf.hold) kiteSt.pending = { x, y }; // đang dừng cho đòn ra → đi ngay sau khi đòn ra
+        else { IN.tmp = true; IN.target = { x, y }; kiteSt.inTarget = IN.target; }
       } else {
         const spot = clearSpot(x0, y0);
         if (!spot) return;
@@ -743,6 +767,44 @@
     }
   };
   setInterval(() => { try { kiteTick(); } catch (err) { post({ t: 'log', msg: 'kite: ' + err.message }); kiteCfg = null; } }, 100);
+  const kiteResume = (R, IN) => {
+    const H = g('H'), t = kiteSt.pending || kiteSt.target;
+    kiteSt.pending = null;
+    if (!H || !t || Math.hypot(H.x - t.x, H.y - t.y) < 12) return;
+    IN.tmp = true; IN.target = { x: t.x, y: t.y }; kiteSt.inTarget = IN.target; R.pickTarget = null;
+  };
+  const kiteFrame = (ts) => {
+    requestAnimationFrame(kiteFrame);
+    try {
+      const dt = kf.last ? Math.min(0.3, (ts - kf.last) / 1000) : 0.07;
+      kf.last = ts;
+      const R = g('R'), IN = g('INPUT');
+      if (!R || !IN) return;
+      const a = +R.atkT;
+      const fired = Number.isFinite(kf.prevAtk) && a > kf.prevAtk + 0.01; // đòn vừa ra (bộ đếm hồi chiêu đặt lại)
+      kf.prevAtk = a;
+      if (!kiteSt.active) { if (kf.hold) { kf.hold = 0; kiteResume(R, IN); } return; }
+      const st = kiteSt.stat;
+      if (fired && st) st.atk = (st.atk || 0) + 1;
+      if (kf.hold) {
+        // Đòn đã ra → đi tiếp ngay; quá 3 khung hình mà chưa ra (không có quái trong tầm chiêu…) → đi tiếp, 0,3 giây không dừng
+        if (fired || ++kf.hold > 3) {
+          if (!fired) kf.noHoldUntil = ts + 300;
+          kf.hold = 0;
+          kiteResume(R, IN);
+        }
+        return;
+      }
+      if (ts < kf.noHoldUntil || kiteSt.skipHold || R.stunT > 0) return;
+      // Khung hình sau đòn sẵn sàng mà nhân vật đang đi theo lệnh né của tool → dừng 1 khung cho đòn ra
+      if (Number.isFinite(a) && a - dt * 1.05 <= 0 && IN.target && IN.target === kiteSt.inTarget) {
+        IN.target = null;
+        kf.hold = 1;
+        if (st) st.holds = (st.holds || 0) + 1;
+      }
+    } catch (_) {}
+  };
+  requestAnimationFrame(kiteFrame);
 
   // 🐎 Trong Tháp không cưỡi ngựa: game tự lên ngựa khi Auto đi tới con quái ở xa (ngoài vòng 400), tới nơi lại phải
   // xuống ngựa (0,6 giây) mới đánh được, trên ngựa không đánh / không hút sinh lực. Vào tháp → tắt "Tự lên ngựa"
