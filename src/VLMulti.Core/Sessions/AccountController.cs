@@ -2358,7 +2358,8 @@ public sealed class AccountController
     {
         if (HorsesToStore <= 0 || Screen != "game" || Away || Maintenance) return;
         if (now - _screenSince < TimeSpan.FromMinutes(2) || now - _horseStoreAt < TimeSpan.FromMinutes(30)) return;
-        if (_ldtBuyingSince is not null || EventRunning(now) || AssassinActive) return;
+        // Không chờ đi thuyền / đánh Sát Thủ xong: cất ngựa chỉ mở bảng Mã Trường vài giây, không đổi chế độ
+        if (_ldtBuyingSince is not null) return;
         _horseStoreAt = now;
         Post(new { t = "horseStore" });
     }
