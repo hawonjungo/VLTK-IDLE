@@ -2591,11 +2591,25 @@ public sealed class AccountController
     private void OnGuildExtras(JsonElement m, DateTime now)
     {
         int Int(string name) => m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
-        Log.Write($"[{Account.Id}] guild extras: daily={Int("daily")} red={Int("redOpened")} burned={Int("burned")} kept={Str(m, "kept")} stashed={Int("stashed")}");
+        Log.Write($"[{Account.Id}] guild extras: daily={Int("daily")} red={Int("redOpened")} burned={Int("burned")} kept={Str(m, "kept")} stashed={Int("stashed")}"
+            + $" burnedNames=[{Str(m, "burnedNames")}] spared=[{Str(m, "spared")}] stashedNames=[{Str(m, "stashedNames")}]");
+        void ToGameLog(string text) => GameLogSink?.Invoke(Account.Id, new[] { new GameLog.Entry(now, "quest", "", Account.CharName ?? "", text) });
         if (Int("daily") > 0)
             Note(now, $"🏯 Cống hiến {Int("daily"):N0} vạn vào bang" + (Int("redOpened") > 0 ? $" (mở {Int("redOpened")} Hồng Bao)" : ""), StatusLevel.Ok);
         if (Int("burned") > 0)
-            Note(now, $"🔥 Lò Đốt Đồ: góp {Int("burned")} món Hoàng Kim (+{Int("burnPts"):N0} cống hiến)", StatusLevel.Ok);
+        {
+            var names = Str(m, "burnedNames");
+            var text = $"🔥 Lò Đốt Đồ: góp {Int("burned")} món Hoàng Kim (+{Int("burnPts"):N0} cống hiến)" + (names.Length > 0 ? $": {names}" : "");
+            Note(now, text, StatusLevel.Ok);
+            ToGameLog(text);
+        }
+        if (Str(m, "spared").Length > 0) ToGameLog($"🔥 Lò Đốt Đồ không đốt: {Str(m, "spared")}");
+        if (Str(m, "stashedNames").Length > 0)
+        {
+            var text = $"📦 Cất vào Rương (đồ quan trọng): {Str(m, "stashedNames")}";
+            Note(now, text, StatusLevel.Ok);
+            ToGameLog(text);
+        }
         if (Str(m, "kept").Length > 0)
             Note(now, $"🔥 Giữ lại (max %): {Str(m, "kept")}" + (Int("stashed") > 0 ? $" · cất {Int("stashed")} món vào Rương" : " · chưa cất được vào Rương"), Int("stashed") > 0 ? StatusLevel.Ok : StatusLevel.Warn);
 

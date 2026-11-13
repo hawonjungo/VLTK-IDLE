@@ -1347,7 +1347,7 @@
     if (!menu) return { r: 'no-guild' };
     flowBusy = true;
     const res = { r: 'ok', bought: [], spent: 0, donated: 0, mails: 0, points: null,
-      daily: 0, redOpened: 0, burned: 0, burnPts: 0, kept: [], stashed: 0, week: null };
+      daily: 0, redOpened: 0, burned: 0, burnPts: 0, kept: [], stashed: 0, week: null, burnedNames: [], spared: [], stashedNames: [] };
     try {
       await guildShop(arg, menu, res);
       if (res.r !== 'no-guild') await guildMail(res);
@@ -1357,6 +1357,9 @@
     }
     res.bought = res.bought.join(',');
     res.kept = res.kept.join(', ');
+    res.burnedNames = res.burnedNames.join(', ');
+    res.spared = res.spared.join(', ');
+    res.stashedNames = res.stashedNames.join(', ');
     return res;
   };
 
@@ -1394,6 +1397,8 @@
     const m = (it.mag || []).find((x) => JX && JX.attr[x.a] === attr);
     return m && m.p ? +m.p[0] : null;
   };
+  // Hoàng Kim môn phái: yêu cầu môn phái (req 39) – Lò bang không nhận, không bao giờ đốt
+  const isSectGold = (it) => !!(it && it.set && it.set.kind === 'gold' && ((it.req || []).find((r) => r && r[0] === 39) || [0, -1])[1] >= 0);
   const goldKeep = (it, rules) => rules.some((r) => {
     if (!new RegExp('^' + r.set, 'i').test(it.n || '')) return false;
     const v = goldLineValue(it, r.attr), max = goldLineMax(it, r.attr);
@@ -1457,7 +1462,27 @@
         const haKeep = bestHongAnh(S).filter((i) => (S.inv || []).includes(i));
         for (const it of haKeep) if (!it.lock) { try { window.H5.lockItem(it); } catch (_) {} await sleep(300); }
         res.kept = keepers.map((i) => i.n).concat(haKeep.map((i) => i.n + ' (túi)'));
-        const burn = gold.filter((i) => !i.lock && !hasInnate(i) && !keepers.includes(i) && !haKeep.includes(i) && grp.includes(+i.set.grp));
+        // 14/11: máy chủ KHÔNG chặn món khoá khi góp Lò, và bản Hành trang của trang (S.inv) có thể chậm cập nhật dấu khoá →
+        // mỗi món xét lại trên dữ liệu máy chủ (H5.st.items: khoa) và bản đọc mới (H5.oldItem). Đốt chỉ khi chắc chắn là
+        // món thường: không đọc được dữ liệu máy chủ cũng không đốt.
+        const spareWhy = (i) => {
+          let s = null, f = null;
+          try { s = window.H5.st.items.get(i.h5); } catch (_) {}
+          try { f = window.H5.oldItem ? window.H5.oldItem(i.h5) : null; } catch (_) {}
+          if (!s || !f) return 'không đọc được máy chủ';
+          if (i.lock || f.lock || s.khoa) return 'đang khoá';
+          if (hasInnate(i) || hasInnate(f)) return 'kỹ năng vốn có';
+          if (/Thiên Tứ/i.test(i.n || '') || /Thiên Tứ/i.test(f.n || '')) return 'Thiên Tứ';
+          if (!grp.includes(+i.set.grp) || isSectGold(i)) return 'môn phái';
+          if (haKeep.includes(i) || keepers.includes(i)) return 'giữ lại';
+          try { const eg = gameGet('equipGain'); if (typeof eg === 'function' && eg(i) > 0) return 'tốt hơn đồ đang mặc'; } catch (_) {}
+          return null;
+        };
+        const burn = [];
+        for (const i of gold) {
+          const why = spareWhy(i);
+          if (why) { if (grp.includes(+i.set.grp)) res.spared.push(`${i.n} (${why})`); } else burn.push(i);
+        }
         if (burn.length && typeof gop === 'function') {
           const before = gold.length;
           const p = gop(burn.slice(0, 200));
@@ -1472,6 +1497,8 @@
             const now = (gameGet('S').inv || []).filter((i) => i && i.set && i.set.kind === 'gold').length;
             res.burned = Math.max(0, before - now);
             res.burnPts = res.burned * ((BH.lo && +BH.lo.diem) || 20);
+            const left = new Set((gameGet('S').inv || []).map((i) => i && i.h5));
+            res.burnedNames = burn.slice(0, 200).filter((i) => !left.has(i.h5)).map((i) => i.n);
           } else {
             const box = $('#askBox');
             if (box && isVisible(box)) { post({ t: 'log', msg: 'furnace: unexpected dialog ' + box.innerText.replace(/\s+/g, ' ').slice(0, 120) }); [...box.querySelectorAll('button')].find((b) => /^Hủy$/.test(b.textContent.trim()))?.click(); }
@@ -1479,6 +1506,14 @@
         }
         await closeModalSure();
         for (const k of keepers) if (await stashItem(k.uid)) res.stashed++;
+        // Món quan trọng còn ở Hành trang → cất vào Rương: món bạn đã khoá, có kỹ năng vốn có, Hoàng Kim môn phái, Thiên Tứ.
+        // Trang sức (dây chuyền, nhẫn, ngọc bội) để lại túi – việc đổi trang sức cần (vẫn không bao giờ bị đốt).
+        const S2 = gameGet('S');
+        const important = (S2 && S2.inv || []).filter((i) => i && i.d !== 99 && i.d !== 10 && ![3, 4, 9].includes(i.d) && !haKeep.includes(i)
+          && (i.lock || hasInnate(i) || /Thiên Tứ/i.test(i.n || '') || (i.set && i.set.kind === 'gold' && (isSectGold(i) || !grp.includes(+i.set.grp)))));
+        for (const it of important.slice(0, 20)) {
+          if (await stashItem(it.uid)) { res.stashed++; res.stashedNames.push(it.n); } else break; // Rương đầy / không cất được → thôi
+        }
         closeBag();
       }
       // 3. Điều kiện tuần (đơn xin vào bang: bạn tự duyệt, tool không bấm) (game xét thứ Hai: ≥ 15 người vào game trong tuần, đủ điểm tuần, quỹ ≥ 20.000 vạn × cấp)
