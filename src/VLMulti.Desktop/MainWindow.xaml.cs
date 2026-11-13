@@ -822,7 +822,7 @@ public partial class MainWindow : Window
         body.Add(FormRow("KNB mỗi ngày (tính cả phần góp tay; chừa lại mức \"Mỗi acc giữ lại\")", _setGuildKnbAmount = Pick((50, "50 KNB"), (100, "100 KNB"), (200, "200 KNB"), (300, "300 KNB"), (500, "500 KNB"))));
         body.Add(_setLand = Box("🏯 Lãnh địa bang (thứ 4, thứ 7): sau Boss Hoàng Kim tự vào lãnh địa, cùng bang đánh Cơ Giáp (Bang chủ / Phó / Trưởng lão tự gọi), ngồi Lửa trại tới đủ kinh nghiệm hôm nay rồi về tháp"));
         body.Add(_setGuildFurnace = Box("🔥 Lò Đốt Đồ mỗi ngày: góp Hoàng Kim bộ chung (trừ món khoá); giữ Động Sát May mắn max và Hồng Ảnh Kinh nghiệm max, cất vào Rương"));
-        body.Add(_setHoan = Box("💊 Tự mua và dùng Hoàn ở Cửa hàng bang: loại có ích cho từng nhân vật; 6 viên khi tháp khó, 3 viên đầu mỗi đợt Boss Hoàng Kim; chừa 2.000 điểm"));
+        body.Add(_setHoan = Box("💊 Tự mua và dùng Hoàn ở Cửa hàng bang: loại có ích cho từng nhân vật; 6 viên khi chết trong tháp, 3 viên đầu mỗi đợt Boss Hoàng Kim; chừa 2.000 điểm"));
         body.Add(_setAuction = Box("🎁 Tự đấu giá Đồ phổ bí ẩn: chỉ acc chính (mục Gửi KNB) ra giá; luôn ra giá sàn 9.999 để không mất món, chỉ trả thêm khi bị người khác vượt giá; Lò đủ món thì Bang chủ / Phó tự hẹn mở sớm nhất"));
         body.Add(FormRow("Đấu giá tối đa", _setAuctionMax = Pick((10000, "10.000 KNB"), (12000, "12.000 KNB"), (15000, "15.000 KNB"), (18000, "18.000 KNB"), (20000, "20.000 KNB"))));
         body.Add(_setGuildWeek = Box("⚠ Cảnh báo điều kiện tuần (điểm tuần, 15 người vào game, quỹ duy trì) vào thứ Bảy, Chủ Nhật"));

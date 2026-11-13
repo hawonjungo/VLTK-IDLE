@@ -941,7 +941,7 @@ function renderSettings() {
         ]),
         check(hoanOn, '💊 Tự mua và dùng Hoàn', 'Chỉ loại có ích cho từng nhân vật (kháng còn thiếu, Gia Tốc, Phi Tốc, chính xác / né tránh / sinh lực khi thật sự tăng được). Mua tối đa 30 viên / loại / ngày, tích tới 60 viên, không góp vạn để mua.'),
         sub(hoanOn, [
-          check(hoanTower, 'Tháp khó: 6 viên (30 phút)', 'Chết lần 2 ở cùng một tầng, hoặc vào lại sau khi nghỉ tháp.'),
+          check(hoanTower, 'Chết trong tháp: 6 viên (30 phút) khi vào lại', 'Tối đa mỗi 25 phút một lần (chết liên tục không đốt hết Hoàn).'),
           check(hoanBoss, 'Boss Hoàng Kim: 3 viên (15 phút) đầu mỗi đợt'),
           grid(['Luôn chừa lại', hoanKeep]),
         ]),

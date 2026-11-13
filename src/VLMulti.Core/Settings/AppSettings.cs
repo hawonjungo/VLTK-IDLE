@@ -79,8 +79,8 @@ public sealed class AppSettings
     public bool GuildThbt { get; set; } = true;       // Tinh Hồng Bảo Thạch (6/tuần)
     public int GuildDonateCap { get; set; } = 1500;
     // 💊 Hoàn của Cửa hàng bang (mặc định tắt): lượt cửa hàng mỗi ngày mua thêm loại Hoàn có ích cho nhân vật (tối đa 30 / loại
-    // / ngày, tích tới 60 viên, luôn chừa HoanKeepPoints điểm, không góp vạn để mua Hoàn); dùng 6 viên (30 phút) khi tháp khó
-    // (chết lần 2 ở một tầng, vào lại sau nghỉ tháp) và 3 viên (15 phút) đầu mỗi đợt Boss Hoàng Kim. Xem agent.js hoanUseful.
+    // / ngày, tích tới 60 viên, luôn chừa HoanKeepPoints điểm, không góp vạn để mua Hoàn); dùng 6 viên (30 phút) khi chết trong
+    // tháp (vào lại; tối đa mỗi 25 phút) và 3 viên (15 phút) đầu mỗi đợt Boss Hoàng Kim. Xem agent.js hoanUseful.
     public bool HoanOn { get; set; }
     public bool HoanTower { get; set; } = true;
     public bool HoanBoss { get; set; } = true;

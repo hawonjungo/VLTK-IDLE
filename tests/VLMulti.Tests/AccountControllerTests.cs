@@ -1234,14 +1234,12 @@ public class AccountControllerTests
         cfg.HoanOn = true;
         t = DieInTower(ctl, t, 60, floor: 704);
         t = Run(ctl, t, 9, InT(704));
-        Assert.Empty(Uses()); // mới chết 1 lần ở tầng này
-        t = DieInTower(ctl, t, 60, floor: 704);
-        t = Run(ctl, t, 9, InT(704));
-        Assert.Equal(new[] { 6 }, Uses());
+        Assert.Equal(new[] { 6 }, Uses()); // chết 1 lần là dùng khi vào lại
         ctl.OnPageMessage("""{"t":"hoanResult","r":"ok","used":"h_gt:6:24,h_bp:6:0"}""", t);
         Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("Gia Tốc Hoàn ×6"));
+        t = DieInTower(ctl, t, 60, floor: 704);
         t = Run(ctl, t, 120, InT(704));
-        Assert.Single(Uses());
+        Assert.Single(Uses()); // chết tiếp ngay: chưa đủ 25 phút, không dùng thêm
 
         // Đầu đợt Boss Hoàng Kim: 3 viên, một lần
         boss = true;

@@ -1736,7 +1736,7 @@ public sealed class AccountController
 
         if (_lastTowerFloor != _deathFloor) { _fastDeaths.Clear(); _deathFloor = _lastTowerFloor; }
         _fastDeaths.Add(now);
-        if (_lastTowerFloor is not null && _fastDeaths.Count >= 2) _hoanTowerPending = true; // tầng khó: Hoàn khi vào lại
+        if (_lastTowerFloor is not null) _hoanTowerPending = true; // chết trong tháp: dùng Hoàn khi vào lại (tối đa mỗi 25 phút)
         if (_lastTowerFloor is not null && _fastDeaths.Count >= cfg.TowerFastDeathCount)
         {
             _fastDeaths.Clear();
@@ -2455,7 +2455,7 @@ public sealed class AccountController
     };
 
     // ---------- 💊 Dùng Hoàn ----------
-    // Tháp khó: chết lần 2 ở cùng một tầng (hoặc nghỉ tháp xong vào lại) → lúc đã ở trong tháp dùng 6 viên mỗi loại có ích
+    // Tháp: chết (hoặc nghỉ tháp xong vào lại) → lúc đã ở trong tháp dùng 6 viên mỗi loại có ích
     // (30 phút), không quá một lần mỗi 25 phút. Boss Hoàng Kim: đầu mỗi đợt 3 viên (15 phút). Trang chọn loại có ích.
     private bool _hoanTowerPending, _hoanBossPending, _hoanPending;
     private DateTime _hoanAt = DateTime.MinValue, _hoanTowerAt = DateTime.MinValue;
@@ -2478,7 +2478,7 @@ public sealed class AccountController
         {
             if (!_hoanTowerPending || !cfg.HoanTower) { _hoanTowerPending = false; return; }
             if (InTower != 1 || now - _hoanTowerAt < TimeSpan.FromMinutes(25)) return;
-            (n, _hoanWhy) = (6, $"tháp khó, tầng {_lastTowerFloor}");
+            (n, _hoanWhy) = (6, $"vừa chết ở tầng {_lastTowerFloor}");
         }
         _hoanAt = now;
         _hoanPending = true;
