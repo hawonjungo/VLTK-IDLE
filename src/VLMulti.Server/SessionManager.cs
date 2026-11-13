@@ -823,6 +823,28 @@ public sealed class SessionManager : IAsyncDisposable
         });
     }
 
+    // 💰 Nút Gửi KNB: mọi acc khác gửi ngay phần KNB trên mức giữ lại về acc chính; acc chính nhận thư sau 3 phút
+    public (string? Error, int Senders, string Main) KnbSendNow()
+    {
+        string main;
+        lock (_gate) main = _settings.KnbMainName;
+        if (main.Length == 0) return ("Chưa chọn acc chính (Cài đặt › 💰 KNB)", 0, "");
+        var now = DateTime.Now;
+        int senders = 0;
+        bool mainIn = false;
+        foreach (var s in Sessions)
+            s.Locked(c =>
+            {
+                var r = c.SendKnbNow(now);
+                if (r == "send") senders++;
+                if (r == "collect") mainIn = true;
+            });
+        if (!mainIn) return ($"{main} không ở trong game – chưa nhận được thư", 0, main);
+        if (senders == 0) return ("Không có acc nào khác đang trong game", 0, main);
+        Log.Write($"knb: gửi ngay – {senders} acc gửi về {main}");
+        return (null, senders, main);
+    }
+
     public string? HorseScan(bool openChests)
     {
         if (_horses.Busy) return "Đang chạy, chờ xong đã";

@@ -2017,13 +2017,34 @@ public sealed class AccountController
 
     // ---------- 💰 KNB về nhân vật chính: mở Đại Hồng Bao, gửi phần trên mức giữ lại; nhân vật chính nhận thư ----------
     private DateOnly _knbSendDay;
-    private DateTime _knbSendTry, _knbCollectAt;
+    private DateTime _knbSendTry, _knbCollectAt, _knbManualUntil;
     private bool _knbSendPending;
+
+    // Nút 💰 Gửi KNB: gửi ngay về acc chính (không chờ lượt mỗi ngày, chạy cả khi chưa bật gửi tự động). Acc chính nhận
+    // thư sau 3 phút (để các acc kịp mở Đại Hồng Bao và gửi). Trả về "send" / "collect", hoặc lý do không làm.
+    public string SendKnbNow(DateTime now)
+    {
+        var cfg = SettingsProvider?.Invoke();
+        if (cfg is null || cfg.KnbMainName.Length == 0) return "no-main";
+        if (Screen != "game" || Away || string.IsNullOrWhiteSpace(Account.CharName)) return "not-in-game";
+        var own = cfg.Accounts.Select(a => a.CharName ?? "").Where(n => n.Length > 0).Distinct().ToArray();
+        if (!own.Contains(cfg.KnbMainName)) return "no-main";
+        _knbManualUntil = now + TimeSpan.FromMinutes(10);
+        if (Account.CharName == cfg.KnbMainName)
+        {
+            _knbCollectAt = now - TimeSpan.FromMinutes(27);
+            return "collect";
+        }
+        _knbSendTry = now;
+        _knbSendPending = true;
+        Post(new { t = "knbSend", arg = new { op = "send", to = cfg.KnbMainName, keep = cfg.KnbKeep + GuildKnbStillToGive(cfg, now), openBig = cfg.KnbOpenBig, allowed = own, min = 100 } });
+        return "send";
+    }
 
     private void SuperviseKnbTransfer(DateTime now)
     {
         var cfg = SettingsProvider?.Invoke();
-        if (cfg is null || !cfg.KnbSendOn || cfg.KnbMainName.Length == 0 || Screen != "game" || Away || string.IsNullOrWhiteSpace(Account.CharName)) return;
+        if (cfg is null || (!cfg.KnbSendOn && now > _knbManualUntil) || cfg.KnbMainName.Length == 0 || Screen != "game" || Away || string.IsNullOrWhiteSpace(Account.CharName)) return;
         if (_knbSendPending && now - _knbSendTry < TimeSpan.FromMinutes(4)) return;
         _knbSendPending = false;
         if (_ldtBuyingSince is not null || _knbPending || _guildPending || EventRunning(now) || now - _screenSince < TimeSpan.FromSeconds(180)) return;
@@ -2040,6 +2061,7 @@ public sealed class AccountController
             return;
         }
         // Acc khác: mỗi ngày một lần, sau khi đã đổi KNB và làm việc bang
+        if (!cfg.KnbSendOn) return;
         var vn = now.ToUniversalTime().AddHours(7);
         if (_knbSendDay == DateOnly.FromDateTime(vn) || vn.TimeOfDay < TimeSpan.FromMinutes(20) || now - _knbSendTry < TimeSpan.FromMinutes(10)) return;
         if (cfg.DailyKnbBuy && _knbDoneDay != DateOnly.FromDateTime(vn)) return;

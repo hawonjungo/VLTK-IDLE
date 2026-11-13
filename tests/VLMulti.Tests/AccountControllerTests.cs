@@ -1189,6 +1189,32 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Knb_button_sends_now_even_when_daily_send_is_off()
+    {
+        var (ctl, page, cfg) = Make();
+        cfg.KnbMainName = "Chính";
+        cfg.Accounts[0].CharName = "Phụ";
+        cfg.Accounts[1].CharName = "Chính";
+        string St(string name) => JsonSerializer.Serialize(new { t = "status", screen = "game", name, lv = "150", gold = "1 vạn", knb = "5000 🔒1", mode = "farm", modeText = "farm", zone = "Hoa Sơn" });
+        var t = Run(ctl, T0, 30, St("Phụ"));
+        Assert.Equal("send", ctl.SendKnbNow(t));
+        var arg = page.Sent.Last(m => m.GetProperty("t").GetString() == "knbSend").GetProperty("arg");
+        Assert.Equal("Chính", arg.GetProperty("to").GetString());
+        // Acc chính: nhận thư sau ~3 phút dù chưa bật gửi tự động
+        var (main, mainPage, mcfg) = Make();
+        mcfg.KnbMainName = "Chính";
+        mcfg.DailyKnbBuy = false;
+        mcfg.EventTeacher = false;
+        mcfg.Accounts[0].CharName = "Chính";
+        mcfg.Accounts[1].CharName = "Phụ";
+        var t2 = Run(main, T0, 200, St("Chính"));
+        Assert.DoesNotContain(mainPage.Sent, m => m.GetProperty("t").GetString() == "knbSend");
+        Assert.Equal("collect", main.SendKnbNow(t2));
+        Run(main, t2, 200, St("Chính"));
+        Assert.Contains(mainPage.Sent, m => m.GetProperty("t").GetString() == "knbSend" && m.GetProperty("arg").GetProperty("op").GetString() == "collect");
+    }
+
+    [Fact]
     public void Reborn_stops_at_the_game_maximum()
     {
         var (ctl, page, cfg) = Make();

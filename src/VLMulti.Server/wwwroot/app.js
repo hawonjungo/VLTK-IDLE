@@ -474,6 +474,14 @@ Chuyển: thư tặng (0 KNB) giữa các nhân vật của bạn. Bán: ngựa 
   if (busy) horseTimer = setTimeout(renderHorses, 2000);
 }
 $('#horseBtn').addEventListener('click', openHorses);
+// 💰 Gửi KNB ngay: mọi acc khác gửi phần KNB trên mức giữ lại (Cài đặt › 💰 KNB) về acc chính, acc chính nhận thư sau 3 phút
+$('#knbSendBtn').addEventListener('click', async () => {
+  if (!confirm('Các acc khác gửi ngay phần KNB trên mức giữ lại về acc chính (thư tặng giữa các nhân vật của bạn)?')) return;
+  try {
+    const r = await api('knb/send-now', {});
+    toast(`💰 ${r.senders} acc đang gửi KNB về ${r.main} · ${r.main} nhận thư sau khoảng 3 phút`);
+  } catch (e) { toast(e.message); }
+});
 
 // ---------- 📜 Nhật ký game ----------
 // Mỗi dòng game ghi về chính nhân vật (kèm tầng / bản đồ), lọc theo nhân vật, loại, ngày; "💎 Đồ hiếm" gộp các nhân vật của bạn

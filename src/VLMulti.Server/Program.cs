@@ -193,6 +193,12 @@ app.MapPost("/api/horses/scan", (ToggleRequest req) =>
 app.MapPost("/api/horses/send", () =>
     manager.HorseSend() is { } error ? Results.Json(new { error }, statusCode: 400) : Results.Ok());
 app.MapPost("/api/horses/cancel", () => { manager.HorseCancel(); return Results.Ok(); });
+// 💰 Gửi KNB ngay về acc chính
+app.MapPost("/api/knb/send-now", () =>
+{
+    var (error, senders, main) = manager.KnbSendNow();
+    return error is not null ? Results.Json(new { error }, statusCode: 400) : Results.Json(new { senders, main });
+});
 app.MapPost("/api/alerts/clear",() => { manager.ClearAlerts(); return Results.Ok(); });
 app.MapPost("/api/settings", (SettingsUpdate req) => { manager.UpdateSettings(req); return Results.Ok(); });
 
