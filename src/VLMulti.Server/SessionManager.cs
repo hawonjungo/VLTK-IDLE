@@ -796,7 +796,11 @@ public sealed class SessionManager : IAsyncDisposable
         if (!landDay)
         {
             _horseLandSince = null;
-            if (inGame < 2 || sitting > 0 || vn.Hour < 13) return;
+            // Chờ đủ mọi acc đang bật vào game (thiếu một acc thì không biết acc đó cần gì → không bán được con nào);
+            // vừa khởi động lại máy chủ thì các acc vào dần. Tới 14:00 vẫn thiếu thì chạy với các acc đang có.
+            int enabled;
+            lock (_gate) enabled = _settings.Accounts.Count(a => a.Enabled);
+            if (inGame < 2 || sitting > 0 || vn.Hour < 13 || (inGame < enabled && vn.Hour < 14)) return;
             var utc = now.ToUniversalTime();
             if (Core.GameData.BossHkSchedule.IsActive(utc) || Core.GameData.BossHkSchedule.IsActive(utc.AddMinutes(20))) return;
             _horseLandDay = day;
