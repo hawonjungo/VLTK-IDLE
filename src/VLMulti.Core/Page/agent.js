@@ -1281,36 +1281,42 @@
     } catch (_) {}
     return out;
   };
-  const hoanBag = (k) => { try { const f = gameGet('ktcBagN'); return typeof f === 'function' ? (+f(k) || 0) : 0; } catch (_) { return 0; } };
-  const hoanLeft = (k) => { try { const b = (gameGet('S').buf || {})[k]; return b && b.until ? Math.max(0, b.until - Date.now()) : 0; } catch (_) { return 0; } };
-  // Dùng arg.n viên mỗi loại có ích đang có trong Hành trang (arg.n = 6 → 30 phút). Không bị chặn trong đợt Boss Hoàng Kim
-  // (đầu đợt app gọi để đánh boss khoẻ hơn) – chỉ mở Hành trang, không đổi chế độ.
+  // Viên Hoàn trong túi theo dữ liệu máy chủ (H5.st.items: tpl "ktc:h_dp", loc "bag", qty). Mua xong bản Hành trang của trang
+  // (S.inv / ktcBagN) chưa cập nhật ngay – 13/11 thử: đã mua mà ktcBagN vẫn 0, ô đồ chưa hiện.
+  const hoanItems = (k) => { try { return [...window.H5.st.items.values()].filter((i) => i && i.tpl === 'ktc:' + k && i.loc === 'bag' && (i.qty | 0) > 0); } catch (_) { return []; } };
+  const hoanBag = (k) => { const a = hoanItems(k).reduce((n, i) => n + (i.qty | 0), 0); if (a) return a; try { const f = gameGet('ktcBagN'); return typeof f === 'function' ? (+f(k) || 0) : 0; } catch (_) { return 0; } };
+  // Dùng arg.n viên mỗi loại có ích (arg.n = 6 → 30 phút) bằng đúng lệnh máy chủ nút Dùng của game gửi (vp.bua, mỗi lần 1 viên,
+  // cộng dồn thời gian). Không mở cửa sổ nào → chạy được cả khi đang bận việc khác, trong tháp hay đợt Boss Hoàng Kim.
+  let hoanBusy = false;
   const hoanUseFlow = async (arg) => {
     const n = Math.max(1, Math.min(30, arg.n | 0 || 1));
-    const want = hoanUseful().filter((k) => hoanBag(k) > 0);
-    if (!want.length) return { r: 'none', used: '', useful: hoanUseful().join(',') };
-    if (flowBusy || anyWindowOpen()) return { r: 'busy' };
-    flowBusy = true;
+    const call = window.H5 && window.H5.call;
+    if (typeof call !== 'function') return { r: 'no-call' };
+    const useful = hoanUseful();
+    const want = useful.filter((k) => hoanBag(k) > 0);
+    if (!want.length) return { r: 'none', used: '', useful: useful.join(',') };
+    if (hoanBusy) return { r: 'busy' };
+    hoanBusy = true;
     const used = [];
     try {
-      if (!(await openBag())) return { r: 'no-bag' };
       for (const k of want) {
         let c = 0;
-        for (let i = 0; i < n && hoanBag(k) > 0; i++) {
-          const have = hoanBag(k), before = hoanLeft(k);
-          if (!(await useBagItem(k, new RegExp('^' + HOAN[k]), '#kiUse', () => hoanBag(k) < have || hoanLeft(k) > before + 1000))) break;
+        for (let i = 0; i < n; i++) {
+          const it = hoanItems(k)[0];
+          if (!it) break;
+          try { const r = await call('vp.bua', { itemId: it.id }); if (!r || r.k !== k) break; } catch (_) { break; }
           c++;
-          if (!isOpen($('#u2bagw')) && !(await openBag())) break;
+          await sleep(250);
         }
         if (c) used.push(`${k}:${c}:${hoanBag(k)}`);
       }
     } catch (err) {
       return { r: 'error: ' + err.message, used: used.join(',') };
     } finally {
-      try { await closeModalSure(); closeBag(); } catch (_) {}
-      flowBusy = false;
+      hoanBusy = false;
+      try { gameGet('refresh')(); } catch (_) {}
     }
-    return { r: 'ok', used: used.join(',') };
+    return { r: 'ok', used: used.join(','), useful: useful.join(',') };
   };
   const guildBtn = (id, sl) => bq(`[data-bhmua="${id}"][data-sl="${sl}"]`);
   const guildState = (id) => { const c = guildBtn(id, 1)?.closest('.u2card'); return c ? VLParse.guildItem(c.innerText) : null; };
