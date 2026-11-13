@@ -486,7 +486,7 @@ $('#knbSendBtn').addEventListener('click', async () => {
 // ---------- 📜 Nhật ký game ----------
 // Mỗi dòng game ghi về chính nhân vật (kèm tầng / bản đồ), lọc theo nhân vật, loại, ngày; "💎 Đồ hiếm" gộp các nhân vật của bạn
 const GAMELOG_KINDS = [['', 'Mọi loại'], ['rare', '💎 Đồ hiếm'], ['boss', '👑 Boss'], ['assassin', '🗡 Sát Thủ'],
-  ['milestone', '🏆 Mốc 100 tầng'], ['tower', '🗼 Tháp'], ['death', '💀 Gục ngã'], ['quest', '🗺 Đi làm nhiệm vụ'], ['datau', '📜 Thưởng Dã Tẩu'], ['land', '🏯 Lãnh địa bang'], ['auction', '🎁 Đấu giá'], ['reborn', '🔄 Chuyển sinh']];
+  ['milestone', '🏆 Mốc 100 tầng'], ['tower', '🗼 Tháp'], ['death', '💀 Gục ngã'], ['quest', '🗺 Đi làm nhiệm vụ'], ['datau', '📜 Thưởng Dã Tẩu'], ['land', '🏯 Lãnh địa bang'], ['auction', '🎁 Đấu giá'], ['reborn', '🔄 Chuyển sinh'], ['hoan', '💊 Hoàn']];
 const vnToday = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
 let logSel = { who: 'rare', kind: '', day: '', hideXp: true };
 // Thưởng Dã Tẩu chỉ có kinh nghiệm ("🎁 Dã Tẩu #2491 (…): 3% kinh nghiệm")
@@ -814,6 +814,8 @@ function renderSettings() {
   const jewelOn = box(!!s.jewelSwapOn);
   const landOn = box(s.guildLandOn !== false);
   const rebornOn = box(!!s.rebornOn);
+  const hoanOn = box(!!s.hoanOn), hoanTower = box(s.hoanTower !== false), hoanBoss = box(s.hoanBoss !== false);
+  const hoanKeep = pick([0, 1000, 2000, 5000, 10000], s.hoanKeepPoints ?? 2000, (n) => `${n0(n)} điểm`);
   const gKnbAmount = pick([50, 100, 200, 300, 500], s.guildKnbAmount ?? 100, (n) => `${n0(n)} KNB`);
   const knbOn = box(!!s.knbSendOn), knbBig = box(s.knbOpenBig !== false);
   const knbMain = h('select', {}, [h('option', { value: '', text: '— Chọn —' })].concat((s.charNames || []).map((n) => {
@@ -937,6 +939,12 @@ function renderSettings() {
           check(gThbt, 'Tinh Hồng Bảo Thạch (60 điểm · 6/tuần)'),
           grid(['Thiếu điểm thì góp tối đa', gDonate]),
         ]),
+        check(hoanOn, '💊 Tự mua và dùng Hoàn', 'Chỉ loại có ích cho từng nhân vật (kháng còn thiếu, Gia Tốc, Phi Tốc, chính xác / né tránh / sinh lực khi thật sự tăng được). Mua tối đa 30 viên / loại / ngày, tích tới 60 viên, không góp vạn để mua.'),
+        sub(hoanOn, [
+          check(hoanTower, 'Tháp khó: 6 viên (30 phút)', 'Chết lần 2 ở cùng một tầng, hoặc vào lại sau khi nghỉ tháp.'),
+          check(hoanBoss, 'Boss Hoàng Kim: 3 viên (15 phút) đầu mỗi đợt'),
+          grid(['Luôn chừa lại', hoanKeep]),
+        ]),
       ]),
       section('Cống hiến', [
         grid(['Góp vạn mỗi ngày', gDaily], ['Hết Hồng Bao thì chừa lại', gReserve]),
@@ -955,7 +963,8 @@ function renderSettings() {
         return { guildShop: guild.checked, guildLdt: gLdt.checked, guildPhucDuyen: gFdl.checked, guildTtsp: gTtsp.checked, guildThbt: gThbt.checked,
           guildDonateCap: +gDonate.value, guildDailyAmount: +gDaily.value, guildDonateReserve: +gReserve.value,
           guildFurnace: gFurnace.checked, guildWeekAlert: gWeek.checked, guildKnbOn: gKnbOn.checked, guildKnbAmount: +gKnbAmount.value,
-          guildLandOn: landOn.checked, auctionOn: auctionOn.checked, auctionMaxKnb: +auctionMax.value };
+          guildLandOn: landOn.checked, auctionOn: auctionOn.checked, auctionMaxKnb: +auctionMax.value,
+          hoanOn: hoanOn.checked, hoanTower: hoanTower.checked, hoanBoss: hoanBoss.checked, hoanKeepPoints: +hoanKeep.value };
       }, 'Đã lưu bang hội'),
     ]],
     ['knb', '💰 KNB', () => [

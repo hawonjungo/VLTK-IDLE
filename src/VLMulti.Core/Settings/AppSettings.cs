@@ -78,6 +78,13 @@ public sealed class AppSettings
     public bool GuildTtsp { get; set; } = true;       // Tiên Thảo Lộ Đặc Biệt (5/tuần)
     public bool GuildThbt { get; set; } = true;       // Tinh Hồng Bảo Thạch (6/tuần)
     public int GuildDonateCap { get; set; } = 1500;
+    // 💊 Hoàn của Cửa hàng bang (mặc định tắt): lượt cửa hàng mỗi ngày mua thêm loại Hoàn có ích cho nhân vật (tối đa 30 / loại
+    // / ngày, tích tới 60 viên, luôn chừa HoanKeepPoints điểm, không góp vạn để mua Hoàn); dùng 6 viên (30 phút) khi tháp khó
+    // (chết lần 2 ở một tầng, vào lại sau nghỉ tháp) và 3 viên (15 phút) đầu mỗi đợt Boss Hoàng Kim. Xem agent.js hoanUseful.
+    public bool HoanOn { get; set; }
+    public bool HoanTower { get; set; } = true;
+    public bool HoanBoss { get; set; } = true;
+    public int HoanKeepPoints { get; set; } = 2000;
     // Cống hiến vạn mỗi ngày tới GuildDailyAmount vạn (0 = tắt; 5.000 / 10.000 / 20.000 – game cho tối đa 20.000/ngày):
     // thiếu vạn thì mở Hồng Bao, hết Hồng Bao thì chừa lại GuildDonateReserve vạn
     public int GuildDailyAmount { get; set; }
@@ -174,6 +181,7 @@ public sealed class AppSettings
         TowerRestMinutes = Math.Clamp(TowerRestMinutes, 5, 720);
         EventTeacherSpendCap = Math.Clamp(EventTeacherSpendCap, 0, 5000);
         GuildDonateCap = Math.Clamp(GuildDonateCap, 0, 20000);
+        HoanKeepPoints = Math.Clamp(HoanKeepPoints, 0, 100000);
         GuildDonateReserve = Math.Clamp(GuildDonateReserve, 0, 1_000_000);
         if (GuildDonateDaily && GuildDailyAmount == 0) GuildDailyAmount = 20000; // cài đặt cũ
         GuildDailyAmount = Math.Clamp(GuildDailyAmount, 0, 20000);

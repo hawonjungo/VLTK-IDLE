@@ -534,6 +534,9 @@ public sealed class AccountController
                 case "sellJunkResult":
                     OnSellJunkResult(m, now);
                     break;
+                case "hoanResult":
+                    OnHoanResult(m, now);
+                    break;
                 case "rebornResult":
                     OnRebornResult(m, now);
                     break;
@@ -1166,6 +1169,7 @@ public sealed class AccountController
         if (handsOff != _bossTime)
         {
             _bossTime = handsOff;
+            if (handsOff) _hoanBossPending = true; // đầu đợt: dùng Hoàn (nếu bật)
             Note(now, handsOff ? "👑 Boss Hoàng Kim: để game tự đi đánh, app tạm đứng yên"
                                : "👑 Xong Boss Hoàng Kim: app chạy lại bình thường");
             if (!handsOff)
@@ -1176,6 +1180,7 @@ public sealed class AccountController
         }
         if (handsOff)
         {
+            SuperviseHoan(now, boss: true);
             _stepWatch = null; // game tự đưa đi đánh boss: thời gian này không tính là kẹt
             SuperviseRecovery(now);
             return;
@@ -1217,6 +1222,7 @@ public sealed class AccountController
         SuperviseAuction(now);
         SuperviseReborn(now);
         SuperviseHorseStore(now);
+        SuperviseHoan(now, boss: false);
         SuperviseSellJunk(now);
         SuperviseKnbTransfer(now);
         SuperviseStuck(now);
@@ -1730,6 +1736,7 @@ public sealed class AccountController
 
         if (_lastTowerFloor != _deathFloor) { _fastDeaths.Clear(); _deathFloor = _lastTowerFloor; }
         _fastDeaths.Add(now);
+        if (_lastTowerFloor is not null && _fastDeaths.Count >= 2) _hoanTowerPending = true; // tầng khó: Hoàn khi vào lại
         if (_lastTowerFloor is not null && _fastDeaths.Count >= cfg.TowerFastDeathCount)
         {
             _fastDeaths.Clear();
@@ -2443,7 +2450,57 @@ public sealed class AccountController
     private static readonly Dictionary<string, string> GuildItemNames = new()
     {
         ["ldt"] = "Lệnh Bài Dã Tẩu", ["fdl1"] = "Bình Phúc Duyên Lộ", ["ttsp"] = "Tiên Thảo Lộ Đặc Biệt", ["thbt"] = "Tinh Hồng Bảo Thạch",
+        ["h_tm"] = "Trường Mệnh Hoàn", ["h_gt"] = "Gia Tốc Hoàn", ["h_ctr"] = "Cao Trung Hoàn", ["h_cth"] = "Cao Thiểm Hoàn",
+        ["h_bp"] = "Băng Phòng Hoàn", ["h_hp"] = "Hỏa Phòng Hoàn", ["h_lp"] = "Lôi Phòng Hoàn", ["h_dp"] = "Độc Phòng Hoàn", ["h_pt"] = "Phi Tốc Hoàn",
     };
+
+    // ---------- 💊 Dùng Hoàn ----------
+    // Tháp khó: chết lần 2 ở cùng một tầng (hoặc nghỉ tháp xong vào lại) → lúc đã ở trong tháp dùng 6 viên mỗi loại có ích
+    // (30 phút), không quá một lần mỗi 25 phút. Boss Hoàng Kim: đầu mỗi đợt 3 viên (15 phút). Trang chọn loại có ích.
+    private bool _hoanTowerPending, _hoanBossPending, _hoanPending;
+    private DateTime _hoanAt = DateTime.MinValue, _hoanTowerAt = DateTime.MinValue;
+    private string _hoanWhy = "";
+
+    private void SuperviseHoan(DateTime now, bool boss)
+    {
+        var cfg = SettingsProvider?.Invoke();
+        if (cfg is null || !cfg.HoanOn) { _hoanTowerPending = _hoanBossPending = false; return; }
+        if (Screen != "game" || Away || Maintenance) return;
+        if (_hoanPending && now - _hoanAt < TimeSpan.FromMinutes(1)) return;
+        if (now - _hoanAt < TimeSpan.FromSeconds(20)) return;
+        int n;
+        if (boss)
+        {
+            if (!_hoanBossPending || !cfg.HoanBoss) { _hoanBossPending = false; return; }
+            (n, _hoanWhy) = (3, "Boss Hoàng Kim");
+        }
+        else
+        {
+            if (!_hoanTowerPending || !cfg.HoanTower) { _hoanTowerPending = false; return; }
+            if (InTower != 1 || now - _hoanTowerAt < TimeSpan.FromMinutes(25)) return;
+            (n, _hoanWhy) = (6, $"tháp khó, tầng {_lastTowerFloor}");
+        }
+        _hoanAt = now;
+        _hoanPending = true;
+        Post(new { t = "hoanUse", arg = new { n } });
+    }
+
+    private void OnHoanResult(JsonElement m, DateTime now)
+    {
+        _hoanPending = false;
+        var r = Str(m, "r");
+        var used = Str(m, "used");
+        Log.Write($"[{Account.Id}] hoan ({_hoanWhy}): {r} used={used} useful={Str(m, "useful")}");
+        if (r is "busy" or "no-bag") return; // 20 giây nữa thử lại
+        bool boss = _hoanWhy.StartsWith("Boss");
+        if (boss) _hoanBossPending = false; else { _hoanTowerPending = false; _hoanTowerAt = now; }
+        if (r != "ok" || used.Length == 0) return;
+        var parts = used.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Split(':'))
+            .Select(p => $"{(GuildItemNames.TryGetValue(p[0], out var nm) ? nm : p[0])} ×{(p.Length > 1 ? p[1] : "?")}" + (p.Length > 2 ? $" (còn {p[2]})" : ""));
+        var text = $"💊 Dùng Hoàn ({_hoanWhy}): {string.Join(", ", parts)}";
+        Note(now, text, StatusLevel.Ok);
+        GameLogSink?.Invoke(Account.Id, new[] { new GameLog.Entry(now, "hoan", "", Account.CharName ?? "", text) });
+    }
     private DateOnly _guildDoneDay;
     private DateTime _guildLastTry;
     private bool _guildPending;
@@ -2461,7 +2518,7 @@ public sealed class AccountController
             if (cfg.GuildTtsp) items.Add("ttsp");
             if (cfg.GuildThbt) items.Add("thbt");
         }
-        if (items.Count == 0 && cfg.GuildDailyAmount <= 0 && !cfg.GuildFurnace && !cfg.GuildWeekAlert) return;
+        if (items.Count == 0 && !cfg.HoanOn && cfg.GuildDailyAmount <= 0 && !cfg.GuildFurnace && !cfg.GuildWeekAlert) return;
         var vn = now.ToUniversalTime().AddHours(7);
         if (_guildDoneDay == DateOnly.FromDateTime(vn) || vn.TimeOfDay < TimeSpan.FromMinutes(10)) return;
         if (_guildPending && now - _guildLastTry < TimeSpan.FromMinutes(3)) return;
@@ -2478,6 +2535,7 @@ public sealed class AccountController
                 items, donateCap = cfg.GuildShop ? cfg.GuildDonateCap : 0,
                 dailyAmount = cfg.GuildDailyAmount, reserve = cfg.GuildDonateReserve,
                 furnace = cfg.GuildFurnace, keep = GuildFurnaceKeep,
+                hoan = cfg.HoanOn ? new { keep = cfg.HoanKeepPoints, stock = 60 } : null,
             },
         });
     }

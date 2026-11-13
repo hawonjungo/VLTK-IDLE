@@ -1228,6 +1228,90 @@
   // Món mua xong gửi vào 📨 Hộp thư ("Cửa hàng bang: 1 Lệnh Bài Dã Tẩu") → chỉ nhận đúng các thư đó, không bấm "Nhận tất cả"
   // (thư Chợ trả đồ phổ hết hạn bày bán… để bạn tự xử lý). Chưa vào bang (không có thẻ Cửa hàng) → 'no-guild'.
   const GUILD_CAT = { ldt: 'vp', fdl1: 'vp', ttsp: 'vp', thbt: 'vp', tn: 'vp', tdt: 'vp' };
+  // ---------- 💊 Hoàn của Cửa hàng bang (5 phút / viên, cộng dồn; mua xong vào Hành trang, bấm Dùng) ----------
+  // Chỉ mua / dùng loại thật sự có ích cho nhân vật, tính từ chỉ số (R.P) và quái tháp gặp gần nhất (monSeen):
+  //  · kháng (Băng / Hỏa / Lôi / Độc Phòng +50%): kháng loại đó còn thiếu ≥ 5 so với mức tối đa
+  //  · Gia Tốc (+20% di chuyển): luôn có ích khi kéo quái trong tháp · Phi Tốc (+50 tốc độ đánh, bang cấp 3): luôn
+  //  · Cao Trung (+500 chính xác): có kỹ năng ở ô dùng chính xác (SK_USE_AR) và tỉ lệ trúng quái tăng ≥ 5 điểm (dưới 90%)
+  //  · Cao Thiểm (+500 né tránh): quái đang trúng mình trên mức sàn và giảm được ≥ 5 điểm
+  //  · Trường Mệnh (+500 sinh lực): 500 ≥ 5% sinh lực, hoặc giúp sống qua đúng một đòn của quái
+  // Tỉ lệ trúng của game: a·100/(a+d), sàn 40%, trần 95%.
+  const HOAN = {
+    h_tm: 'Trường Mệnh Hoàn', h_gt: 'Gia Tốc Hoàn', h_ctr: 'Cao Trung Hoàn', h_cth: 'Cao Thiểm Hoàn',
+    h_bp: 'Băng Phòng Hoàn', h_hp: 'Hỏa Phòng Hoàn', h_lp: 'Lôi Phòng Hoàn', h_dp: 'Độc Phòng Hoàn', h_pt: 'Phi Tốc Hoàn',
+  };
+  for (const k of Object.keys(HOAN)) GUILD_CAT[k] = 'hoan';
+  const HOAN_RES = { h_bp: 'cold', h_hp: 'fire', h_lp: 'light', h_dp: 'poison' };
+  let monSeen = null; // quái tháp gặp gần nhất: { def, ar, dmg } (lớn nhất trong đám đang sống)
+  const watchMonsters = () => {
+    try {
+      const R = gameGet('R');
+      if (!R || !R.tower) return;
+      const es = (R.enemies || []).filter((e) => e && !e.dead && e.hp > 0);
+      if (!es.length) return;
+      monSeen = { def: Math.max(...es.map((e) => +e.def || 0)), ar: Math.max(...es.map((e) => +e.ar || 0)), dmg: Math.max(...es.map((e) => +e.dmg || 0)), at: Date.now() };
+    } catch (_) {}
+  };
+  const hitPct = (a, d) => { const s = a + d === 0 ? 50 : (a * 100) / (a + d); return Math.max(40, Math.min(95, s)); };
+  const hoanUseful = () => {
+    const out = [];
+    try {
+      const S = gameGet('S'), R = gameGet('R'), P = R && R.P, useAr = gameGet('SK_USE_AR');
+      if (!S || !P) return out;
+      for (const [k, el] of Object.entries(HOAN_RES)) {
+        const have = +(P.res || {})[el] || 0, max = +((P.resMaxE || {})[el] ?? P.resMax) || 0;
+        if (max - have >= 5) out.push(k);
+      }
+      out.push('h_gt', 'h_pt');
+      const m = monSeen && Date.now() - monSeen.at < 6 * 3600e3 ? monSeen : null;
+      if (m) {
+        const arSkill = (S.slots || []).some((id) => id > 0 && useAr && useAr.has && useAr.has(+id));
+        const base = +P.arBase || 0, ar = +P.ar || 0;
+        if (arSkill && base > 0) {
+          const now = hitPct(ar, m.def), next = hitPct(ar * (base + 500) / base, m.def);
+          if (now < 90 && next - now >= 5) out.push('h_ctr');
+        }
+        const mh = hitPct(m.ar, +P.def || 0), mh2 = hitPct(m.ar, (+P.def || 0) + 500);
+        if (mh - mh2 >= 5) out.push('h_cth');
+      }
+      // Sát thương quái tính sau kháng (lấy loại kháng thấp nhất của mình cho chắc)
+      const life = +P.life || 0, minRes = Math.min(...Object.values(P.res || { x: 0 }).map((x) => +x || 0));
+      const hit = m ? m.dmg * (100 - minRes) / 100 : 0;
+      if (life > 0 && (500 >= life * 0.05 || (hit >= life && hit < life + 500))) out.push('h_tm');
+    } catch (_) {}
+    return out;
+  };
+  const hoanBag = (k) => { try { const f = gameGet('ktcBagN'); return typeof f === 'function' ? (+f(k) || 0) : 0; } catch (_) { return 0; } };
+  const hoanLeft = (k) => { try { const b = (gameGet('S').buf || {})[k]; return b && b.until ? Math.max(0, b.until - Date.now()) : 0; } catch (_) { return 0; } };
+  // Dùng arg.n viên mỗi loại có ích đang có trong Hành trang (arg.n = 6 → 30 phút). Không bị chặn trong đợt Boss Hoàng Kim
+  // (đầu đợt app gọi để đánh boss khoẻ hơn) – chỉ mở Hành trang, không đổi chế độ.
+  const hoanUseFlow = async (arg) => {
+    const n = Math.max(1, Math.min(30, arg.n | 0 || 1));
+    const want = hoanUseful().filter((k) => hoanBag(k) > 0);
+    if (!want.length) return { r: 'none', used: '', useful: hoanUseful().join(',') };
+    if (flowBusy || anyWindowOpen()) return { r: 'busy' };
+    flowBusy = true;
+    const used = [];
+    try {
+      if (!(await openBag())) return { r: 'no-bag' };
+      for (const k of want) {
+        let c = 0;
+        for (let i = 0; i < n && hoanBag(k) > 0; i++) {
+          const have = hoanBag(k), before = hoanLeft(k);
+          if (!(await useBagItem(k, new RegExp('^' + HOAN[k]), '#kiUse', () => hoanBag(k) < have || hoanLeft(k) > before + 1000))) break;
+          c++;
+          if (!isOpen($('#u2bagw')) && !(await openBag())) break;
+        }
+        if (c) used.push(`${k}:${c}:${hoanBag(k)}`);
+      }
+    } catch (err) {
+      return { r: 'error: ' + err.message, used: used.join(',') };
+    } finally {
+      try { await closeModalSure(); closeBag(); } catch (_) {}
+      flowBusy = false;
+    }
+    return { r: 'ok', used: used.join(',') };
+  };
   const guildBtn = (id, sl) => bq(`[data-bhmua="${id}"][data-sl="${sl}"]`);
   const guildState = (id) => { const c = guildBtn(id, 1)?.closest('.u2card'); return c ? VLParse.guildItem(c.innerText) : null; };
   const guildPts = () => VLParse.guildPoints((bhRoot() || {}).innerText);
@@ -1524,16 +1608,20 @@
         return card ? VLParse.guildDonate(card.innerText) : null;
       };
 
-      for (const id of arg.items || []) {
+      const hoanIds = arg.hoan ? hoanUseful().filter((k) => hoanBag(k) < (arg.hoan.stock ?? 60)) : [];
+      for (const id of [...(arg.items || []), ...hoanIds]) {
         const cat = GUILD_CAT[id] || 'vp';
+        const isHoan = cat === 'hoan';
         if (!(await showCat(cat))) { res.r = 'no-shop'; break; }
         let s = guildState(id);
         if (!s) { reportUnreadable('guild-' + id, (guildBtn(id, 1)?.closest('.u2card') || bhRoot() || {}).innerText || ''); continue; }
         if (s.locked || s.done >= s.max) continue;
         let points = guildPts() ?? 0;
         let want = s.max - s.done;
+        // Hoàn: không góp thêm vạn, luôn chừa arg.hoan.keep điểm, tích tối đa arg.hoan.stock viên mỗi loại
+        if (isHoan) want = Math.min(want, (arg.hoan.stock ?? 60) - hoanBag(id), Math.floor(Math.max(0, points - (arg.hoan.keep ?? 2000)) / s.price));
         // Thiếu điểm → góp vạn trong trần chi hôm nay
-        if (points < want * s.price && (arg.donateCap || 0) > 0) {
+        if (!isHoan && points < want * s.price && (arg.donateCap || 0) > 0) {
           const info = await donateInfo();
           const room = info ? Math.min(arg.donateCap - info.done, info.cap - info.done, info.can ?? Infinity) : 0;
           const amount = Math.max(0, Math.min(want * s.price - points, room));
@@ -1544,7 +1632,7 @@
           if (!(await showCat(cat))) { res.r = 'no-shop'; break; }
           s = guildState(id) || s;
         }
-        want = Math.min(s.max - s.done, Math.floor(points / s.price));
+        want = isHoan ? Math.max(0, want) : Math.min(s.max - s.done, Math.floor(points / s.price));
         let misses = 0;
         while (want > 0 && misses < 3) {
           // Nút nhiều nhất không quá số cần (×10, ×5, ×6…), không có thì từng cái
@@ -2511,6 +2599,8 @@
       lockInnateFlow().then((res) => post({ t: 'lockInnateResult', ...res }), (err) => post({ t: 'lockInnateResult', r: 'error: ' + err.message }));
     } else if (m.t === 'sellJunk') {
       sellJunkFlow().then((res) => post({ t: 'sellJunkResult', ...res }), (err) => post({ t: 'sellJunkResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'hoanUse') {
+      hoanUseFlow(m.arg || {}).then((res) => post({ t: 'hoanResult', ...res }), (err) => post({ t: 'hoanResult', r: 'error: ' + err.message }));
     } else if (m.t === 'reborn') {
       rebornFlow().then((res) => post({ t: 'rebornResult', ...res }), (err) => post({ t: 'rebornResult', r: 'error: ' + err.message }));
     } else if (m.t === 'horseStore') {
@@ -3236,6 +3326,7 @@
 
   const report = () => {
     try { if (screenOf() === 'game') restoreSlots(); } catch (_) {}
+    watchMonsters();
     try { handleTabLock(); } catch (err) { post({ t: 'log', msg: 'tab lock failed: ' + err.message }); }
     try { logDialogs(); } catch (err) { post({ t: 'log', msg: 'dialog scan failed: ' + err.message }); }
     const screen = screenOf();

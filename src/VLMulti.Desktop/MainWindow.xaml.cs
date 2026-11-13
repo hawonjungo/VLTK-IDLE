@@ -707,7 +707,7 @@ public partial class MainWindow : Window
         _setKnb = null!, _setBuffTtl = null!, _setBuffTtlSp = null!, _setBuffQht = null!,
         _setGuild = null!, _setGuildLdt = null!, _setGuildFdl = null!, _setGuildTtsp = null!, _setGuildThbt = null!;
     private TextBox _setGuildDonate = null!;
-    private CheckBox _setGuildKnbOn = null!, _setJewel = null!, _setLand = null!, _setAuction = null!, _setReborn = null!;
+    private CheckBox _setGuildKnbOn = null!, _setJewel = null!, _setLand = null!, _setAuction = null!, _setReborn = null!, _setHoan = null!;
     private ComboBox _setGuildKnbAmount = null!, _setAuctionMax = null!;
     private CheckBox _setSellJunk = null!, _setGuildFurnace = null!, _setGuildWeek = null!, _setKnbOn = null!, _setKnbBig = null!;
     private ComboBox _setGuildDaily = null!, _setGuildReserve = null!, _setKnbMain = null!, _setKnbKeep = null!;
@@ -822,6 +822,7 @@ public partial class MainWindow : Window
         body.Add(FormRow("KNB mỗi ngày (tính cả phần góp tay; chừa lại mức \"Mỗi acc giữ lại\")", _setGuildKnbAmount = Pick((50, "50 KNB"), (100, "100 KNB"), (200, "200 KNB"), (300, "300 KNB"), (500, "500 KNB"))));
         body.Add(_setLand = Box("🏯 Lãnh địa bang (thứ 4, thứ 7): sau Boss Hoàng Kim tự vào lãnh địa, cùng bang đánh Cơ Giáp (Bang chủ / Phó / Trưởng lão tự gọi), ngồi Lửa trại tới đủ kinh nghiệm hôm nay rồi về tháp"));
         body.Add(_setGuildFurnace = Box("🔥 Lò Đốt Đồ mỗi ngày: góp Hoàng Kim bộ chung (trừ món khoá); giữ Động Sát May mắn max và Hồng Ảnh Kinh nghiệm max, cất vào Rương"));
+        body.Add(_setHoan = Box("💊 Tự mua và dùng Hoàn ở Cửa hàng bang: loại có ích cho từng nhân vật; 6 viên khi tháp khó, 3 viên đầu mỗi đợt Boss Hoàng Kim; chừa 2.000 điểm"));
         body.Add(_setAuction = Box("🎁 Tự đấu giá Đồ phổ bí ẩn: chỉ acc chính (mục Gửi KNB) ra giá; luôn ra giá sàn 9.999 để không mất món, chỉ trả thêm khi bị người khác vượt giá; Lò đủ món thì Bang chủ / Phó tự hẹn mở sớm nhất"));
         body.Add(FormRow("Đấu giá tối đa", _setAuctionMax = Pick((10000, "10.000 KNB"), (12000, "12.000 KNB"), (15000, "15.000 KNB"), (18000, "18.000 KNB"), (20000, "20.000 KNB"))));
         body.Add(_setGuildWeek = Box("⚠ Cảnh báo điều kiện tuần (điểm tuần, 15 người vào game, quỹ duy trì) vào thứ Bảy, Chủ Nhật"));
@@ -876,6 +877,7 @@ public partial class MainWindow : Window
         _setGuildKnbOn.IsChecked = _settings.GuildKnbOn;
         _setJewel.IsChecked = _settings.JewelSwapOn;
         _setReborn.IsChecked = _settings.RebornOn;
+        _setHoan.IsChecked = _settings.HoanOn;
         _setLand.IsChecked = _settings.GuildLandOn;
         SelectValue(_setGuildKnbAmount, _settings.GuildKnbAmount);
         _setGuildWeek.IsChecked = _settings.GuildWeekAlert;
@@ -930,6 +932,7 @@ public partial class MainWindow : Window
         _settings.GuildKnbOn = _setGuildKnbOn.IsChecked == true;
         _settings.JewelSwapOn = _setJewel.IsChecked == true;
         _settings.RebornOn = _setReborn.IsChecked == true;
+        _settings.HoanOn = _setHoan.IsChecked == true;
         _settings.GuildLandOn = _setLand.IsChecked == true;
         if (_setGuildKnbAmount.SelectedItem is ComboBoxItem { Tag: int knbAmt }) _settings.GuildKnbAmount = knbAmt;
         _settings.GuildWeekAlert = _setGuildWeek.IsChecked == true;

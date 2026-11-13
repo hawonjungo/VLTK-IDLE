@@ -1215,6 +1215,46 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Hoan_is_used_on_a_hard_tower_floor_and_at_the_start_of_a_boss_wave()
+    {
+        var (ctl, page, cfg) = Make();
+        bool boss = false;
+        ctl.BossHkSchedule = _ => boss;
+        string InT(int floor) => JsonSerializer.Serialize(new { t = "status", screen = "game", lv = "139", gold = "1 vạn", knb = "1 🔒1", mode = "tower", modeText = "tower",
+            zone = $"Thông Thiên Tháp · tầng {floor}", inTower = 1, hk = "Đợt sau: 12:00" });
+        List<int> Uses() => page.Sent.Where(m => m.GetProperty("t").GetString() == "hoanUse").Select(m => m.GetProperty("arg").GetProperty("n").GetInt32()).ToList();
+        var t = Run(ctl, T0, 15, Status("game", mode: "farm"));
+        ctl.RequestMode("tower", t);
+        t = t.AddSeconds(70);
+        t = DieInTower(ctl, t, 60, floor: 703);
+        t = DieInTower(ctl, t, 60, floor: 703);
+        t = Run(ctl, t, 30, InT(703));
+        Assert.Empty(Uses()); // mặc định tắt
+
+        cfg.HoanOn = true;
+        t = DieInTower(ctl, t, 60, floor: 704);
+        t = Run(ctl, t, 9, InT(704));
+        Assert.Empty(Uses()); // mới chết 1 lần ở tầng này
+        t = DieInTower(ctl, t, 60, floor: 704);
+        t = Run(ctl, t, 9, InT(704));
+        Assert.Equal(new[] { 6 }, Uses());
+        ctl.OnPageMessage("""{"t":"hoanResult","r":"ok","used":"h_gt:6:24,h_bp:6:0"}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("Gia Tốc Hoàn ×6"));
+        t = Run(ctl, t, 120, InT(704));
+        Assert.Single(Uses());
+
+        // Đầu đợt Boss Hoàng Kim: 3 viên, một lần
+        boss = true;
+        t = Run(ctl, t, 6, InT(704));
+        ctl.OnPageMessage("""{"t":"sysNote","text":"👑 Boss Hoàng Kim Hà Linh Phiêu xuất hiện — tạm rời Tháp tầng 704 đi săn Boss.","boss":true}""", t);
+        t = Run(ctl, t, 30, Status("game", mode: "farm"));
+        Assert.Equal(new[] { 6, 3 }, Uses());
+        ctl.OnPageMessage("""{"t":"hoanResult","r":"ok","used":"h_gt:3:21"}""", t);
+        Run(ctl, t, 120, Status("game", mode: "farm"));
+        Assert.Equal(2, Uses().Count);
+    }
+
+    [Fact]
     public void Reborn_stops_at_the_game_maximum()
     {
         var (ctl, page, cfg) = Make();
