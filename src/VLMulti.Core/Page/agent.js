@@ -1467,7 +1467,8 @@
                 const box = $('#askBox');
                 if (!box || !isVisible(box)) return null;
                 const t = box.innerText.replace(/\s+/g, ' ');
-                if (!new RegExp('^Gửi [\\d.,]+ KNB cho ' + arg.to.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\?').test(t)) return 'bad';
+                // Game rút gọn số lớn: "Gửi 11.3k KNB cho …?" (từ 10.000 KNB) – 13/11 mọi lần gửi lớn bị huỷ vì thiếu "k"
+                if (!new RegExp('^Gửi [\\d.,]+\\s*[kKmM]? KNB cho ' + arg.to.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\?').test(t)) return 'bad';
                 return [...box.querySelectorAll('button')].find((b) => b.dataset.a === '1' || /^Gửi$/.test(b.textContent.trim())) || 'bad';
               }, 3000);
               if (yes && yes !== 'bad') {
