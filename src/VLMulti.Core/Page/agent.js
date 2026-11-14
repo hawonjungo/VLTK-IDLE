@@ -588,10 +588,27 @@
       return pool.length >= 2 ? pool : [];
     } catch (_) { return []; }
   };
-  // Trong tháp có được cưỡi ngựa không: đang xoay chiêu → KHÔNG (14/11: nhân vật Thiên Nhẫn xoay Vân Long Kích + Ma Diệm Thất Sát; chiêu
-  // chính dùng được trên ngựa nên tool để cưỡi, tới lượt Ma Diệm Thất Sát – chiêu chỉ dùng khi đi bộ – game đánh thường thay).
-  // Không xoay chiêu → như cũ: theo chiêu chính.
-  const towerRideOk = (R, S) => rotSkills(R, S).length === 0 && mainHorseOk(R);
+  // Trong tháp có được cưỡi ngựa không: đang xoay chiêu mà có chiêu CHỈ DÙNG KHI ĐI BỘ (HORSE_LIM 1) → KHÔNG (14/11: nhân vật
+  // Thiên Nhẫn xoay Vân Long Kích + Ma Diệm Thất Sát; chiêu chính dùng được trên ngựa nên tool để cưỡi, tới lượt Ma Diệm Thất
+  // Sát game đánh thường thay). Còn lại → theo chiêu chính như cũ (15/11: Ngũ Độc ngoại công xoay 2 chiêu đều cưỡi được mà bị
+  // bắt xuống ngựa).
+  const towerRideOk = (R, S) => {
+    let lim = null;
+    try { lim = g('HORSE_LIM'); } catch (_) {}
+    const footOnly = rotSkills(R, S).some((a) => lim && lim[a.id] === 1);
+    return !footOnly && mainHorseOk(R);
+  };
+  // Nhân vật đánh xa trong tháp: chiêu chính bắn ngoài tầm quái nhưng vòng xoay có chiêu tầm ngắn hơn tầm quái → tới lượt chiêu
+  // đó game cho đi sát vào quái, phần né lại kéo ra → giằng co, chiêu chính (mạnh hơn nhiều) gần như không ra, bị đánh chết
+  // (14/11: chiêu chính tầm 512 + chiêu phụ tầm 180, quái tầm 400 → chết 7 lần liền ở một tầng, log chiêu=[phụ:14]).
+  // Khi đó tắt "Xoay chiêu" của game trong tháp (chỉ đánh chiêu chính), ra khỏi tháp bật lại như bạn cài.
+  let monReach = 0, monReachAt = 0;
+  const rotShortSkill = (R, S) => {
+    const main = R && R.P && R.P.main;
+    if (!main || main.melee || !(monReach > 0) || Date.now() - monReachAt > 10 * 60000) return null;
+    if ((+main.rad || 0) - monReach < 25) return null; // chiêu chính cũng không bắn ngoài tầm quái → để như cũ
+    return rotSkills(R, S).find((a) => a.id !== main.id && (+a.rad || 0) < monReach + 20) || null;
+  };
   const kiteTick = () => {
     kiteSt.active = false;
     // Ra khỏi tháp (chết, nghỉ, boss…) → vào lại cùng tầng vẫn chạy sẵn trước khi quái mọc (xét trước mọi điều kiện:
@@ -778,6 +795,7 @@
       // Tầm đánh của quái (game: e.reach; quái ra đòn khi cách ≤ reach + 4). Chiêu mình bắn xa hơn hẳn → đứng ngoài tầm
       // quái mà vẫn trong tầm mình (ví dụ quái cận chiến 75, mình 512 → giữ ~360); không hơn được thì như cũ (150–260).
       const mReach = Math.max(0, ...near.map((e) => +e.reach || 0));
+      if (mReach > 0) { monReach = mReach; monReachAt = now; }
       const outrange = freeMove && rad - mReach >= 25;
       let want = outrange ? Math.min(rad - 12, Math.max(mReach + 0.6 * (rad - mReach), Math.min(360, rad - 40)))
         : Math.max(150, Math.min(rad * 0.55, 260));
@@ -900,6 +918,26 @@
       let S, R;
       try { S = window.H5.G('S'); R = window.H5.G('R'); } catch (_) { return; }
       if (!S || !R || !S.name) return;
+      // Xoay chiêu trong tháp (xem rotShortSkill): tắt khi có chiêu tầm ngắn hơn tầm quái, ra khỏi tháp bật lại
+      {
+        const rk = 'vlRotOff';
+        let mineRot = false;
+        try { mineRot = localStorage.getItem(rk) === '1'; } catch (_) {}
+        if (R.tower) {
+          const short = S.rot !== false ? rotShortSkill(R, S) : null;
+          if (short) {
+            S.rot = false;
+            try { localStorage.setItem(rk, '1'); } catch (_) {}
+            try { g('refreshRotBtn')(); } catch (_) {}
+            post({ t: 'log', msg: `rotation: tháp → tắt Xoay chiêu (${short.n} tầm ${Math.round(short.rad)} < tầm quái ${Math.round(monReach)}; chỉ đánh ${R.P.main.n} tầm ${Math.round(R.P.main.rad)})` });
+          }
+        } else if (mineRot && !R.dg) {
+          S.rot = true;
+          try { localStorage.removeItem(rk); } catch (_) {}
+          try { g('refreshRotBtn')(); } catch (_) {}
+          post({ t: 'log', msg: 'rotation: ra khỏi tháp → bật lại Xoay chiêu' });
+        }
+      }
       if (!R.tower && Date.now() < rideHoldUntil) return; // vừa xuống ngựa để vào tháp
       const key = 'vlRideOff';
       // Chiêu chính dùng được trên ngựa → cứ cưỡi (nhanh hơn, né tốt hơn); bật lại nếu tool đã tắt trước đó
