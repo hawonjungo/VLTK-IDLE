@@ -94,6 +94,7 @@ public sealed class SessionManager : IAsyncDisposable
         c.LootFound += (src, text) => OnLoot(acc, src, text);
         c.GuildLogResult += m => _guildLedger.Ingest(m, DateTime.Now);
         c.HorseResult += m => _horses.OnResult(acc.Id, m);
+        c.RpsSeen += OnRpsSeen;
 
         lock (_gate) _sessions[acc.Id] = session;
         try
@@ -117,6 +118,7 @@ public sealed class SessionManager : IAsyncDisposable
             var sessions = Sessions;
             foreach (var s in sessions) s.Locked(c => c.Tick(now));
             SuperviseHorsesInLand(now);
+            SuperviseRps(now);
 
             if (now - _lastStateSave > SaveStateEvery)
             {
@@ -751,6 +753,47 @@ public sealed class SessionManager : IAsyncDisposable
         int target;
         lock (_gate) target = _settings.GuildKnbAmount;
         return _guildLedger.Week(day, target, DateTime.Now);
+    }
+
+    // ---------- ✊ Oẳn tù tì: thu kết quả máy chủ để thống kê (chỉ đọc, không cược) ----------
+    // Mỗi 5 phút một acc đang trong game đọc 10 ván gần nhất (rps.xem); mỗi ván ghi một dòng "r,mv,utc" vào data/rps.csv.
+    private DateTime _rpsAt = DateTime.MinValue;
+    private long _rpsLast;
+    private readonly object _rpsGate = new();
+
+    private void SuperviseRps(DateTime now)
+    {
+        if (now - _rpsAt < TimeSpan.FromMinutes(5)) return;
+        foreach (var s in Sessions)
+        {
+            bool ok = false;
+            s.Locked(c => { if (c.Screen == "game" && !c.Away) { c.PostRaw(new { t = "rpsPeek" }); ok = true; } });
+            if (ok) { _rpsAt = now; return; }
+        }
+    }
+
+    private void OnRpsSeen(JsonElement m)
+    {
+        if (!m.TryGetProperty("hist", out var hist) || hist.ValueKind != JsonValueKind.Array) return;
+        var rows = new List<(long R, int Mv)>();
+        foreach (var h in hist.EnumerateArray())
+            if (h.TryGetProperty("r", out var r) && h.TryGetProperty("mv", out var mv) && r.TryGetInt64(out var rv) && mv.TryGetInt32(out var mvv))
+                rows.Add((rv, mvv));
+        lock (_rpsGate)
+        {
+            try
+            {
+                var file = Path.Combine(AppPaths.DataDir, "rps.csv");
+                if (_rpsLast == 0 && File.Exists(file))
+                    foreach (var line in File.ReadLines(file))
+                        if (long.TryParse(line.Split(',')[0], out var x) && x > _rpsLast) _rpsLast = x;
+                var add = rows.Where(x => x.R > _rpsLast).OrderBy(x => x.R).ToList();
+                if (add.Count == 0) return;
+                File.AppendAllLines(file, add.Select(x => $"{x.R},{x.Mv},{DateTimeOffset.FromUnixTimeMilliseconds(x.R * 60000):yyyy-MM-ddTHH:mmZ}"));
+                _rpsLast = add[^1].R;
+            }
+            catch (Exception ex) { Log.Write("rps: " + ex.Message); }
+        }
     }
 
     // ---------- 🐴 Mã Trường ----------

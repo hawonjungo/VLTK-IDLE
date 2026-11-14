@@ -2640,6 +2640,14 @@
       lockInnateFlow().then((res) => post({ t: 'lockInnateResult', ...res }), (err) => post({ t: 'lockInnateResult', r: 'error: ' + err.message }));
     } else if (m.t === 'sellJunk') {
       sellJunkFlow().then((res) => post({ t: 'sellJunkResult', ...res }), (err) => post({ t: 'sellJunkResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'rpsPeek') {
+      // ✊ Oẳn tù tì: chỉ ĐỌC kết quả 10 ván gần nhất của máy chủ (rps.xem) để thống kê – không bao giờ cược
+      (async () => {
+        try {
+          const v = await window.H5.call('rps.xem', {});
+          post({ t: 'rpsSeen', hist: (v && v.hist || []).map((x) => ({ r: +x.r, mv: +x.mv })), hu: +(v && v.hu) || 0, now: +(v && v.now) || Date.now() });
+        } catch (e) { post({ t: 'rpsSeen', err: String((e && (e.msg || e.message)) || e).slice(0, 80) }); }
+      })();
     } else if (m.t === 'hoanUse') {
       hoanUseFlow(m.arg || {}).then((res) => post({ t: 'hoanResult', ...res }), (err) => post({ t: 'hoanResult', r: 'error: ' + err.message }));
     } else if (m.t === 'reborn') {

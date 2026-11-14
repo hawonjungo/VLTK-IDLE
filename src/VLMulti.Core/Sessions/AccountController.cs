@@ -188,6 +188,7 @@ public sealed class AccountController
     public event Action<ActivityEntry>? ActivityAdded;
     // 🐴 Mã Trường: kết quả một bước (xem HorseCoordinator)
     public event Action<JsonElement>? HorseResult;
+    public event Action<JsonElement>? RpsSeen; // ✊ Oẳn tù tì: kết quả máy chủ đọc được (chỉ thống kê)
 
     // Gửi một bước 🐴 Mã Trường vào trang (bên gọi giữ khoá của acc như mọi lệnh khác)
     public void PostRaw(object message) => Post(message);
@@ -542,6 +543,9 @@ public sealed class AccountController
                     break;
                 case "horseStoreResult":
                     OnHorseStoreResult(m, now);
+                    break;
+                case "rpsSeen":
+                    RpsSeen?.Invoke(m.Clone());
                     break;
                 case "horseResult":
                     Log.Write($"[{Account.Id}] horse {Str(m, "op")}: {Str(m, "r")} stored={Str(m, "stored")} sent={Str(m, "sent")} failed={Str(m, "failed")}");
