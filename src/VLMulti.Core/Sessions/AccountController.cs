@@ -538,6 +538,15 @@ public sealed class AccountController
                 case "hoanResult":
                     OnHoanResult(m, now);
                     break;
+                case "buildSpent":
+                {
+                    var parts = new[] { Str(m, "attr"), Str(m, "sk") }.Where(x => x.Length > 0);
+                    var text = $"🔄 Cộng điểm theo lối đánh cũ (cấp {Raw(m, "lv")}): {string.Join(" · ", parts)}";
+                    Log.Write($"[{Account.Id}] {text}");
+                    Note(now, text, StatusLevel.Ok);
+                    GameLogSink?.Invoke(Account.Id, new[] { new GameLog.Entry(now, "reborn", "", Account.CharName ?? "", text) });
+                    break;
+                }
                 case "rebornResult":
                     OnRebornResult(m, now);
                     break;
@@ -2365,7 +2374,7 @@ public sealed class AccountController
         {
             case "ok":
                 if (int.TryParse(Raw(m, "n"), out var n)) Reborn = n;
-                var text = $"🔄 Chuyển sinh lần {Raw(m, "n")}: về cấp 1, game tự cộng điểm; Luyện Công tới hết cấp {RebornTowerLevel} rồi về tháp";
+                var text = $"🔄 Chuyển sinh lần {Raw(m, "n")}: về cấp 1, cộng điểm lại theo lối đánh cũ; Luyện Công tới hết cấp {RebornTowerLevel} rồi về tháp";
                 Note(now, text, StatusLevel.Ok);
                 GameLogSink?.Invoke(Account.Id, new[] { new GameLog.Entry(now, "reborn", "", Account.CharName ?? "", text) });
                 _rebornHoldNoted = false;

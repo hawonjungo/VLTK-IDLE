@@ -919,7 +919,7 @@ function renderSettings() {
         check(buffQht, '🍶 Quế Hoa Tửu (+20 may mắn)'),
       ]),
       section('Nhân vật', [
-        check(rebornOn, '🔄 Tự chuyển sinh ở cấp 200', 'Tới tối đa 10 lần. Bật "Tự cộng điểm" của game, đặt lại 4 ô kỹ năng khi học lại được. Sau chuyển sinh Luyện Công tới hết cấp 80 rồi mới vào tháp.'),
+        check(rebornOn, '🔄 Tự chuyển sinh ở cấp 200', 'Tới tối đa 10 lần. Cộng điểm lại đúng lối đánh cũ (tỉ lệ tiềm năng, chỉ kỹ năng đã có), đặt lại 4 ô kỹ năng. Sau chuyển sinh Luyện Công tới hết cấp 80 rồi mới vào tháp.'),
       ]),
       section('Hành trang', [
         check(sellJunk, '💰 Sắp đầy thì "Bán thừa"', 'Món không khớp ⚙ Nhặt đồ, không khoá.'),

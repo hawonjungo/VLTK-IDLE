@@ -2329,7 +2329,14 @@
       closeBag();
       const slots = (S.slots || []).map((x) => +x || 0);
       try { localStorage.setItem(SLOT_KEY, JSON.stringify({ slots, at: Date.now() })); } catch (_) {}
-      if (S.autoPts !== true) { S.autoPts = true; try { g('save')(); } catch (_) {} }
+      // Lối đánh trước chuyển sinh: tỉ lệ tiềm năng, kỹ năng + cấp, chiêu chính → cộng lại đúng như vậy (restoreBuild).
+      // KHÔNG dùng "Tự cộng điểm" của game: 15/11 sau chuyển sinh nó cộng vào bị động Kiếm cho nhân vật cầm Đao (ở cấp thấp
+      // mọi lựa chọn tăng sức mạnh ~0 → game chọn bị động có yêu cầu cấp cao nhất, không xét vũ khí).
+      try {
+        const main = (g('R').P && g('R').P.main && g('R').P.main.id) || S.main || 0;
+        localStorage.setItem(BUILD_KEY, JSON.stringify({ attr: { ...S.attr }, sk: { ...S.sk }, main, slots, at: Date.now() }));
+      } catch (_) {}
+      if (S.autoPts === true) { S.autoPts = false; try { g('save')(); } catch (_) {} }
       const p = Promise.resolve(doReborn()).catch(() => {});
       const box = await waitFor(() => { const b = $('#askBox'); return b && /Chuyển sinh/.test(b.textContent || '') ? b : null; }, 4000);
       if (!box) return { r: 'no-confirm' };
@@ -2343,6 +2350,79 @@
     } finally {
       flowBusy = false;
     }
+  };
+  // ---------- Cộng điểm lại theo lối đánh trước chuyển sinh ----------
+  // Tiềm năng: trước hết đủ yêu cầu của đồ đang mặc (reqDeficit), còn lại giữ đúng tỉ lệ cũ (ví dụ Sức mạnh 88% · Thân pháp 12%).
+  // Kỹ năng: chỉ cộng vào kỹ năng đã có trước chuyển sinh, tới đúng cấp cũ, theo thứ tự: chiêu chính → 4 ô → còn lại (cấp cũ
+  // cao trước). Không bao giờ học kỹ năng mới. Cộng bằng đúng hàm của game (H5.attr → attr.add, skLearn → sk.hoc).
+  const BUILD_KEY = 'vl.rebBuild';
+  let buildAt = 0, buildBusy = false;
+  const restoreBuild = async () => {
+    if (buildBusy || flowBusy || Date.now() - buildAt < 5000) return;
+    buildAt = Date.now();
+    let b = null;
+    try { b = JSON.parse(localStorage.getItem(BUILD_KEY) || 'null'); } catch (_) {}
+    if (!b || !b.attr || !b.sk) return;
+    const S = g('S'), H = window.H5;
+    if (!S || !H || typeof H.attr !== 'function') return;
+    if (S.autoPts === true) { S.autoPts = false; try { g('save')(); } catch (_) {} } // game không được tự cộng chen vào
+    if (+S.lvl >= 200) { try { localStorage.removeItem(BUILD_KEY); } catch (_) {} return; } // lượt chuyển sinh sau lưu lại
+    if (!(S.attrPts > 0) && !(S.skPts > 0)) return;
+    buildBusy = true;
+    const done = { attr: {}, sk: {} };
+    try {
+      // 1. Tiềm năng
+      let pts = S.attrPts | 0;
+      if (pts > 0) {
+        const keys = ['str', 'dex', 'vit', 'eng'];
+        const give = { str: 0, dex: 0, vit: 0, eng: 0 };
+        const rd = g('reqDeficit');
+        if (typeof rd === 'function') {
+          const need = { str: 0, dex: 0, vit: 0, eng: 0 };
+          for (const it of Object.values(S.eq || {})) {
+            if (!it) continue;
+            try { const d = rd(it) || {}; for (const k of keys) need[k] = Math.max(need[k], +d[k] || 0); } catch (_) {}
+          }
+          for (const k of keys) { const n = Math.min(pts, need[k]); give[k] += n; pts -= n; }
+        }
+        const total = keys.reduce((s0, k) => s0 + (+b.attr[k] || 0), 0);
+        if (total > 0) {
+          for (; pts > 0; pts--) {
+            const sum = keys.reduce((s0, k) => s0 + (+S.attr[k] || 0) + give[k], 0) + 1;
+            let best = null, gap = -Infinity;
+            for (const k of keys) {
+              const want = ((+b.attr[k] || 0) / total) * sum, now = (+S.attr[k] || 0) + give[k];
+              if (want - now > gap) { gap = want - now; best = k; }
+            }
+            give[best]++;
+          }
+        }
+        for (const k of keys) if (give[k] > 0) { H.attr(k, give[k]); done.attr[k] = give[k]; await sleep(600); }
+      }
+      // 2. Kỹ năng
+      const learn = g('skLearn'), can = g('canLearn'), SK = g('SK');
+      if ((S.skPts | 0) > 0 && typeof learn === 'function' && typeof can === 'function' && SK) {
+        const ids = Object.keys(b.sk).map(Number).filter((id) => SK[id] && (+b.sk[id] || 0) > (S.sk[id] | 0));
+        const rank = (id) => (id === +b.main ? 0 : (b.slots || []).includes(id) ? 1 : 2);
+        ids.sort((x, y) => rank(x) - rank(y) || (+b.sk[y] || 0) - (+b.sk[x] || 0));
+        for (const id of ids) {
+          for (let guard = 0; guard < 40 && (g('S').skPts | 0) > 0 && (g('S').sk[id] | 0) < (+b.sk[id] || 0) && can(SK[id]); guard++) {
+            const before = g('S').sk[id] | 0;
+            learn(id);
+            await waitFor(() => (g('S').sk[id] | 0) > before, 3000);
+            if ((g('S').sk[id] | 0) <= before) break;
+            done.sk[SK[id].n] = (done.sk[SK[id].n] || 0) + 1;
+          }
+        }
+      }
+    } catch (err) {
+      post({ t: 'log', msg: 'build: ' + err.message });
+    } finally {
+      buildBusy = false;
+    }
+    const a = Object.entries(done.attr).map(([k, v]) => `${({ str: 'Sức mạnh', dex: 'Thân pháp', vit: 'Sinh khí', eng: 'Nội công' })[k]} +${v}`);
+    const s = Object.entries(done.sk).map(([k, v]) => `${k} +${v}`);
+    if (a.length || s.length) post({ t: 'buildSpent', lv: +g('S').lvl, attr: a.join(', '), sk: s.join(', ') });
   };
   // Sau chuyển sinh: kỹ năng cũ học lại được (game tự cộng điểm) thì đặt lại đúng ô như trước. Hết việc hoặc quá 7 ngày thì thôi.
   let slotsAt = 0;
@@ -3446,7 +3526,7 @@
   });
 
   const report = () => {
-    try { if (screenOf() === 'game') restoreSlots(); } catch (_) {}
+    try { if (screenOf() === 'game') { restoreSlots(); restoreBuild(); } } catch (_) {}
     watchMonsters();
     try { handleTabLock(); } catch (err) { post({ t: 'log', msg: 'tab lock failed: ' + err.message }); }
     try { logDialogs(); } catch (err) { post({ t: 'log', msg: 'dialog scan failed: ' + err.message }); }

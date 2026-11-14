@@ -797,7 +797,7 @@ public partial class MainWindow : Window
         body.Add(_setBuffQht = Box("🍶 Quế Hoa Tửu (+20 may mắn)"));
         body.Add(_setSellJunk = Box("💰 Hành trang sắp đầy thì bấm \"Bán thừa\" của game (món không khớp ⚙ Nhặt đồ, không khoá)"));
         body.Add(FormRow("Bán khi còn ≤ ô trống", _setSellFree = Number("1–200 ô")));
-        body.Add(_setReborn = Box("🔄 Tự chuyển sinh ở cấp 200 (tới 10 lần): bật Tự cộng điểm của game, đặt lại ô kỹ năng; Luyện Công tới hết cấp 80 rồi mới vào tháp"));
+        body.Add(_setReborn = Box("🔄 Tự chuyển sinh ở cấp 200 (tới 10 lần): cộng điểm lại theo lối đánh cũ, đặt lại ô kỹ năng; Luyện Công tới hết cấp 80 rồi mới vào tháp"));
         body.Add(_setJewel = Box("💍 Đổi trang sức theo việc: Luyện Công / Nhiệm Vụ đeo Hồng Ảnh, Leo Tháp / Boss đeo trang sức sức mạnh (chỉ dây chuyền, 2 nhẫn, ngọc bội)"));
         body.Add(Section("💰 Gửi KNB về acc chính"));
         body.Add(Note("Mỗi ngày một lần (sau khi đổi vạn → KNB) các acc khác gửi thư tặng phần KNB trên mức giữ lại về acc chính; acc chính tự nhận thư mỗi 30 phút."));
