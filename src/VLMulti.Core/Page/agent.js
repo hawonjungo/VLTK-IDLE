@@ -563,7 +563,8 @@
     const st = kiteSt.stat;
     if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0, mounted: st.mounted || 0, movePct: st.nearTicks ? Math.round(100 * (st.moveTicks || 0) / st.nearTicks) : null, pre: st.pre || 0, far: st.far || 0, mReach: st.mReach || 0, danger: Math.round((st.danger || 0) / 10),
       atkPs: st.nearTicks ? Math.round(100 * (st.atk || 0) / (st.nearTicks * 0.1)) / 100 : null,
-      atkPct: st.nearTicks && st.rate ? Math.round(100 * (st.atk || 0) / (st.nearTicks * 0.1) / st.rate) : null });
+      atkPct: st.nearTicks && st.rate ? Math.round(100 * (st.atk || 0) / (st.nearTicks * 0.1) / st.rate) : null,
+      sk: st.sk ? Object.entries(st.sk).map(([k, v]) => `${k}:${v}`).join(' ') : '' });
     kiteSt.stat = null;
   };
   const clearSpot = (x, y) => {
@@ -577,6 +578,20 @@
   const mainHorseOk = (R) => {
     try { const id = R && R.P && R.P.main && R.P.main.id; const lim = g('HORSE_LIM'); return !(lim && id && lim[id] === 1); } catch (_) { return false; }
   };
+  // Xoay chiêu đang bật (game rotPool: S.rot khác false, ≥ 2 chiêu tấn công ở ô 1–4) → các chiêu xoay trong game (R.rotI)
+  const rotSkills = (R, S) => {
+    try {
+      if (!S || S.rot === false || window.NO_ROT || (S.mainLock && S.main === 'basic')) return [];
+      const acts = (R && R.P && R.P.actives) || [];
+      const ids = (S.slots || []).filter((x) => x > 0);
+      const pool = ids.map((id) => acts.find((a) => a.id === id)).filter(Boolean);
+      return pool.length >= 2 ? pool : [];
+    } catch (_) { return []; }
+  };
+  // Trong tháp có được cưỡi ngựa không: đang xoay chiêu → KHÔNG (14/11: nhân vật Thiên Nhẫn xoay Vân Long Kích + Ma Diệm Thất Sát; chiêu
+  // chính dùng được trên ngựa nên tool để cưỡi, tới lượt Ma Diệm Thất Sát – chiêu chỉ dùng khi đi bộ – game đánh thường thay).
+  // Không xoay chiêu → như cũ: theo chiêu chính.
+  const towerRideOk = (R, S) => rotSkills(R, S).length === 0 && mainHorseOk(R);
   const kiteTick = () => {
     kiteSt.active = false;
     // Ra khỏi tháp (chết, nghỉ, boss…) → vào lại cùng tầng vẫn chạy sẵn trước khi quái mọc (xét trước mọi điều kiện:
@@ -615,6 +630,12 @@
     const now = Date.now();
     const melee = c.melee != null ? !!c.melee : !!(R.P && R.P.main && R.P.main.melee);
     const rad = (R.P && R.P.main && +R.P.main.rad) || (melee ? 90 : 400);
+    // Chiêu sắp ra (xoay chiêu: R.rotI trong vòng xoay của game; không xoay: chiêu chính) – tầm đánh lấy theo chiêu này
+    const pool = rotSkills(R, S);
+    const curSk = pool.length ? pool[(R.rotI | 0) % pool.length] : (R.P && R.P.main);
+    kiteSt.curSk = curSk && curSk.id;
+    const curMelee = curSk ? !!curSk.melee : melee;
+    const curRad = (curSk && +curSk.rad) || rad;
     const m = c.margin ?? 220;
     const lifePct = R.P && R.P.life > 0 ? 100 * (R.life || 0) / R.P.life : 100;
     // Nguy hiểm: máu tụt ≥ 25% trong 3 giây gần nhất, hoặc tầng này vừa chết → 4 giây giữ xa ngoài tầm quái
@@ -631,7 +652,7 @@
     const JK = 0.81, SAFE = 330;
     // Chiêu chính dùng được khi cưỡi ngựa? (HORSE_LIM của game: 1 = không dùng được trên ngựa). Được → không cần tránh
     // lên ngựa, không bắt xuống ngựa (ví dụ Vân Long Kích, Huyền Âm Trảm); không được → giữ trong vòng an toàn.
-    const horseOk = mainHorseOk(R);
+    const horseOk = towerRideOk(R, S);
     // Đi xa cũng không bị lên ngựa: chiêu chính đánh được trên ngựa, hoặc "Tự lên ngựa" đang tắt (trong tháp tool tắt cho
     // nhân vật có chiêu chính không dùng được trên ngựa) → bỏ giới hạn 330/390 để giữ ngựa
     const freeMove = horseOk || (S && S.autoRide === false && !R.mounted);
@@ -719,23 +740,36 @@
     }
     let t = near.reduce((a, e) => (dist(e) < dist(a) ? e : a));
     let tx, ty;
-    if (melee) {
-      // Đông quái sát người (≥ 3 con trong 120) → đi vòng quanh TÂM đám quái, ở mép ngoài; ít quái → quanh con gần nhất.
-      // Bán kính ~70% tầm đánh (trong tầm), mỗi lần một cung dài `step` (px trên màn hình).
-      // Tính trong thước của game (x/0,81, 2y/0,81): vòng tròn ở đó = elip dẹt dọc trên màn hình → luôn trong tầm đánh
+    if (melee && !curMelee) {
+      // Cận chiến, tới lượt chiêu đánh xa trong vòng xoay (ví dụ Ma Diệm Thất Sát tầm 397): ra đòn tại chỗ – chỉ nhích ngang
+      // ngắn quanh mục tiêu, không lại gần hơn, không đi xa (lượt sau là chiêu cận chiến)
+      const vx = H.x - t.x, vy = H.y - t.y, d = Math.hypot(vx, vy) || 1;
+      const sl = Math.min(step, 45);
+      tx = H.x + (-vy / d) * sl * kiteSt.side; ty = H.y + (vx / d) * sl * kiteSt.side;
+      if (++kiteSt.sideSteps >= 4) { kiteSt.sideSteps = 0; kiteSt.side = -kiteSt.side; }
+    } else if (melee) {
+      // Cận chiến: vừa đánh vừa đi vòng quanh MỤC TIÊU đang đánh (R.tgt của game; không có thì con gần nhất), luôn trong tầm
+      // chiêu sắp ra (Vân Long Kích 90): bán kính ~60% tầm, mỗi bước quay tối đa ~50° (14/11: trước đây vòng quanh tâm đám
+      // quái bán kính tới 130 và bước 75 px → hay ra khỏi tầm 90, nhảy qua lại quanh mục tiêu). Đông quái (≥ 3 con trong
+      // 120): chọn chiều vòng ra xa phía đám quái. Máu tụt nhanh / máu thấp: lùi ra một nhịp rồi vòng lại.
+      const tg = R.tgt && !R.tgt.dead && R.tgt.hp > 0 && near.includes(R.tgt) ? R.tgt : t;
+      t = tg;
       const pack = near.filter((e) => dist(e) <= 120);
-      let rJ = Math.max(45, Math.min(rad * 0.7, 80));
+      const rMax = Math.max(30, curRad - 15);
+      const rJ = Math.max(25, Math.min(curRad * 0.6, rMax));
+      const stepJ = Math.min(step / JK, rJ * 0.9);
+      const a0 = Math.atan2(2 * (H.y - t.y), H.x - t.x);
       if (pack.length >= 3) {
-        const gx = pack.reduce((a, e) => a + e.x, 0) / pack.length, gy = pack.reduce((a, e) => a + e.y, 0) / pack.length;
-        const spread = Math.max(...pack.map((e) => jx(gx, gy, e.x, e.y)));
-        t = { x: gx, y: gy };
-        rJ = Math.max(rJ, Math.min(spread + 45, 130));
-      }
-      const stepJ = step / JK;
-      const a = Math.atan2(2 * (H.y - t.y), H.x - t.x) + kiteSt.side * (stepJ / rJ);
-      const rr = (low ? rJ + stepJ * 0.6 : rJ) * JK;
+        const gx = pack.reduce((s0, e) => s0 + e.x, 0) / pack.length, gy = pack.reduce((s0, e) => s0 + e.y, 0) / pack.length;
+        const dA = (sd) => { const aa = a0 + sd * (stepJ / rJ); return jx(t.x + Math.cos(aa) * rJ * JK, t.y + Math.sin(aa) * rJ * JK / 2, gx, gy); };
+        kiteSt.side = dA(1) >= dA(-1) ? 1 : -1;
+      } else if (++kiteSt.sideSteps >= 8) { kiteSt.sideSteps = 0; kiteSt.side = -kiteSt.side; } // đổi chiều cho khó đoán
+      const a = a0 + kiteSt.side * (stepJ / rJ);
+      const out = low || danger;
+      if (st && danger) st.danger = (st.danger || 0) + 1;
+      const rr = (out ? rJ + stepJ * 0.8 : rJ) * JK;
       tx = t.x + Math.cos(a) * rr; ty = t.y + Math.sin(a) * rr / 2;
-      if (++kiteSt.sideSteps >= 8) { kiteSt.sideSteps = 0; kiteSt.side = -kiteSt.side; } // đổi chiều vòng cho khó đoán
+      if (st) st.far = Math.round(rJ);
     } else {
       // Đi ngang so với hướng quái + chỉnh khoảng cách (theo thước game) về ~55% tầm, tối đa 260 – luôn dưới ngưỡng ngựa
       const vx = H.x - t.x, vy = H.y - t.y, d = Math.hypot(vx, vy) || 1;
@@ -820,7 +854,7 @@
       kf.prevAtk = a;
       if (!kiteSt.active) { if (kf.hold) { kf.hold = 0; kiteResume(R, IN); } return; }
       const st = kiteSt.stat;
-      if (fired && st) st.atk = (st.atk || 0) + 1;
+      if (fired && st) { st.atk = (st.atk || 0) + 1; if (kiteSt.curSk) (st.sk || (st.sk = {}))[kiteSt.curSk] = (st.sk[kiteSt.curSk] || 0) + 1; }
       if (kf.hold) {
         // Đòn đã ra → đi tiếp ngay; quá 3 khung hình mà chưa ra (không có quái trong tầm chiêu…) → đi tiếp, 0,3 giây không dừng
         if (fired || ++kf.hold > 3) {
@@ -852,7 +886,7 @@
   const groundForTower = async () => {
     try {
       const S = g('S'), R = g('R');
-      if (!S || !R || mainHorseOk(R)) return;
+      if (!S || !R || towerRideOk(R, S)) return;
       rideHoldUntil = Date.now() + 8000;
       if (S.autoRide !== false) { S.autoRide = false; try { localStorage.setItem('vlRideOff', '1'); } catch (_) {} }
       if (R.mounted) {
@@ -869,7 +903,7 @@
       if (!R.tower && Date.now() < rideHoldUntil) return; // vừa xuống ngựa để vào tháp
       const key = 'vlRideOff';
       // Chiêu chính dùng được trên ngựa → cứ cưỡi (nhanh hơn, né tốt hơn); bật lại nếu tool đã tắt trước đó
-      if (R.tower && mainHorseOk(R)) {
+      if (R.tower && towerRideOk(R, S)) {
         let mine = false;
         try { mine = localStorage.getItem(key) === '1'; } catch (_) {}
         if (mine) { S.autoRide = true; try { localStorage.removeItem(key); } catch (_) {} post({ t: 'log', msg: 'ride: chiêu chính dùng được trên ngựa → giữ Tự lên ngựa' }); }
