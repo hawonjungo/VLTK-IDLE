@@ -557,7 +557,7 @@ public sealed class AccountController
                     RpsSeen?.Invoke(m.Clone());
                     break;
                 case "horseResult":
-                    Log.Write($"[{Account.Id}] horse {Str(m, "op")}: {Str(m, "r")} stored={Str(m, "stored")} sent={Str(m, "sent")} failed={Str(m, "failed")}");
+                    Log.Write($"[{Account.Id}] horse {Str(m, "op")}: {Str(m, "r")} stored={Str(m, "stored")} sent={Str(m, "sent")} failed={Str(m, "failed")} opened={Raw(m, "opened")} junk={Raw(m, "junkSold")} bagFull={Raw(m, "bagFull")}");
                     HorseResult?.Invoke(m.Clone());
                     break;
                 case "unreadable":
@@ -568,8 +568,18 @@ public sealed class AccountController
                     break;
                 case "kiteFloor":
                     // Số liệu né liên tục từng tầng (để so và chỉnh): thời gian, máu mất, số lần nhích, máu thấp nhất
-                    Log.Write($"[{Account.Id}] kite floor {Raw(m, "floor")}: {Raw(m, "secs")}s lost={Raw(m, "lost")} steps={Raw(m, "steps")} min={Raw(m, "minPct")}% {(Raw(m, "melee") == "1" ? "melee" : "ranged")} ngựa={Raw(m, "mounted")} đi={Raw(m, "movePct")}% trước={Raw(m, "pre")} xa={Raw(m, "far")} tầmquái={Raw(m, "mReach")} đòn={Raw(m, "atkPs")}/s ({Raw(m, "atkPct")}%) nguy={Raw(m, "danger")}s chiêu=[{Str(m, "sk")}] trúng={Raw(m, "hits")} hàng={Raw(m, "line")}");
+                    Log.Write($"[{Account.Id}] kite floor {Raw(m, "floor")}: {Raw(m, "secs")}s lost={Raw(m, "lost")} steps={Raw(m, "steps")} min={Raw(m, "minPct")}% {(Raw(m, "melee") == "1" ? "melee" : "ranged")} ngựa={Raw(m, "mounted")} đi={Raw(m, "movePct")}% trước={Raw(m, "pre")} xa={Raw(m, "far")} tầmquái={Raw(m, "mReach")} đòn={Raw(m, "atkPs")}/s ({Raw(m, "atkPct")}%) nguy={Raw(m, "danger")}s chiêu=[{Str(m, "sk")}] trúng={Raw(m, "hits")} hàng={Raw(m, "line")} kiểu={Str(m, "style")}");
                     break;
+                case "kiteTune":
+                {
+                    var best = Str(m, "best");
+                    var label = best switch { "line" => "xếp hàng", "strafe" => "đi ngang", "orbit45" => "vòng sát (45% tầm)", "orbit60" => "vòng vừa (60% tầm)", "orbit75" => "vòng rộng (75% tầm)", _ => best };
+                    var tuneText = $"🧪 Kéo quái trong tháp: chọn kiểu {label} – {Str(m, "desc")}";
+                    Log.Write($"[{Account.Id}] {tuneText}");
+                    Note(now, tuneText, StatusLevel.Ok);
+                    GameLogSink?.Invoke(Account.Id, new[] { new GameLog.Entry(now, "tower", "", Account.CharName ?? "", tuneText) });
+                    break;
+                }
                 case "gameToast":
                     OnGameToast(Str(m, "text"), now);
                     break;

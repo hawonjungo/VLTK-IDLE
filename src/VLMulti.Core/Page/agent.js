@@ -66,7 +66,7 @@
   const bqa = (sel) => { const r = bhRoot(); return r ? [...r.querySelectorAll(sel)] : []; };
   const closeGuildWin = () => { const w = guildWin(); const x = w && (w.querySelector('.bgx') || w.querySelector('button')); if (x) x.click(); };
   const anyWindowOpen = () => ['#panel', '#modal'].some((sel) => { const el = $(sel); return !!el && isVisible(el); })
-    || isOpen($('#u2bagw')) || isOpen($('#u2chw')) || !!guildWin();
+    || isOpen($('#u2bagw')) || isOpen($('#u2chw')) || !!guildWin() || !!document.getElementById('h5sl');
   // Đợt Boss Hoàng Kim (12:00 · 15:30 · 19:30 · 22:00 giờ Việt Nam, 30 phút, đệm 1 phút trước / 3 phút sau):
   // game tự đưa nhân vật đi đánh → không mở bảng, không kéo quái, để game làm
   const inBossHk = () => {
@@ -559,13 +559,67 @@
     fireClick(arena, r.left + sx, r.top + sy);
     return true;
   };
+  // ---------- 🧪 Tự chọn kiểu kéo quái tốt nhất cho nhân vật này (trong tháp) ----------
+  // Thử luân phiên các kiểu theo khối 10 tầng (A, B, A, B… – xen kẽ để tầng càng lên càng khó không làm lệch), mỗi kiểu 4 khối;
+  // chấm điểm = giây trung bình mỗi tầng + 60 giây mỗi lần chết; dùng kiểu tốt nhất 300 tầng rồi thử lại (số liệu cũ giảm
+  // một nửa). Kiểu: đánh xa "strafe" (đi ngang) / "line" (xếp hàng – chỉ khi chiêu chính bay thẳng xuyên qua); cận chiến
+  // vòng quanh mục tiêu ở 45% / 60% / 75% tầm đánh. Lưu trong trình duyệt của acc (vl.kiteTune).
+  const TUNE_KEY = 'vl.kiteTune', TUNE_BLOCK = 10, TUNE_BLOCKS = 4, TUNE_EXPLOIT = 300, TUNE_DEATH = 60;
+  try { localStorage.removeItem('vl.kiteLine'); } catch (_) {} // công tắc thử tay ngày 16/11 – thay bằng phần tự chọn
+  const tuneStyles = (R) => {
+    const m = R && R.P && R.P.main;
+    if (!m) return [];
+    if (m.melee) return ['orbit60', 'orbit45', 'orbit75'];
+    return m.geo && m.geo.k === 'line' && m.geo.pierce ? ['line', 'strafe'] : [];
+  };
+  const tuneLoad = () => { try { return JSON.parse(localStorage.getItem(TUNE_KEY) || 'null'); } catch (_) { return null; } };
+  const tuneSave = (t) => { try { localStorage.setItem(TUNE_KEY, JSON.stringify(t)); } catch (_) {} };
+  const tuneScore = (x) => (x && x.f + x.d > 0 ? (x.secs + TUNE_DEATH * x.d) / Math.max(1, x.f) : Infinity);
+  // Kiểu đang dùng (mặc định kiểu đầu danh sách: line / orbit60)
+  const tuneStyle = (R) => {
+    const list = tuneStyles(R);
+    if (!list.length) return null;
+    let t = tuneLoad();
+    if (!t || !t.list || t.list.join() !== list.join()) {
+      t = { list, stats: Object.fromEntries(list.map((s) => [s, { f: 0, secs: 0, d: 0 }])), phase: 'explore', order: [], i: 0, left: TUNE_BLOCK, cur: list[0], best: null, exploitLeft: 0 };
+      for (let b = 0; b < TUNE_BLOCKS; b++) for (const s of list) t.order.push(s);
+      t.cur = t.order[0];
+      tuneSave(t);
+    }
+    return t.cur;
+  };
+  const tuneFloor = (R, secs, died) => {
+    const t = tuneLoad();
+    if (!t || !t.stats || !t.stats[t.cur]) return;
+    const x = t.stats[t.cur];
+    if (died) x.d++; else { x.f++; x.secs += Math.min(secs, 180); }
+    if (died) return tuneSave(t); // chết không tính là qua tầng; khối chỉ đếm tầng qua được
+    if (t.phase === 'explore') {
+      if (--t.left > 0) return tuneSave(t);
+      t.i++;
+      if (t.i < t.order.length) { t.cur = t.order[t.i]; t.left = TUNE_BLOCK; return tuneSave(t); }
+      const ranked = t.list.slice().sort((a, b) => tuneScore(t.stats[a]) - tuneScore(t.stats[b]));
+      const prev = t.best;
+      t.best = ranked[0]; t.cur = t.best; t.phase = 'exploit'; t.exploitLeft = TUNE_EXPLOIT;
+      const desc = ranked.map((s) => { const v = t.stats[s]; return `${s} ${tuneScore(v).toFixed(1)}s/tầng (qua ${v.f}, chết ${v.d})`; }).join(' · ');
+      post({ t: 'kiteTune', best: t.best, prev: prev || '', desc });
+      return tuneSave(t);
+    }
+    if (--t.exploitLeft > 0) return tuneSave(t);
+    // Thử lại: số liệu cũ giảm một nửa, lại luân phiên
+    for (const s of t.list) { const v = t.stats[s]; v.f /= 2; v.secs /= 2; v.d /= 2; }
+    t.phase = 'explore'; t.order = []; for (let b = 0; b < TUNE_BLOCKS; b++) for (const s of t.list) t.order.push(s);
+    t.i = 0; t.cur = t.order[0]; t.left = TUNE_BLOCK;
+    tuneSave(t);
+  };
   const kiteFloorDone = (R) => {
     const st = kiteSt.stat;
+    if (st && st.floor != null && st.style && !st.left) { try { tuneFloor(R, (Date.now() - st.t0) / 1000, !!st.died); } catch (_) {} } // rời tháp không do chết (boss…) → không tính
     if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0, mounted: st.mounted || 0, movePct: st.nearTicks ? Math.round(100 * (st.moveTicks || 0) / st.nearTicks) : null, pre: st.pre || 0, far: st.far || 0, mReach: st.mReach || 0, danger: Math.round((st.danger || 0) / 10),
       atkPs: st.nearTicks ? Math.round(100 * (st.atk || 0) / (st.nearTicks * 0.1)) / 100 : null,
       atkPct: st.nearTicks && st.rate ? Math.round(100 * (st.atk || 0) / (st.nearTicks * 0.1) / st.rate) : null,
       sk: st.sk ? Object.entries(st.sk).map(([k, v]) => `${k}:${v}`).join(' ') : '',
-      hits: st.hitShots ? Math.round(100 * st.hitN / st.hitShots) / 100 : null, line: st.line ? 1 : 0 });
+      hits: st.hitShots ? Math.round(100 * st.hitN / st.hitShots) / 100 : null, line: st.line ? 1 : 0, style: st.style || '' });
     kiteSt.stat = null;
   };
   const clearSpot = (x, y) => {
@@ -642,7 +696,7 @@
     const H = g('H'), R = g('R'), W = g('WORLD'), S = g('S');
     if (!auto || !auto.classList.contains('on') || ((flowBusy || anyWindowOpen()) && !(R && R.tower))) return;
     if (!H || !R || !W || !R.tower || R.dg || R.sat || R.deadT > 0 || (S && S.mode !== 'tower')) {
-      if (kiteSt.stat && R && (R.deadT > 0 || !R.tower)) { kiteSt.stat.died = 1; if (R.deadT > 0) kiteSt.diedFloor = kiteSt.stat.floor; kiteFloorDone(R); }
+      if (kiteSt.stat && R && (R.deadT > 0 || !R.tower)) { kiteSt.stat.died = R.deadT > 0 ? 1 : 0; kiteSt.stat.left = R.deadT > 0 ? 0 : 1; if (R.deadT > 0) kiteSt.diedFloor = kiteSt.stat.floor; kiteFloorDone(R); }
       kiteSt.floor = null; return;
     }
     const now = Date.now();
@@ -680,6 +734,7 @@
       kiteFloorDone(R);
       kiteSt.floor = R.tower.floor;
       kiteSt.stat = { floor: R.tower.floor, t0: now, lost: 0, steps: 0, minPct: 100, life: R.life, melee };
+      try { kiteSt.stat.style = tuneStyle(R); } catch (_) {}
       kiteSt.target = null;
     }
     const st = kiteSt.stat;
@@ -774,7 +829,9 @@
       t = tg;
       const pack = near.filter((e) => dist(e) <= 120);
       const rMax = Math.max(30, curRad - 15);
-      const rJ = Math.max(25, Math.min(curRad * 0.6, rMax));
+      const sty = st && st.style;
+      const rf = sty === 'orbit45' ? 0.45 : sty === 'orbit75' ? 0.75 : 0.6;
+      const rJ = Math.max(25, Math.min(curRad * rf, rMax));
       const stepJ = Math.min(step / JK, rJ * 0.9);
       const a0 = Math.atan2(2 * (H.y - t.y), H.x - t.x);
       if (pack.length >= 3) {
@@ -812,8 +869,8 @@
       const cap = urgent ? step * 1.8 : step;
       const fix = Math.max(-cap, Math.min(cap, (want - dj) * (urgent ? 1 : 0.4) * JK)) * (low ? 1.5 : 1);
       const geo = R.P && R.P.main && R.P.main.geo;
-      let lineOn = !!(geo && geo.k === 'line' && geo.pierce);
-      try { if (localStorage.getItem('vl.kiteLine') === '0') lineOn = false; } catch (_) {}
+      const sty = st && st.style;
+      const lineOn = !!(geo && geo.k === 'line' && geo.pierce) && sty !== 'strafe';
       if (st) st.line = lineOn ? 1 : 0;
       if (lineOn) {
         // 🎯 Xếp hàng (chiêu chính bay thẳng XUYÊN QUA, game geoTargets: trúng mọi con trong dải ±col quanh đường từ nhân
@@ -1060,6 +1117,8 @@
   const closeModal = () => { const c = $('#mClose'); if (c && isVisible(c)) c.click(); };
   // Đóng hộp thoại và chắc chắn nó đã đóng (lần mua hỏng từng để Kỳ Trân Các mở → mọi lượt sau báo "đang bận")
   const closeModalSure = async () => {
+    // Hộp chọn số lượng của game (#h5sl, phủ toàn màn hình – "Mở tất cả…" Rương Ngựa): bấm Hủy
+    if (document.getElementById('h5sl')) { $('#h5slX')?.click(); await waitFor(() => !document.getElementById('h5sl'), 1500); }
     if (guildWin()) { closeGuildWin(); await waitFor(() => !guildWin(), 1500); }
     for (let i = 0; i < 3 && isVisible($('#modal')); i++) {
       closeModal();
@@ -1939,21 +1998,62 @@
     return freed;
   };
   const chestCount = () => +((($('#t-inv [data-mi="rngua"] i') || {}).textContent) || 0) || 0;
+  // Hành trang còn bao nhiêu ô trống (dữ liệu game: INV_MAX − số món)
+  const bagFree = () => { try { return (+g('INV_MAX') || 0) - ((g('S').inv || []).length); } catch (_) { return 0; } };
+  // "Bán thừa" của game ngay trong Hành trang đang mở (món không khớp bộ lọc ⚙ Nhặt đồ, không khoá) – không mở việc khác
+  const sellJunkHere = async () => {
+    const b = $('#bSellAll');
+    const n = b ? +(((b.querySelector('small') || {}).textContent || '').replace(/\D/g, '')) || 0 : 0;
+    if (!b || b.disabled || !n) return 0;
+    b.click();
+    const yes = await waitFor(() => {
+      const box = $('#askBox');
+      if (!box || !isVisible(box)) return null;
+      if (!/^Bán \d+ món đồ thừa/.test(box.innerText.trim())) return 'bad';
+      return [...box.querySelectorAll('button')].find((x) => x.dataset.a === '1' || /^Bán$/.test(x.textContent.trim())) || 'bad';
+    }, 2500);
+    if (!yes || yes === 'bad') { const box = $('#askBox'); if (box && isVisible(box)) [...box.querySelectorAll('button')].find((x) => /^Hủy$/.test(x.textContent.trim()))?.click(); return 0; }
+    const before = bagFree();
+    yes.click();
+    await waitFor(() => bagFree() > before, 3000);
+    return n;
+  };
+  // Mở Rương Ngựa: mỗi rương ra 1 ngựa, cần 1 ô trống trong Hành trang. Trước khi mở: thiếu chỗ thì "Bán thừa" để dọn túi.
+  // Giao diện 16/11: nút "Mở tất cả…" (#miUse10) mở hộp chọn số lượng #h5sl (ô số, nút "Mở" #h5slOk, "Hủy" #h5slX) – trước
+  // đây tool bấm "Mở ×10" rồi chờ, nay hộp đó treo lại trên màn hình, không rương nào được mở. Mở tối đa số ô trống − 5.
   const openHorseChests = async (res) => {
     if (!(await openBag())) return;
     try {
-      for (let i = 0, misses = 0; i < 30 && misses < 2; i++) {
+      for (let round = 0, misses = 0; round < 6 && misses < 2; round++) {
         const have = chestCount();
         if (have <= 0) break;
+        if (bagFree() < Math.min(have, 40) + 5) { const sold = await sellJunkHere(); if (sold) res.junkSold = (res.junkSold || 0) + sold; }
+        const room = bagFree() - 5;
+        if (room <= 0) { res.bagFull = true; break; }
+        const n = Math.min(have, room);
         $('#t-inv [data-mi="rngua"]').click();
-        const btn = await waitFor(() => { const b = $(have >= 10 ? '#miUse10' : '#miUse'); return b && isVisible(b) && !b.disabled ? b : null; }, 2000);
-        if (!btn) { misses++; await closeModalSure(); continue; }
         horseMsgs.length = 0;
-        btn.click();
-        if (await waitFor(() => chestCount() < have, 5000)) { res.opened += have - chestCount(); misses = 0; }
-        else if (sawMsg(/Hành trang đầy|đầy/)) { res.bagFull = true; break; } // ngựa ra không còn chỗ (Mã Trường và Hành trang đều đầy)
+        if (n === 1 || have === 1) {
+          const one = await waitFor(() => { const b = $('#miUse'); return b && isVisible(b) && !b.disabled ? b : null; }, 2000);
+          if (!one) { misses++; await closeModalSure(); continue; }
+          one.click();
+        } else {
+          const all = await waitFor(() => { const b = $('#miUse10'); return b && isVisible(b) && !b.disabled ? b : null; }, 2000);
+          if (!all) { misses++; await closeModalSure(); continue; }
+          all.click();
+          const sl = await waitFor(() => { const d = document.getElementById('h5sl'); return d && d.querySelector('input') && $('#h5slOk') ? d : null; }, 2000);
+          if (!sl) { misses++; await closeModalSure(); continue; }
+          setValue(sl.querySelector('input'), String(n));
+          await sleep(200);
+          $('#h5slOk').click();
+        }
+        if (await waitFor(() => chestCount() < have, 10000)) {
+          await waitFor(() => { const c = chestCount(); return c <= have - n ? c : null; }, 8000); // nhiều rương: chờ số dừng giảm
+          res.opened += have - chestCount(); misses = 0;
+        } else if (sawMsg(/Hành trang đầy|đầy/)) { res.bagFull = true; break; }
         else misses++;
         await closeModalSure();
+        if (!isOpen($('#u2bagw')) && !(await openBag())) break;
       }
     } finally {
       await closeModalSure();
