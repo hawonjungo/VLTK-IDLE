@@ -1055,6 +1055,19 @@
         let mine = false;
         try { mine = localStorage.getItem(key) === '1'; } catch (_) {}
         if (mine) { S.autoRide = true; try { localStorage.removeItem(key); } catch (_) {} post({ t: 'log', msg: 'ride: chiêu chính dùng được trên ngựa → giữ Tự lên ngựa' }); }
+        // 16/11: Ngũ Độc ngoại công (Huyền Âm Trảm cưỡi được) cả buổi đi bộ trong tháp (log ngựa=0): "Tự lên ngựa" đang tắt
+        // nhưng không phải tool tắt (không có dấu vlRideOff) → dòng trên không bật lại, chết / hồi sinh xuống ngựa là đi bộ
+        // luôn. Trong tháp chiêu cưỡi được → luôn bật Tự lên ngựa (nhớ dấu vlRideOnT để ra khỏi tháp trả lại như bạn cài)
+        // và đang đi bộ thì tự bấm Lên ngựa.
+        if (S.autoRide === false) {
+          S.autoRide = true;
+          try { localStorage.setItem('vlRideOnT', '1'); } catch (_) {}
+          post({ t: 'log', msg: 'ride: tháp, chiêu dùng được trên ngựa → bật Tự lên ngựa' });
+        }
+        if (!R.mounted && !R.dead && !(R.hp <= 0) && Date.now() - rideAt > 3000) {
+          const rb = $('#rideBtn');
+          if (rb && /Lên ngựa/.test(rb.textContent)) { rideAt = Date.now(); rb.click(); }
+        }
         return;
       }
       if (R.tower) {
@@ -1074,6 +1087,13 @@
           S.autoRide = true;
           try { localStorage.removeItem(key); } catch (_) {}
           post({ t: 'log', msg: 'ride: ra khỏi tháp → bật lại Tự lên ngựa' });
+        }
+        let onT = false;
+        try { onT = localStorage.getItem('vlRideOnT') === '1'; } catch (_) {}
+        if (onT && !R.dg) {
+          S.autoRide = false;
+          try { localStorage.removeItem('vlRideOnT'); } catch (_) {}
+          post({ t: 'log', msg: 'ride: ra khỏi tháp → trả lại Tự lên ngựa tắt như bạn cài' });
         }
       }
     } catch (_) {}
@@ -2100,7 +2120,21 @@
     return { coll, spares, stable: stableNow() };
   };
   // Thẻ món trong Hành trang: mở / khoá (#bLock "🔓Mở khóa" khi đang khoá, "🔒Khóa" khi không)
+  // 16/11: Hành trang KHÔNG vẽ ô ngựa (d 10) nữa – món có trong dữ liệu túi nhưng không có ô để bấm → mở khoá thất bại,
+  // ngựa thừa (tự khoá khi mở Rương Ngựa) không bán / gửi được. Gọi thẳng việc nút 🔒 làm (máy chủ "item.khoa"), bấm ô chỉ
+  // là dự phòng.
   const setLocked = async (uid, lock) => {
+    try {
+      const inv = (g('S').inv || []).find((x) => String(x.uid) === String(uid));
+      if (inv && window.H5 && typeof window.H5.call === 'function') {
+        if (!!inv.lock === lock) return true;
+        const r = await window.H5.call('item.khoa', { itemId: inv.h5 || inv.uid, on: lock });
+        if (r && r.khoa === lock) {
+          await waitFor(() => { const x = (g('S').inv || []).find((y) => String(y.uid) === String(uid)); return !x || !!x.lock === lock; }, 2000);
+          return true;
+        }
+      }
+    } catch (_) {}
     const it = $(`#t-inv [data-uid="${uid}"]`);
     if (!it) return false;
     it.click();
