@@ -564,7 +564,8 @@
     if (st && st.floor != null) post({ t: 'kiteFloor', floor: st.floor, secs: Math.round((Date.now() - st.t0) / 100) / 10, lost: Math.round(st.lost), steps: st.steps, minPct: Math.round(st.minPct), melee: st.melee ? 1 : 0, mounted: st.mounted || 0, movePct: st.nearTicks ? Math.round(100 * (st.moveTicks || 0) / st.nearTicks) : null, pre: st.pre || 0, far: st.far || 0, mReach: st.mReach || 0, danger: Math.round((st.danger || 0) / 10),
       atkPs: st.nearTicks ? Math.round(100 * (st.atk || 0) / (st.nearTicks * 0.1)) / 100 : null,
       atkPct: st.nearTicks && st.rate ? Math.round(100 * (st.atk || 0) / (st.nearTicks * 0.1) / st.rate) : null,
-      sk: st.sk ? Object.entries(st.sk).map(([k, v]) => `${k}:${v}`).join(' ') : '' });
+      sk: st.sk ? Object.entries(st.sk).map(([k, v]) => `${k}:${v}`).join(' ') : '',
+      hits: st.hitShots ? Math.round(100 * st.hitN / st.hitShots) / 100 : null, line: st.line ? 1 : 0 });
     kiteSt.stat = null;
   };
   const clearSpot = (x, y) => {
@@ -810,9 +811,49 @@
       const urgent = outrange && dj < mReach + 40;
       const cap = urgent ? step * 1.8 : step;
       const fix = Math.max(-cap, Math.min(cap, (want - dj) * (urgent ? 1 : 0.4) * JK)) * (low ? 1.5 : 1);
-      tx = H.x + (-uy) * step * kiteSt.side + ux * fix;
-      ty = H.y + (ux) * step * kiteSt.side + uy * fix;
-      if (++kiteSt.sideSteps >= 5) { kiteSt.sideSteps = 0; kiteSt.side = -kiteSt.side; }
+      const geo = R.P && R.P.main && R.P.main.geo;
+      let lineOn = !!(geo && geo.k === 'line' && geo.pierce);
+      try { if (localStorage.getItem('vl.kiteLine') === '0') lineOn = false; } catch (_) {}
+      if (st) st.line = lineOn ? 1 : 0;
+      if (lineOn) {
+        // 🎯 Xếp hàng (chiêu chính bay thẳng XUYÊN QUA, game geoTargets: trúng mọi con trong dải ±col quanh đường từ nhân
+        // vật tới mục tiêu, không giới hạn số con): lùi THẲNG ra xa tâm đám quái (thay vì đi ngang) → quái đuổi theo nối đuôi
+        // nhau trên một trục, nằm gọn trong đường bay. Chỉnh ngang nhẹ để trục đi qua đám phía sau mục tiêu. Tính trong thước
+        // của game (x/0,81, 2y/0,81). Sát mép → trượt dọc mép (vòng quanh phòng), không dồn vào góc.
+        const P = (o) => ({ x: o.x / JK, y: (2 * o.y) / JK });
+        const h = P(H), tp = P(t);
+        const pk = near.filter((e) => dist(e) <= want + 220).map(P);
+        const gx = pk.reduce((s0, p) => s0 + p.x, 0) / pk.length, gy = pk.reduce((s0, p) => s0 + p.y, 0) / pk.length;
+        let ax = h.x - gx, ay = h.y - gy, al = Math.hypot(ax, ay);
+        if (al < 1) { ax = h.x - tp.x; ay = h.y - tp.y; al = Math.hypot(ax, ay) || 1; }
+        ax /= al; ay /= al; // hướng ra xa tâm đám quái
+        // Đường bắn: nhân vật → mục tiêu; con nằm SAU mục tiêu lệch ngang bao nhiêu → dời nhân vật ngược lại cho trục quét qua
+        let bx = tp.x - h.x, by = tp.y - h.y; const bl = Math.hypot(bx, by) || 1; bx /= bl; by /= bl;
+        const nx = -by, ny = bx;
+        const behind = pk.filter((p) => (p.x - h.x) * bx + (p.y - h.y) * by > bl + 5);
+        let lat = 0;
+        if (behind.length) {
+          const off = behind.reduce((s0, p) => s0 + ((p.x - h.x) * nx + (p.y - h.y) * ny), 0) / behind.length;
+          const far = behind.reduce((s0, p) => s0 + ((p.x - h.x) * bx + (p.y - h.y) * by), 0) / behind.length;
+          lat = -off * bl / Math.max(30, far - bl);
+        }
+        const stepJ = step / JK, latMax = stepJ * 0.8;
+        lat = Math.max(-latMax, Math.min(latMax, lat));
+        const fixJ = fix / JK;
+        // Luôn đi (đứng yên là bị chốt vị trí): bước quá ngắn → thêm nhích ngang đổi chiều
+        let dx = ax * fixJ + nx * lat, dy = ay * fixJ + ny * lat;
+        if (Math.hypot(dx, dy) < stepJ * 0.45) { dx += nx * stepJ * 0.5 * kiteSt.side; dy += ny * stepJ * 0.5 * kiteSt.side; if (++kiteSt.sideSteps >= 4) { kiteSt.sideSteps = 0; kiteSt.side = -kiteSt.side; } }
+        let px = h.x + dx, py = h.y + dy;
+        // Sát mép: bỏ phần đi ra ngoài, trượt dọc mép theo hướng còn rộng
+        const mx = m / JK, my = (2 * m) / JK, wx = W.w / JK, wy = (2 * W.h) / JK;
+        if (px < mx || px > wx - mx) { px = h.x; py = h.y + (Math.sign(dy) || (h.y < wy / 2 ? 1 : -1)) * stepJ; }
+        if (py < my || py > wy - my) { py = h.y; px = h.x + (Math.sign(dx) || (h.x < wx / 2 ? 1 : -1)) * stepJ; }
+        tx = px * JK; ty = (py * JK) / 2;
+      } else {
+        tx = H.x + (-uy) * step * kiteSt.side + ux * fix;
+        ty = H.y + (ux) * step * kiteSt.side + uy * fix;
+        if (++kiteSt.sideSteps >= 5) { kiteSt.sideSteps = 0; kiteSt.side = -kiteSt.side; }
+      }
     }
     // Sát mép / góc → kéo điểm đến vào trong, đổi chiều
     const cx = W.w / 2, cy = W.h / 2;
@@ -872,7 +913,19 @@
       kf.prevAtk = a;
       if (!kiteSt.active) { if (kf.hold) { kf.hold = 0; kiteResume(R, IN); } return; }
       const st = kiteSt.stat;
-      if (fired && st) { st.atk = (st.atk || 0) + 1; if (kiteSt.curSk) (st.sk || (st.sk = {}))[kiteSt.curSk] = (st.sk[kiteSt.curSk] || 0) + 1; }
+      if (fired && st) {
+        st.atk = (st.atk || 0) + 1;
+        if (kiteSt.curSk) (st.sk || (st.sk = {}))[kiteSt.curSk] = (st.sk[kiteSt.curSk] || 0) + 1;
+        // Số quái trúng đòn này (đúng cách game chọn mục tiêu cho chiêu có hình dạng: geoTargets)
+        try {
+          const ms = R.P && R.P.main, tg = R.tgt;
+          if (ms && ms.geo && tg && !tg.dead) {
+            const gt = g('geoTargets');
+            const n = 1 + (typeof gt === 'function' ? (gt(ms, tg, (R.enemies || []).filter((e) => e && !e.dead && e.hp > 0)) || []).length : 0);
+            st.hitN = (st.hitN || 0) + n; st.hitShots = (st.hitShots || 0) + 1;
+          }
+        } catch (_) {}
+      }
       if (kf.hold) {
         // Đòn đã ra → đi tiếp ngay; quá 3 khung hình mà chưa ra (không có quái trong tầm chiêu…) → đi tiếp, 0,3 giây không dừng
         if (fired || ++kf.hold > 3) {
