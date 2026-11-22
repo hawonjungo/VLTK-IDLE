@@ -1855,6 +1855,53 @@
     }
     return names;
   };
+  // 📜 Đồ phổ nên GIỮ (không bán), theo bạn dặn 23/11: (1) ghép ra món Hoàng Kim nâng được lên [Thiên Tứ] – bảng J.platVng
+  // của game (41 món); (2) đồ Hoàng Kim môn phái của một acc bạn đang chơi (arg.sects = tên phái của các acc). Môn phái
+  // của món: game xếp đồ Hoàng Kim theo bộ (window.H5HK.g: [tên, ô, bộ, thứ tự]); bộ 1–28 là đồ môn phái, mỗi phái 2–4
+  // bộ liền nhau, từ 29 là bộ chung. Phái của bộ lấy từ món Thiên Tứ cùng bộ (req 39); bộ không có món Thiên Tứ (vd. Chú
+  // Phược, Địa Phách) kẹp giữa hai bộ cùng phái → cùng phái đó.
+  let dpSetFac = null;
+  const dpSetSect = () => {
+    if (dpSetFac) return dpSetFac;
+    const low = (x) => String(x || '').toLowerCase();
+    const J = g('J') || {}, pv = J.platVng || {}, FAC = g('FAC') || {};
+    const facN = Object.fromEntries(Object.values(FAC).map((f) => [f.id, f.n]));
+    const rows = (window.H5HK && window.H5HK.g) || [];
+    const setOf = new Map(rows.map((x) => [low(x[0]), x[2]]));
+    const known = {};
+    for (const [k, v] of Object.entries(pv)) { const r = (v.req || []).find((q) => q[0] === 39); const st = setOf.get(low(k)); if (r && st != null) known[st] = facN[r[1]]; }
+    const fac = {};
+    for (let st = 1; st <= 28; st++) {
+      if (known[st]) { fac[st] = known[st]; continue; }
+      let lo = st - 1; while (lo >= 1 && !known[lo]) lo--;
+      let hi = st + 1; while (hi <= 28 && !known[hi]) hi++;
+      fac[st] = (known[lo] && known[lo] === known[hi]) ? known[lo] : (known[lo] || known[hi] || '');
+    }
+    if (!rows.length) return { setOf, fac, pv };
+    dpSetFac = { setOf, fac, pv };
+    return dpSetFac;
+  };
+  const dpKeepWhy = (made, sects) => {
+    try {
+      const { setOf, fac, pv } = dpSetSect();
+      const low = String(made || '').toLowerCase();
+      if (Object.keys(pv).some((k) => k.toLowerCase() === low)) return 'nâng được Thiên Tứ';
+      const st = setOf.get(low), sect = st != null ? fac[st] : '';
+      if (sect && (sects || []).includes(sect)) return 'đồ ' + sect;
+      return '';
+    } catch (_) { return ''; }
+  };
+  // Đồ phổ trong Hành trang: giữ / để bán (acc chính báo sau khi nhận thư)
+  const dpSort = (sects) => {
+    const keep = [], sell = [];
+    for (const i of dpToSend()) {
+      const o = (window.H5.oldItem && window.H5.oldItem(i.id)) || {};
+      const made = o.dp || String(i.tpl).replace(/^dp:/, '');
+      const why = dpKeepWhy(made, sects);
+      if (why) keep.push(`${made} (${why})`); else sell.push(made);
+    }
+    return { keep, sell };
+  };
   const knbFlowSend = async (arg) => {
     if (flowBusy || anyWindowOpen()) return { r: 'busy' };
     if (inBossHk()) return { r: 'boss-hk' };
@@ -1878,6 +1925,7 @@
             if (await waitFor(() => !$(`#mBody [data-take="${id}"]`), 3000)) { res.mails++; misses = 0; } else misses++;
           }
         }
+        if (res.mails > 0 && arg.sects) { const d = dpSort(arg.sects); if (d.keep.length) res.dpKeep = d.keep.join(', '); if (d.sell.length) res.dpSell = d.sell.join(', '); }
       } else {
         // 1. Mở hết Đại Hồng Bao
         if (arg.openBig) {

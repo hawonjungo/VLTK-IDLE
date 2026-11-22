@@ -2110,7 +2110,8 @@ public sealed class AccountController
             _knbCollectAt = now;
             _knbSendTry = now;
             _knbSendPending = true;
-            Post(new { t = "knbSend", arg = new { op = "collect", from = own } });
+            var sects = cfg.Accounts.Select(a => a.Sect ?? "").Where(x => x.Length > 0).Distinct().ToArray();
+            Post(new { t = "knbSend", arg = new { op = "collect", from = own, sects } });
             return;
         }
         // Acc khác: mỗi ngày một lần, sau khi đã đổi KNB và làm việc bang
@@ -2152,6 +2153,13 @@ public sealed class AccountController
         if (dpSent.Length > 0) Note(now, $"📜 Gửi Đồ phổ cho {cfg?.KnbMainName} để bán: {dpSent}", StatusLevel.Ok);
         if (Str(m, "dpErr").Length > 0) Raise("dp-send", $"Gửi Đồ phổ cho {cfg?.KnbMainName} không được: {Str(m, "dpErr")}");
         if (Int("mails") > 0) Note(now, $"💰 Nhận {Int("mails")} thư KNB từ các acc (có {Int("knb"):N0} KNB)", StatusLevel.Ok);
+        // Acc chính: Đồ phổ trong túi – giữ (nâng được Thiên Tứ / đồ môn phái acc bạn đang chơi) hay để bán
+        if (Str(m, "dpKeep").Length > 0 || Str(m, "dpSell").Length > 0)
+        {
+            var text = "📜 Đồ phổ: " + string.Join(" · ", new[] { Str(m, "dpKeep").Length > 0 ? "giữ " + Str(m, "dpKeep") : "", Str(m, "dpSell").Length > 0 ? "để bán " + Str(m, "dpSell") : "" }.Where(x => x.Length > 0));
+            Note(now, text, StatusLevel.Ok);
+            Log.Write($"[{Account.Id}] {text}");
+        }
         if (Account.CharName == cfg?.KnbMainName) return;
         if (r == "ok") { _knbSendDay = VnDate(now); return; }
         Raise("knb-send", $"Gửi KNB cho {cfg?.KnbMainName} không được ({r})");
