@@ -89,6 +89,10 @@ public sealed class AppSettings
     // Khăn Xanh (mua khăn bằng lượng, luôn chừa GsGoldKeepVan vạn) và tặng Ông Già Noel trong giới hạn ngày. Khăn Đỏ tốn
     // KNB (100 / cái, trừ KNB khóa trước): chỉ khi bật GsRedOn, tối đa GsRedKnbDay KNB mỗi ngày mỗi acc.
     public bool GsOn { get; set; } = true;
+    // 🏪 Acc chính (KnbMainName) tự bày bán Đồ phổ ở Chợ (giữ món nâng được Thiên Tứ / đồ môn phái của bạn). Giá: rẻ hơn
+    // giá rao thấp nhất 2%, sàn 70% giá rao trung bình; món chưa ai rao thì theo ChoPrices (tên món ghép → KNB, bạn đặt).
+    public bool ChoSellOn { get; set; } = true;
+    public Dictionary<string, long> ChoPrices { get; set; } = new();
     public bool GsRedOn { get; set; }
     public int GsRedKnbDay { get; set; } = 500;
     public int GsGoldKeepVan { get; set; } = 1000;

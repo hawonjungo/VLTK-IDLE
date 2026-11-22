@@ -474,6 +474,73 @@ Chuyển: thư tặng (0 KNB) giữa các nhân vật của bạn. Bán: ngựa 
   if (busy) horseTimer = setTimeout(renderHorses, 2000);
 }
 $('#horseBtn').addEventListener('click', openHorses);
+// ---------- 🏪 Chợ: Đồ phổ của acc chính + bảng giá Chợ 3 ngày ----------
+// Acc chính tự bày Đồ phổ (giữ món nâng được Thiên Tứ / đồ môn phái của bạn). Món chưa ai rao: bạn nhập giá ở đây.
+let choOpen = false, choTimer = 0;
+const choTitle = '🏪 Chợ · Đồ phổ';
+const kn = (n) => Number(n || 0).toLocaleString('vi-VN');
+async function openCho() { choOpen = true; await renderCho(); }
+async function renderCho() {
+  clearTimeout(choTimer);
+  if (!choOpen) return;
+  let st;
+  try { st = await api('cho'); } catch (e) { if (e.message !== 'unauthorized') toast(e.message); return; }
+  if (!choOpen || (!$('#modal').classList.contains('hidden') && $('#modalTitle').textContent !== choTitle)) { choOpen = false; return; }
+  const parts = [];
+  const on = h('input', { type: 'checkbox', onchange: async (e) => { try { await api('cho/on', { on: e.target.checked }); } catch (err) { toast(err.message); } renderCho(); } });
+  on.checked = !!st.on;
+  parts.push(h('label', { class: 'check-row' }, [on, `Tự bày bán ở Chợ (acc chính: ${st.main || 'chưa chọn ở ⚙ › 💰 KNB'})`]));
+  parts.push(h('p', { class: 'dim', text: 'Giá: rẻ hơn giá rao thấp nhất 2%, sàn 70% giá rao trung bình 3 ngày. 2 giờ không ai mua → bày lại, hạ 5% mỗi lần, tối đa 6 lần. Luôn giữ Đồ phổ nâng được Thiên Tứ và đồ môn phái của bạn. Chừa 2 ô bày bán cho bạn.' }));
+
+  const items = (st.items && st.items.items) || [];
+  parts.push(h('h3', { text: `Đồ phổ của ${st.main || 'acc chính'}` + (st.itemsAt ? ` · đọc lúc ${st.itemsAt}` : '') }));
+  if (!items.length) parts.push(h('p', { class: 'dim', text: st.itemsAt ? 'Không có Đồ phổ nào.' : 'Chưa đọc túi acc chính (vài phút sau khi máy chủ khởi động).' }));
+  const label = (x) => ({
+    keep: `giữ – ${x.why}`, wait: x.price ? `chờ lượt bày · ${kn(x.price)} KNB` : 'chờ lượt bày', 'no-price': 'chưa ai rao – nhập giá',
+    'max-tries': 'đã bày 6 lần không bán được', 'no-card': 'chưa mua được Thẻ Giao Dịch',
+    listed: `vừa bày ${kn(x.price)} KNB`, 'on-market': `đang bày ${kn(x.price)} KNB`,
+  })[x.state] || x.state;
+  const manual = Object.fromEntries((st.prices || []).filter((p) => p.src === 'bạn đặt').map((p) => [p.n, p.p]));
+  const list = h('div', { class: 'cho-items' });
+  for (const x of items) {
+    const row = h('div', { class: 'cho-item' + (x.state === 'keep' ? ' keep' : '') }, [
+      h('span', { text: x.n }),
+      h('small', { class: 'dim', text: label(x) + (x.tries ? ` · đã bày ${x.tries} lần` : '') }),
+    ]);
+    if (x.state !== 'keep' && x.state !== 'on-market' && x.state !== 'listed') {
+      const inp = h('input', { type: 'number', min: 0, step: 1000, placeholder: 'giá KNB', value: manual[x.n] || '' });
+      row.append(h('span', { class: 'cho-price' }, [inp, h('button', { class: 'btn', text: 'Lưu giá', onclick: async () => {
+        try { await api('cho/price', { name: x.n, price: Math.max(0, Math.round(+inp.value || 0)) }); toast('Đã lưu giá – bày ở lượt sau'); } catch (e) { toast(e.message); }
+        renderCho();
+      } })]));
+    }
+    list.append(row);
+  }
+  parts.push(list);
+
+  const rows = st.rows || [];
+  parts.push(h('h3', { text: `Bảng giá Chợ 3 ngày · ${rows.length} món · ${kn(st.listings)} lượt bày · ${kn(st.soldTotal)} đã bán` }));
+  const q = h('input', { type: 'search', placeholder: 'Tìm món…', class: 'cho-search' });
+  const tbl = h('div', { class: 'cho-table' });
+  const draw = () => {
+    tbl.replaceChildren(h('div', { class: 'cho-row head' }, ['Món', 'Rao thấp nhất', 'Trung bình', 'Đã bán', 'Tool bày'].map((t) => h('span', { text: t }))));
+    const f = q.value.trim().toLowerCase();
+    for (const r of rows.filter((r) => !f || r.n.toLowerCase().includes(f)).slice(0, 200))
+      tbl.append(h('div', { class: 'cho-row' }, [
+        h('span', { text: r.n }),
+        h('span', { text: r.open ? `${kn(r.min)} (${r.open})` : '–' }),
+        h('span', { text: kn(r.med) }),
+        h('span', { text: r.sold ? `${r.sold} · ${kn(r.soldMed)}` : '–' }),
+        h('span', { text: r.p ? kn(r.p) : '–' }),
+      ]));
+  };
+  q.addEventListener('input', draw);
+  draw();
+  parts.push(q, tbl);
+  openModal(choTitle, parts);
+  choTimer = setTimeout(renderCho, 60000);
+}
+$('#choBtn').addEventListener('click', openCho);
 // 💰 Gửi KNB ngay: mọi acc khác gửi phần KNB trên mức giữ lại (Cài đặt › 💰 KNB) về acc chính, acc chính nhận thư sau 3 phút
 $('#knbSendBtn').addEventListener('click', async () => {
   if (!confirm('Các acc khác gửi ngay phần KNB trên mức giữ lại về acc chính (thư tặng giữa các nhân vật của bạn)?')) return;

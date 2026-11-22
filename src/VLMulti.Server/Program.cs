@@ -188,6 +188,10 @@ app.MapPost("/api/pause", async (ToggleRequest req) => { await manager.SetPaused
 app.MapPost("/api/auto-recover",(ToggleRequest req) => { manager.SetAutoRecover(req.On); return Results.Ok(); });
 // 🐴 Mã Trường: quét (mở rương, cất loài mới, lập danh sách chuyển) → bạn xem → chuyển
 app.MapGet("/api/horses", () => Results.Json(manager.HorseSnapshot()));
+// 🏪 Chợ: bảng giá Đồ phổ, Đồ phổ của acc chính, đặt giá món chưa ai rao, bật / tắt tự bày bán
+app.MapGet("/api/cho", () => Results.Json(manager.ChoSnapshot()));
+app.MapPost("/api/cho/price", (ChoPriceRequest req) => { if (string.IsNullOrWhiteSpace(req.Name) || req.Price < 0 || req.Price > 100_000_000) return Results.BadRequest(); manager.ChoSetPrice(req.Name.Trim(), req.Price); return Results.Ok(); });
+app.MapPost("/api/cho/on", (ToggleRequest req) => { manager.ChoSetOn(req.On); return Results.Ok(); });
 app.MapPost("/api/horses/scan", (ToggleRequest req) =>
     manager.HorseScan(req.On) is { } error ? Results.Json(new { error }, statusCode: 400) : Results.Ok());
 app.MapPost("/api/horses/send", () =>
@@ -212,6 +216,7 @@ return 0;
 record LoginRequest(string Password);
 record ClickRequest(double X, double Y);
 record ToggleRequest(bool On);
+record ChoPriceRequest(string Name, long Price);
 record ModeRequest(string Code);
 record CredentialRequest(string User, string Password);
 record CredentialImport(string id, string user, string pass);

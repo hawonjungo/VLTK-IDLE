@@ -1903,6 +1903,77 @@
     }
     return { keep, sell };
   };
+  // 🏪 Bán Đồ phổ ở Chợ (acc chính). Máy chủ gửi giá từng món (arg.prices[tên món ghép] = { p, floor }): rẻ hơn giá
+  // người khác đang rao thấp nhất 2%, sàn 70% giá rao trung bình; món chưa ai rao thì giá bạn đặt. Mỗi lần bày lại (hết 2
+  // giờ không ai mua – Chợ trả món về Hộp thư) hạ 5%, không dưới sàn, tối đa 6 lần (đếm theo món, nhớ trong trình duyệt).
+  // Không bao giờ bày món nên giữ (dpKeepWhy: nâng được Thiên Tứ / đồ môn phái acc bạn đang chơi). Chừa ô bày cho bạn
+  // (tối đa arg.maxMine món của acc này trên Chợ, game cho 10). Cần Thẻ Giao Dịch: chỉ mua khi thật sự có món để bày.
+  const CHO_TRIES_KEY = 'vl.choTries';
+  const choTakeReturns = async () => {
+    // Thư "Chợ" có Đồ phổ: món gỡ / hết hạn trả về, hoặc tiền bán được. Thư Chợ khác (đồ bạn tự bày) để bạn tự xử lý.
+    let n = 0;
+    $('#u20mail')?.click();
+    if (!(await waitFor(() => $('#mBody #nmTo') || $('#mBody .nmrow'), 3000))) return 0;
+    for (let i = 0, misses = 0; i < 20 && misses < 2; i++) {
+      await sleep(500);
+      const row = [...document.querySelectorAll('#mBody .nmrow')].find((r) =>
+        ((r.querySelector(':scope > span > b') || {}).textContent || '').trim() === 'Chợ' && r.querySelector('[data-take]') && /Đồ phổ/.test(r.innerText));
+      if (!row) break;
+      const id = row.querySelector('[data-take]').dataset.take;
+      row.querySelector('[data-take]').click();
+      if (await waitFor(() => !$(`#mBody [data-take="${id}"]`), 3000)) { n++; misses = 0; } else misses++;
+    }
+    await closeModalSure();
+    return n;
+  };
+  const choSellFlow = async (arg) => {
+    if (flowBusy || anyWindowOpen()) return { r: 'busy' };
+    if (inBossHk()) return { r: 'boss-hk' };
+    flowBusy = true;
+    const res = { r: 'ok', back: 0, listed: [], items: [], card: '' };
+    let tries = {};
+    try { tries = JSON.parse(localStorage.getItem(CHO_TRIES_KEY) || '{}') || {}; } catch (_) {}
+    try {
+      res.back = await choTakeReturns();
+      const ds = await window.H5.call('cho.ds', {});
+      const mine = ((ds && ds.ds) || []).filter((d) => d.mine);
+      const listed = new Map(mine.filter((d) => d.item).map((d) => [d.item.id, d.price]));
+      let slots = Math.min(+arg.maxMine || 8, +(ds && ds.max) || 10) - mine.length;
+      for (const i of dpToSend()) {
+        const o = (window.H5.oldItem && window.H5.oldItem(i.id)) || {};
+        const made = o.dp || String(i.tpl).replace(/^dp:/, '');
+        const why = dpKeepWhy(made, arg.sects || []);
+        const row = { id: i.id, n: made, why, tries: tries[i.id] | 0, price: 0, state: why ? 'keep' : 'wait' };
+        res.items.push(row);
+        if (why) continue;
+        const pr = (arg.prices || {})[made];
+        if (!pr) { row.state = 'no-price'; continue; }
+        if (row.tries >= 6) { row.state = 'max-tries'; continue; }
+        row.price = Math.max(+pr.floor || 0, Math.round(+pr.p * Math.pow(0.95, row.tries)));
+        if (!arg.sell || slots <= 0) continue;
+        if (!res.card) res.card = await ensureTradeCard();
+        if (!['have', 'bought', 'bought-unseen'].includes(res.card)) { row.state = 'no-card'; continue; }
+        try {
+          await window.H5.call('cho.ban', { itemId: i.id, price: row.price });
+          tries[i.id] = row.tries + 1; row.tries++; row.state = 'listed'; slots--;
+          res.listed.push(`${made} ${row.price}`);
+        } catch (e) { row.state = 'err ' + String((e && (e.msg || e.message)) || e).slice(0, 60); }
+        await sleep(600);
+      }
+      // Món đang bày (không còn trong túi): ghi để xem
+      for (const d of mine) if (d.item && /^Đồ phổ /.test(String(d.iname))) res.items.push({ id: d.item.id, n: String(d.iname).replace(/^Đồ phổ /, ''), why: '', tries: tries[d.item.id] | 0, price: +d.price, state: 'on-market', het: +d.het || 0 });
+      // Món đã đi (bán được) thì bỏ khỏi bộ đếm
+      const live = new Set(res.items.map((x) => String(x.id)));
+      for (const k of Object.keys(tries)) if (!live.has(String(k))) delete tries[k];
+      try { localStorage.setItem(CHO_TRIES_KEY, JSON.stringify(tries)); } catch (_) {}
+    } catch (err) {
+      res.r = 'error: ' + err.message;
+    } finally {
+      try { await closeModalSure(); } catch (_) {}
+      flowBusy = false;
+    }
+    return res;
+  };
   const knbFlowSend = async (arg) => {
     if (flowBusy || anyWindowOpen()) return { r: 'busy' };
     if (inBossHk()) return { r: 'boss-hk' };
@@ -3156,6 +3227,8 @@
       lockInnateFlow().then((res) => post({ t: 'lockInnateResult', ...res }), (err) => post({ t: 'lockInnateResult', r: 'error: ' + err.message }));
     } else if (m.t === 'sellJunk') {
       sellJunkFlow().then((res) => post({ t: 'sellJunkResult', ...res }), (err) => post({ t: 'sellJunkResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'choSell') {
+      choSellFlow(m.arg || {}).then((res) => post({ t: 'choSellResult', ...res }), (err) => post({ t: 'choSellResult', r: 'error: ' + err.message }));
     } else if (m.t === 'choPeek') {
       // 🏪 Chợ: đọc danh sách đang bày (chỉ đọc) – ghi giá Đồ phổ để định giá sau này
       (async () => {

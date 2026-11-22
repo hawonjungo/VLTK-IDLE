@@ -95,6 +95,7 @@ public sealed class SessionManager : IAsyncDisposable
         c.GuildLogResult += m => _guildLedger.Ingest(m, DateTime.Now);
         c.HorseResult += m => _horses.OnResult(acc.Id, m);
         c.ChoSeen += OnChoSeen;
+        c.ChoSellResult += OnChoSellResult;
 
         lock (_gate) _sessions[acc.Id] = session;
         try
@@ -848,22 +849,67 @@ public sealed class SessionManager : IAsyncDisposable
         foreach (var s in Sessions) s.Locked(c => c.SendKnbAfterHorses(now));
     }
 
-    // ---------- 🏪 Chợ: theo dõi giá Đồ phổ (chỉ đọc, giai đoạn 1) ----------
-    // Mỗi 15 phút một acc đọc danh sách Chợ (cho.ds). data/cho.csv: "add,utc,id,giá,tiền,người bán,bày lúc,hết hạn,của mình,tên"
-    // khi thấy món mới; "gone,utc,id,sớm" khi món biến mất – sớm=1 (còn hơn 5 phút mới hết hạn) gần như chắc là đã bán.
-    private DateTime _choAt = DateTime.MinValue;
-    private Dictionary<long, long>? _choOpen; // id → hết hạn (ms)
+    // ---------- 🏪 Chợ: giá Đồ phổ + acc chính tự bày bán ----------
+    // Mỗi 5 phút một acc đọc danh sách Chợ (cho.ds, chỉ đọc). data/cho.csv: "add,utc,id,giá,tiền,người bán,bày lúc,hết hạn,
+    // của mình,tên" khi thấy món mới; "gone,utc,id,sớm" khi món biến mất – sớm=1 (còn hơn 5 phút mới hết hạn) gần như chắc
+    // là đã bán. Giữ 3 ngày gần nhất trong bộ nhớ để tính giá (ChoPrices) và hiện bảng giá (🏪 trên trang).
+    private sealed class ChoListing
+    {
+        public string Name = "";   // tên món ghép (bỏ "Đồ phổ ")
+        public long Price, Het;
+        public bool Mine, Open = true, Sold;
+        public DateTime At;
+    }
+    private DateTime _choAt = DateTime.MinValue, _choSellAt = DateTime.MinValue, _choSeenAt = DateTime.MinValue;
+    private Dictionary<long, ChoListing>? _cho;
+    private JsonElement? _choItems; // kết quả lượt bày gần nhất của acc chính
+    private DateTime _choItemsAt;
     private readonly object _choGate = new();
+    private static readonly TimeSpan ChoKeep = TimeSpan.FromDays(3);
+    private static string ChoName(string n) => n.StartsWith("Đồ phổ ") ? n["Đồ phổ ".Length..] : n;
 
     private void SuperviseCho(DateTime now)
     {
-        if (now - _choAt < TimeSpan.FromMinutes(15)) return;
-        foreach (var s in Sessions)
+        if (now - _choAt >= TimeSpan.FromMinutes(5))
+            foreach (var s in Sessions)
+            {
+                bool ok = false;
+                s.Locked(c => { if (c.Screen == "game" && !c.Away) { c.PostRaw(new { t = "choPeek" }); ok = true; } });
+                if (ok) { _choAt = now; break; }
+            }
+        SuperviseChoSell(now);
+    }
+
+    private void LoadCho()
+    {
+        if (_cho is not null) return;
+        _cho = new();
+        var file = Path.Combine(AppPaths.DataDir, "cho.csv");
+        if (!File.Exists(file)) return;
+        var since = DateTime.UtcNow - ChoKeep;
+        foreach (var line in File.ReadLines(file))
         {
-            bool ok = false;
-            s.Locked(c => { if (c.Screen == "game" && !c.Away) { c.PostRaw(new { t = "choPeek" }); ok = true; } });
-            if (ok) { _choAt = now; return; }
+            var f = SplitCsv(line);
+            if (f.Count > 9 && f[0] == "add" && long.TryParse(f[2], out var id)
+                && DateTime.TryParse(f[1], null, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var at) && at >= since)
+                _cho[id] = new ChoListing { Name = ChoName(f[9]), Price = long.TryParse(f[3], out var p) ? p : 0, Het = long.TryParse(f[7], out var h) ? h : 0, Mine = f[8] == "1", At = at };
+            else if (f.Count > 3 && f[0] == "gone" && long.TryParse(f[2], out var gid) && _cho.TryGetValue(gid, out var g)) { g.Open = false; g.Sold = f[3] == "1"; }
         }
+    }
+
+    private static List<string> SplitCsv(string line)
+    {
+        var res = new List<string>();
+        var sb = new System.Text.StringBuilder();
+        bool q = false;
+        foreach (var ch in line)
+        {
+            if (ch == '"') { q = !q; continue; }
+            if (ch == ',' && !q) { res.Add(sb.ToString()); sb.Clear(); continue; }
+            sb.Append(ch);
+        }
+        res.Add(sb.ToString());
+        return res;
     }
 
     private void OnChoSeen(JsonElement m)
@@ -872,7 +918,7 @@ public sealed class SessionManager : IAsyncDisposable
         {
             // Acc đọc bị lỗi (vd. "Chưa kết nối máy chủ" ngay sau khởi động): 2 phút nữa thử lại
             Log.Write("cho: " + (m.TryGetProperty("err", out var e) ? e.ToString() : "no rows"));
-            _choAt = DateTime.Now - TimeSpan.FromMinutes(13);
+            _choAt = DateTime.Now - TimeSpan.FromMinutes(3);
             return;
         }
         long nowMs = m.TryGetProperty("now", out var nv) && nv.TryGetInt64(out var nn) ? nn : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -881,42 +927,138 @@ public sealed class SessionManager : IAsyncDisposable
         {
             try
             {
-                var file = Path.Combine(AppPaths.DataDir, "cho.csv");
-                if (_choOpen is null)
-                {
-                    _choOpen = new();
-                    if (File.Exists(file))
-                        foreach (var line in File.ReadLines(file))
-                        {
-                            var f = line.Split(',');
-                            if (f.Length > 7 && f[0] == "add" && long.TryParse(f[2], out var id) && long.TryParse(f[7], out var het)) _choOpen[id] = het;
-                            else if (f.Length > 2 && f[0] == "gone" && long.TryParse(f[2], out var gid)) _choOpen.Remove(gid);
-                        }
-                }
-                if (rows.GetArrayLength() == 0 && _choOpen.Count > 5) return; // Chợ trả về rỗng bất thường: không coi là bán hết
-                var utc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mmZ");
+                LoadCho();
+                var open = _cho!.Where(x => x.Value.Open).ToList();
+                if (rows.GetArrayLength() == 0 && open.Count > 5) return; // Chợ trả về rỗng bất thường: không coi là bán hết
+                var utcNow = DateTime.UtcNow;
+                var utc = utcNow.ToString("yyyy-MM-ddTHH:mmZ");
                 var seen = new HashSet<long>();
                 var lines = new List<string>();
                 foreach (var r in rows.EnumerateArray())
                 {
                     if (!r.TryGetProperty("id", out var idv) || !idv.TryGetInt64(out var id)) continue;
                     seen.Add(id);
-                    if (_choOpen.ContainsKey(id)) continue;
+                    if (_cho.ContainsKey(id)) continue;
                     long L(string k) => r.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? (long)v.GetDouble() : 0;
                     string S(string k) => r.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
                     bool mine = r.TryGetProperty("mine", out var mv) && mv.ValueKind == JsonValueKind.True;
-                    _choOpen[id] = L("h");
+                    _cho[id] = new ChoListing { Name = ChoName(S("n")), Price = L("p"), Het = L("h"), Mine = mine, At = utcNow };
                     lines.Add($"add,{utc},{id},{L("p")},{S("cur")},{Csv(S("s"))},{L("c")},{L("h")},{(mine ? 1 : 0)},{Csv(S("n"))}");
                 }
-                foreach (var (id, het) in _choOpen.Where(x => !seen.Contains(x.Key)).ToList())
+                foreach (var (id, x) in open.Where(x => !seen.Contains(x.Key)))
                 {
-                    lines.Add($"gone,{utc},{id},{(het - nowMs > 5 * 60_000 ? 1 : 0)}");
-                    _choOpen.Remove(id);
+                    x.Open = false;
+                    x.Sold = x.Het - nowMs > 5 * 60_000;
+                    lines.Add($"gone,{utc},{id},{(x.Sold ? 1 : 0)}");
                 }
-                if (lines.Count > 0) File.AppendAllLines(file, lines);
+                foreach (var old in _cho.Where(x => !x.Value.Open && x.Value.At < utcNow - ChoKeep).Select(x => x.Key).ToList()) _cho.Remove(old);
+                if (lines.Count > 0) File.AppendAllLines(Path.Combine(AppPaths.DataDir, "cho.csv"), lines);
+                _choSeenAt = DateTime.Now;
             }
             catch (Exception ex) { Log.Write("cho: " + ex.Message); }
         }
+    }
+
+    // Giá bày từng món (tên món ghép → giá, sàn, nguồn). Có người khác đang rao: rẻ hơn giá thấp nhất 2%, sàn 70% giá rao
+    // trung bình 3 ngày (không tính món của mình). Chưa ai rao: giá bạn đặt (ChoPrices), sàn 70%.
+    private Dictionary<string, (long P, long Floor, string Src)> ChoPrices()
+    {
+        Dictionary<string, long> manual;
+        lock (_gate) manual = new(_settings.ChoPrices, StringComparer.OrdinalIgnoreCase);
+        var res = new Dictionary<string, (long, long, string)>(StringComparer.OrdinalIgnoreCase);
+        lock (_choGate)
+        {
+            LoadCho();
+            foreach (var g in _cho!.Values.Where(x => !x.Mine && x.Price > 0).GroupBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                var asks = g.Select(x => x.Price).OrderBy(x => x).ToList();
+                long med = asks[asks.Count / 2], floor = (long)Math.Round(med * 0.7);
+                var open = g.Where(x => x.Open).Select(x => x.Price).ToList();
+                if (open.Count > 0) res[g.Key] = (Math.Max(floor, (long)Math.Round(open.Min() * 0.98)), floor, "rao");
+            }
+        }
+        foreach (var (n, p) in manual)
+            if (p > 0 && !res.ContainsKey(n)) res[n] = (p, (long)Math.Round(p * 0.7), "bạn đặt");
+        return res;
+    }
+
+    // Acc chính bày bán mỗi 15 phút (đang trong game, ngoài đợt Boss – trang tự kiểm tra). Tắt bán thì vẫn đọc túi 30 phút
+    // một lần để trang hiện danh sách Đồ phổ. Cần dữ liệu Chợ mới (đọc trong 20 phút qua).
+    private void SuperviseChoSell(DateTime now)
+    {
+        bool on; string main; string[] sects;
+        lock (_gate)
+        {
+            on = _settings.ChoSellOn;
+            main = _settings.KnbMainName;
+            sects = _settings.Accounts.Select(a => a.Sect ?? "").Where(x => x.Length > 0).Distinct().ToArray();
+        }
+        if (main.Length == 0 || now - _choSellAt < TimeSpan.FromMinutes(on ? 15 : 30) || now - _choSeenAt > TimeSpan.FromMinutes(20)) return;
+        var prices = ChoPrices().ToDictionary(x => x.Key, x => new { p = x.Value.P, floor = x.Value.Floor });
+        foreach (var s in Sessions)
+        {
+            bool ok = false;
+            s.Locked(c =>
+            {
+                if (c.Account.CharName != main || c.Screen != "game" || c.Away) return;
+                c.PostRaw(new { t = "choSell", arg = new { prices, sects, maxMine = 8, sell = on } });
+                ok = true;
+            });
+            if (ok) { _choSellAt = now; return; }
+        }
+    }
+
+    private void OnChoSellResult(JsonElement m)
+    {
+        var r = m.TryGetProperty("r", out var rv) ? rv.GetString() : "";
+        if (r is "busy" or "boss-hk") { _choSellAt = DateTime.Now - TimeSpan.FromMinutes(12); return; }
+        lock (_choGate) { _choItems = m; _choItemsAt = DateTime.Now; }
+    }
+
+    // 🏪 trên trang: bảng giá (món có trên Chợ 3 ngày qua) + Đồ phổ của acc chính
+    public object ChoSnapshot()
+    {
+        var prices = ChoPrices();
+        bool on; string main;
+        lock (_gate) { on = _settings.ChoSellOn; main = _settings.KnbMainName; }
+        lock (_choGate)
+        {
+            LoadCho();
+            var rows = _cho!.Values.Where(x => !x.Mine && x.Price > 0).GroupBy(x => x.Name, StringComparer.OrdinalIgnoreCase).Select(g =>
+            {
+                var asks = g.Select(x => x.Price).OrderBy(x => x).ToList();
+                var open = g.Where(x => x.Open).Select(x => x.Price).ToList();
+                var sold = g.Where(x => x.Sold).Select(x => x.Price).OrderBy(x => x).ToList();
+                prices.TryGetValue(g.Key, out var pr);
+                return new
+                {
+                    n = g.Key, open = open.Count, min = open.Count > 0 ? open.Min() : 0, med = asks[asks.Count / 2], seen = asks.Count,
+                    sold = sold.Count, soldMed = sold.Count > 0 ? sold[sold.Count / 2] : 0, p = pr.P, floor = pr.Floor, src = pr.Src ?? "",
+                };
+            }).OrderByDescending(x => x.sold).ThenByDescending(x => x.seen).ThenBy(x => x.n).ToList();
+            return new
+            {
+                on, main, rows, items = _choItems, itemsAt = _choItemsAt == default ? null : _choItemsAt.ToString("HH:mm"),
+                prices = prices.Select(x => new { n = x.Key, p = x.Value.P, floor = x.Value.Floor, src = x.Value.Src }),
+                listings = _cho.Count, soldTotal = _cho.Values.Count(x => x.Sold),
+            };
+        }
+    }
+
+    public void ChoSetPrice(string name, long price)
+    {
+        lock (_gate)
+        {
+            if (price > 0) _settings.ChoPrices[ChoName(name)] = price; else _settings.ChoPrices.Remove(ChoName(name));
+            _settingsDirty = true;
+        }
+        _choSellAt = DateTime.MinValue; // bày ở lượt sau, không chờ 15 phút
+    }
+
+    public void ChoSetOn(bool on)
+    {
+        lock (_gate) { _settings.ChoSellOn = on; _settingsDirty = true; }
+        _choSellAt = DateTime.MinValue;
     }
 
     // 💰 Nút Gửi KNB: mọi acc khác gửi ngay phần KNB trên mức giữ lại về acc chính; acc chính nhận thư sau 3 phút

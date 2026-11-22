@@ -188,6 +188,7 @@ public sealed class AccountController
     public event Action<ActivityEntry>? ActivityAdded;
     // 🐴 Mã Trường: kết quả một bước (xem HorseCoordinator)
     public event Action<JsonElement>? HorseResult;
+    public event Action<JsonElement>? ChoSellResult; // 🏪 acc chính: Đồ phổ đã bày / đang giữ
     public event Action<JsonElement>? ChoSeen; // 🏪 Chợ: Đồ phổ đang bày (chỉ thống kê giá)
 
     // Gửi một bước 🐴 Mã Trường vào trang (bên gọi giữ khoá của acc như mọi lệnh khác)
@@ -556,6 +557,19 @@ public sealed class AccountController
                 case "horseStoreResult":
                     OnHorseStoreResult(m, now);
                     break;
+                case "choSellResult":
+                {
+                    var listed = m.TryGetProperty("listed", out var lv) && lv.ValueKind == JsonValueKind.Array ? lv.EnumerateArray().Select(x => x.GetString() ?? "").ToList() : new List<string>();
+                    Log.Write($"[{Account.Id}] cho sell: {Str(m, "r")} back={Raw(m, "back")} card={Str(m, "card")} listed=[{string.Join(", ", listed)}]");
+                    if (listed.Count > 0)
+                    {
+                        var text = $"🏪 Bày bán Đồ phổ: {string.Join(", ", listed.Select(x => { var i = x.LastIndexOf(' '); return i > 0 && long.TryParse(x[(i + 1)..], out var p) ? $"{x[..i]} {p:N0} KNB" : x; }))}";
+                        Note(now, text, StatusLevel.Ok);
+                        GameLogSink?.Invoke(Account.Id, new[] { new GameLog.Entry(now, "auction", "", Account.CharName ?? "", text) });
+                    }
+                    ChoSellResult?.Invoke(m.Clone());
+                    break;
+                }
                 case "choSeen":
                     ChoSeen?.Invoke(m.Clone());
                     break;
