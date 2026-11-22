@@ -1470,7 +1470,8 @@ public class AccountControllerTests
         cfg.GuildKnbOn = true;
         cfg.GuildKnbAmount = 100;
         cfg.KnbKeep = 1000;
-        Run(ctl, T0, 8 * 60, Status("game", "tower", "Thông Thiên Tháp · tầng 900"));
+        var t = Run(ctl, T0, 8 * 60, Status("game", "tower", "Thông Thiên Tháp · tầng 900"));
+        ctl.SendKnbAfterHorses(t);
         var send = page.Sent.Single(m => m.GetProperty("t").GetString() == "knbSend").GetProperty("arg");
         Assert.Equal(1100, send.GetProperty("keep").GetInt32()); // góp bang trước, gửi về acc chính sau
     }
@@ -1489,8 +1490,12 @@ public class AccountControllerTests
         Assert.DoesNotContain(page.Sent, m => m.GetProperty("t").GetString() == "knbSend");
         cfg.KnbSendOn = true;
         var t = Run(ctl, t0, 4 * 60, Status("game", "tower", "Thông Thiên Tháp · tầng 900"));
+        Assert.DoesNotContain(page.Sent, m => m.GetProperty("t").GetString() == "knbSend"); // 12:00: chờ lượt 🐴 (hoặc 15:00)
+        ctl.SendKnbAfterHorses(t);
         var send = page.Sent.Single(m => m.GetProperty("t").GetString() == "knbSend").GetProperty("arg");
         Assert.Equal("send", send.GetProperty("op").GetString());
+        Assert.True(send.GetProperty("dp").GetBoolean()); // Đồ phổ gửi kèm
+        Assert.Equal(100, send.GetProperty("minCard").GetInt32()); // đã có thẻ thì gửi từ 100 KNB
         Assert.Equal("Main", send.GetProperty("to").GetString());
         Assert.Equal(1000, send.GetProperty("keep").GetInt32()); // không góp KNB vào bang: chỉ chừa "Mỗi acc giữ lại"
         Assert.Equal(new[] { "A", "Main" }, send.GetProperty("allowed").EnumerateArray().Select(x => x.GetString()));
@@ -1498,6 +1503,8 @@ public class AccountControllerTests
         Assert.Contains(ctl.Activity.Items, e => e.Text.StartsWith("💰 Gửi 4,200 KNB cho Main") || e.Text.StartsWith("💰 Gửi 4.200 KNB cho Main"));
         Run(ctl, t, 30 * 60, Status("game", "tower", "Thông Thiên Tháp · tầng 900"));
         Assert.Single(page.Sent, m => m.GetProperty("t").GetString() == "knbSend"); // mỗi ngày một lần
+        ctl.SendKnbAfterHorses(t.AddHours(1));
+        Assert.Single(page.Sent, m => m.GetProperty("t").GetString() == "knbSend");
 
         // Nhân vật chính: chỉ nhận thư, không gửi
         var (main, mainPage, mainCfg) = Make();

@@ -188,6 +188,7 @@ public sealed class AccountController
     public event Action<ActivityEntry>? ActivityAdded;
     // 🐴 Mã Trường: kết quả một bước (xem HorseCoordinator)
     public event Action<JsonElement>? HorseResult;
+    public event Action<JsonElement>? ChoSeen; // 🏪 Chợ: Đồ phổ đang bày (chỉ thống kê giá)
     public event Action<JsonElement>? RpsSeen; // ✊ Oẳn tù tì: kết quả máy chủ đọc được (chỉ thống kê)
 
     // Gửi một bước 🐴 Mã Trường vào trang (bên gọi giữ khoá của acc như mọi lệnh khác)
@@ -555,6 +556,9 @@ public sealed class AccountController
                     break;
                 case "horseStoreResult":
                     OnHorseStoreResult(m, now);
+                    break;
+                case "choSeen":
+                    ChoSeen?.Invoke(m.Clone());
                     break;
                 case "rpsSeen":
                     RpsSeen?.Invoke(m.Clone());
@@ -2071,8 +2075,23 @@ public sealed class AccountController
         }
         _knbSendTry = now;
         _knbSendPending = true;
-        Post(new { t = "knbSend", arg = new { op = "send", to = cfg.KnbMainName, keep = cfg.KnbKeep + GuildKnbStillToGive(cfg, now), openBig = cfg.KnbOpenBig, allowed = own, min = 100 } });
+        Post(new { t = "knbSend", arg = new { op = "send", to = cfg.KnbMainName, keep = cfg.KnbKeep + GuildKnbStillToGive(cfg, now), openBig = cfg.KnbOpenBig, allowed = own, min = 100, minCard = 100, dp = true } });
         return "send";
+    }
+
+    // Ngay sau lượt 🐴 mỗi ngày (SessionManager): gửi KNB + Đồ phổ về acc chính, dùng chung Thẻ Giao Dịch lượt 🐴 vừa mua (nếu
+    // có). Bật "Gửi KNB tự động" mới chạy; hôm nay đã gửi thì thôi. Acc chính nhận thư sau 3 phút.
+    public void SendKnbAfterHorses(DateTime now)
+    {
+        var cfg = SettingsProvider?.Invoke();
+        if (cfg is null || !cfg.KnbSendOn || cfg.KnbMainName.Length == 0 || Screen != "game" || Away || string.IsNullOrWhiteSpace(Account.CharName)) return;
+        if (Account.CharName == cfg.KnbMainName) { _knbCollectAt = now - TimeSpan.FromMinutes(27); return; }
+        if (_knbSendDay == VnDate(now) || _knbSendPending) return;
+        var own = cfg.Accounts.Select(a => a.CharName ?? "").Where(n => n.Length > 0).Distinct().ToArray();
+        if (!own.Contains(cfg.KnbMainName)) return;
+        _knbSendTry = now;
+        _knbSendPending = true;
+        Post(new { t = "knbSend", arg = new { op = "send", to = cfg.KnbMainName, keep = cfg.KnbKeep + GuildKnbStillToGive(cfg, now), openBig = cfg.KnbOpenBig, allowed = own, min = KnbAutoSendMin, minCard = 100, dp = true } });
     }
 
     private void SuperviseKnbTransfer(DateTime now)
@@ -2097,14 +2116,16 @@ public sealed class AccountController
         // Acc khác: mỗi ngày một lần, sau khi đã đổi KNB và làm việc bang
         if (!cfg.KnbSendOn) return;
         var vn = now.ToUniversalTime().AddHours(7);
-        if (_knbSendDay == DateOnly.FromDateTime(vn) || vn.TimeOfDay < TimeSpan.FromMinutes(20) || now - _knbSendTry < TimeSpan.FromMinutes(10)) return;
+        // Thường gửi ngay sau lượt 🐴 (13:00, SendKnbAfterHorses) để dùng chung Thẻ Giao Dịch; lượt 🐴 không chạy (ít acc trong
+        // game…) thì tự gửi từ 15:00
+        if (_knbSendDay == DateOnly.FromDateTime(vn) || vn.TimeOfDay < TimeSpan.FromHours(15) || now - _knbSendTry < TimeSpan.FromMinutes(10)) return;
         if (cfg.DailyKnbBuy && _knbDoneDay != DateOnly.FromDateTime(vn)) return;
         _knbSendTry = now;
         _knbSendPending = true;
         // Góp KNB vào bang hôm nay chưa xong → giữ lại thêm phần đó (góp bang trước, gửi về acc chính sau).
         // Từ 23/11 gửi thư kèm KNB cần Thẻ Giao Dịch (200 KNB khóa / 24 giờ) → lượt tự động chỉ gửi khi dư từ
         // KnbAutoSendMin trở lên (ít hơn thì để dồn sang hôm sau, không tốn thẻ cho vài trăm KNB). Nút 💰 vẫn gửi từ 100.
-        Post(new { t = "knbSend", arg = new { op = "send", to = cfg.KnbMainName, keep = cfg.KnbKeep + GuildKnbStillToGive(cfg, now), openBig = cfg.KnbOpenBig, allowed = own, min = KnbAutoSendMin } });
+        Post(new { t = "knbSend", arg = new { op = "send", to = cfg.KnbMainName, keep = cfg.KnbKeep + GuildKnbStillToGive(cfg, now), openBig = cfg.KnbOpenBig, allowed = own, min = KnbAutoSendMin, minCard = 100, dp = true } });
     }
 
     public const int KnbAutoSendMin = 3000;
@@ -2114,7 +2135,7 @@ public sealed class AccountController
         _knbSendPending = false;
         int Int(string name) => m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? (int)v.GetDouble() : 0;
         var r = Str(m, "r");
-        Log.Write($"[{Account.Id}] knb send: {r} opened={Int("opened")} gained={Int("gained")} sent={Int("sent")} mails={Int("mails")} knb={Int("knb")}");
+        Log.Write($"[{Account.Id}] knb send: {r} opened={Int("opened")} gained={Int("gained")} sent={Int("sent")} mails={Int("mails")} knb={Int("knb")} card={Str(m, "card")} dp=[{Str(m, "dpSent")}]{(Str(m, "dpErr").Length > 0 ? " dpErr=" + Str(m, "dpErr") : "")}");
         if (r is "busy" or "boss-hk") return;
         var cfg = SettingsProvider?.Invoke();
         var card = Str(m, "card");
@@ -2127,6 +2148,9 @@ public sealed class AccountController
         }
         if (Int("opened") > 0) Note(now, $"🧧 Mở {Int("opened")} Đại Hồng Bao (+{Int("gained"):N0} KNB)", StatusLevel.Ok);
         if (Int("sent") > 0) Note(now, $"💰 Gửi {Int("sent"):N0} KNB cho {cfg?.KnbMainName} (còn {Int("knb"):N0})", StatusLevel.Ok);
+        var dpSent = Str(m, "dpSent");
+        if (dpSent.Length > 0) Note(now, $"📜 Gửi Đồ phổ cho {cfg?.KnbMainName} để bán: {dpSent}", StatusLevel.Ok);
+        if (Str(m, "dpErr").Length > 0) Raise("dp-send", $"Gửi Đồ phổ cho {cfg?.KnbMainName} không được: {Str(m, "dpErr")}");
         if (Int("mails") > 0) Note(now, $"💰 Nhận {Int("mails")} thư KNB từ các acc (có {Int("knb"):N0} KNB)", StatusLevel.Ok);
         if (Account.CharName == cfg?.KnbMainName) return;
         if (r == "ok") { _knbSendDay = VnDate(now); return; }

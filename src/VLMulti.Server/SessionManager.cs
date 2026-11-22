@@ -95,6 +95,7 @@ public sealed class SessionManager : IAsyncDisposable
         c.GuildLogResult += m => _guildLedger.Ingest(m, DateTime.Now);
         c.HorseResult += m => _horses.OnResult(acc.Id, m);
         c.RpsSeen += OnRpsSeen;
+        c.ChoSeen += OnChoSeen;
 
         lock (_gate) _sessions[acc.Id] = session;
         try
@@ -119,6 +120,7 @@ public sealed class SessionManager : IAsyncDisposable
             foreach (var s in sessions) s.Locked(c => c.Tick(now));
             SuperviseHorsesInLand(now);
             SuperviseRps(now);
+            SuperviseCho(now);
 
             if (now - _lastStateSave > SaveStateEvery)
             {
@@ -863,6 +865,7 @@ public sealed class SessionManager : IAsyncDisposable
             {
                 if (await _horses.ScanAsync(dm, dn, openChests: true) && _horses.Plan.Count + _horses.Sales.Count > 0)
                     await _horses.SendAsync(dm, dn);
+                KnbAfterHorses();
             });
             return;
         }
@@ -877,7 +880,86 @@ public sealed class SessionManager : IAsyncDisposable
         {
             if (await _horses.ScanAsync(members, names, openChests: false) && _horses.Plan.Count + _horses.Sales.Count > 0)
                 await _horses.SendAsync(members, names);
+            KnbAfterHorses();
         });
+    }
+
+    // Xong lượt 🐴 mỗi ngày: các acc gửi KNB + Đồ phổ về acc chính ngay (dùng chung Thẻ Giao Dịch 24 giờ lượt 🐴 vừa mua)
+    private void KnbAfterHorses()
+    {
+        var now = DateTime.Now;
+        foreach (var s in Sessions) s.Locked(c => c.SendKnbAfterHorses(now));
+    }
+
+    // ---------- 🏪 Chợ: theo dõi giá Đồ phổ (chỉ đọc, giai đoạn 1) ----------
+    // Mỗi 15 phút một acc đọc danh sách Chợ (cho.ds). data/cho.csv: "add,utc,id,giá,tiền,người bán,bày lúc,hết hạn,của mình,tên"
+    // khi thấy món mới; "gone,utc,id,sớm" khi món biến mất – sớm=1 (còn hơn 5 phút mới hết hạn) gần như chắc là đã bán.
+    private DateTime _choAt = DateTime.MinValue;
+    private Dictionary<long, long>? _choOpen; // id → hết hạn (ms)
+    private readonly object _choGate = new();
+
+    private void SuperviseCho(DateTime now)
+    {
+        if (now - _choAt < TimeSpan.FromMinutes(15)) return;
+        foreach (var s in Sessions)
+        {
+            bool ok = false;
+            s.Locked(c => { if (c.Screen == "game" && !c.Away) { c.PostRaw(new { t = "choPeek" }); ok = true; } });
+            if (ok) { _choAt = now; return; }
+        }
+    }
+
+    private void OnChoSeen(JsonElement m)
+    {
+        if (!m.TryGetProperty("rows", out var rows) || rows.ValueKind != JsonValueKind.Array)
+        {
+            // Acc đọc bị lỗi (vd. "Chưa kết nối máy chủ" ngay sau khởi động): 2 phút nữa thử lại
+            Log.Write("cho: " + (m.TryGetProperty("err", out var e) ? e.ToString() : "no rows"));
+            _choAt = DateTime.Now - TimeSpan.FromMinutes(13);
+            return;
+        }
+        long nowMs = m.TryGetProperty("now", out var nv) && nv.TryGetInt64(out var nn) ? nn : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        static string Csv(string x) => "\"" + x.Replace("\"", "'").Replace(',', ' ') + "\"";
+        lock (_choGate)
+        {
+            try
+            {
+                var file = Path.Combine(AppPaths.DataDir, "cho.csv");
+                if (_choOpen is null)
+                {
+                    _choOpen = new();
+                    if (File.Exists(file))
+                        foreach (var line in File.ReadLines(file))
+                        {
+                            var f = line.Split(',');
+                            if (f.Length > 7 && f[0] == "add" && long.TryParse(f[2], out var id) && long.TryParse(f[7], out var het)) _choOpen[id] = het;
+                            else if (f.Length > 2 && f[0] == "gone" && long.TryParse(f[2], out var gid)) _choOpen.Remove(gid);
+                        }
+                }
+                if (rows.GetArrayLength() == 0 && _choOpen.Count > 5) return; // Chợ trả về rỗng bất thường: không coi là bán hết
+                var utc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mmZ");
+                var seen = new HashSet<long>();
+                var lines = new List<string>();
+                foreach (var r in rows.EnumerateArray())
+                {
+                    if (!r.TryGetProperty("id", out var idv) || !idv.TryGetInt64(out var id)) continue;
+                    seen.Add(id);
+                    if (_choOpen.ContainsKey(id)) continue;
+                    long L(string k) => r.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? (long)v.GetDouble() : 0;
+                    string S(string k) => r.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+                    bool mine = r.TryGetProperty("mine", out var mv) && mv.ValueKind == JsonValueKind.True;
+                    _choOpen[id] = L("h");
+                    lines.Add($"add,{utc},{id},{L("p")},{S("cur")},{Csv(S("s"))},{L("c")},{L("h")},{(mine ? 1 : 0)},{Csv(S("n"))}");
+                }
+                foreach (var (id, het) in _choOpen.Where(x => !seen.Contains(x.Key)).ToList())
+                {
+                    lines.Add($"gone,{utc},{id},{(het - nowMs > 5 * 60_000 ? 1 : 0)}");
+                    _choOpen.Remove(id);
+                }
+                if (lines.Count > 0) File.AppendAllLines(file, lines);
+            }
+            catch (Exception ex) { Log.Write("cho: " + ex.Message); }
+        }
     }
 
     // 💰 Nút Gửi KNB: mọi acc khác gửi ngay phần KNB trên mức giữ lại về acc chính; acc chính nhận thư sau 3 phút

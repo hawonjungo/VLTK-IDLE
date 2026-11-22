@@ -1835,6 +1835,26 @@
     res.q = `cà rốt ${q.giay | 0} · cành thông ${q.but | 0} · nón ${q.muc | 0} · hoa tuyết ${q.hoa | 0} · NT ${t.thiep | 0} · xanh ${t.bo | 0} · đỏ ${t.lang | 0}`;
     return res;
   };
+  // Đồ phổ trong Hành trang gửi được: không khoá, không ràng buộc (dữ liệu máy chủ H5.st.items, tpl "dp:…")
+  const dpToSend = () => {
+    try {
+      const raw = window.H5.st.items;
+      const all = raw instanceof Map ? [...raw.values()] : Array.isArray(raw) ? raw : Object.values(raw || {});
+      return all.filter((i) => i && /^dp:/.test(String(i.tpl)) && i.loc === 'bag' && !i.khoa && !i.lock && !i.bound);
+    } catch (_) { return []; }
+  };
+  const dpName = (i) => { try { const o = window.H5.oldItem && window.H5.oldItem(i.id); return (o && o.n) || String(i.tpl); } catch (_) { return String(i.tpl); } };
+  // Gửi thư chỉ có đồ (đúng việc nút 📨 Gửi thư làm: máy chủ "thu.gui" { to, itemIds }), mỗi thư 5 món
+  const sendDp = async (to, list, res) => {
+    const names = [];
+    for (let k = 0; k < list.length; k += 5) {
+      const chunk = list.slice(k, k + 5);
+      try { await window.H5.call('thu.gui', { to, itemIds: chunk.map((i) => i.id) }); names.push(...chunk.map(dpName)); }
+      catch (e) { res.dpErr = String((e && (e.msg || e.message)) || e).slice(0, 100); break; }
+      await sleep(800);
+    }
+    return names;
+  };
   const knbFlowSend = async (arg) => {
     if (flowBusy || anyWindowOpen()) return { r: 'busy' };
     if (inBossHk()) return { r: 'boss-hk' };
@@ -1851,7 +1871,7 @@
             await sleep(500);
             const row = [...document.querySelectorAll('#mBody .nmrow')].find((r) =>
               (arg.from || []).includes(((r.querySelector(':scope > span > b') || {}).textContent || '').trim())
-              && r.querySelector('[data-take]') && /KNB/.test(r.innerText) && !/khóa/.test(r.innerText));
+              && r.querySelector('[data-take]') && ((/KNB/.test(r.innerText) && !/khóa/.test(r.innerText)) || /Đồ phổ/.test(r.innerText)));
             if (!row) break;
             const id = row.querySelector('[data-take]').dataset.take;
             row.querySelector('[data-take]').click();
@@ -1873,9 +1893,19 @@
         // 2. Gửi phần trên mức giữ lại về nhân vật chính
         const have = knbExact();
         const amount = have != null ? Math.floor(have - (arg.keep ?? 1000)) : 0;
-        if (arg.op === 'send' && amount >= (arg.min ?? 1)) {
+        // Đồ phổ (không khoá) cũng gửi về acc chính để bán (cần thẻ; một Đồ phổ đáng vài nghìn tới hơn trăm nghìn KNB nên
+        // có Đồ phổ là mua thẻ). Đã có thẻ còn hạn (hoặc vừa mua) thì KNB gửi từ arg.minCard, không chờ đủ arg.min.
+        const dps = arg.op === 'send' && arg.dp ? dpToSend() : [];
+        const wantKnb = arg.op === 'send' && amount >= (tradeCardOk() ? (arg.minCard ?? arg.min ?? 1) : (arg.min ?? 1));
+        if (wantKnb || dps.length) {
           res.card = await ensureTradeCard();
           if (res.card !== 'have' && res.card !== 'bought' && res.card !== 'bought-unseen') { res.r = 'no-card'; res.knb = knbExact() ?? 0; return res; }
+        }
+        if (dps.length) {
+          const sent = await sendDp(arg.to, dps, res);
+          if (sent.length) res.dpSent = sent.join(', ');
+        }
+        if (arg.op === 'send' && res.card && amount >= (arg.minCard ?? arg.min ?? 1)) {
           await closeModalSure();
           $('#u20mail')?.click();
           const toBox = await waitFor(() => $('#mBody #nmTo'), 3000);
@@ -3077,6 +3107,15 @@
       lockInnateFlow().then((res) => post({ t: 'lockInnateResult', ...res }), (err) => post({ t: 'lockInnateResult', r: 'error: ' + err.message }));
     } else if (m.t === 'sellJunk') {
       sellJunkFlow().then((res) => post({ t: 'sellJunkResult', ...res }), (err) => post({ t: 'sellJunkResult', r: 'error: ' + err.message }));
+    } else if (m.t === 'choPeek') {
+      // 🏪 Chợ: đọc danh sách đang bày (chỉ đọc) – ghi giá Đồ phổ để định giá sau này
+      (async () => {
+        try {
+          const v = await window.H5.call('cho.ds', {});
+          const rows = (v && v.ds || []).filter((d) => /^Đồ phổ/.test(String(d.iname || ''))).map((d) => ({ id: +d.id, n: String(d.iname), p: +d.price, cur: d.cur || 'knb', s: String(d.seller_name || ''), c: +d.created || 0, h: +d.het || 0, mine: !!d.mine }));
+          post({ t: 'choSeen', rows, now: +(v && v.now) || Date.now() });
+        } catch (e) { post({ t: 'choSeen', err: String((e && (e.msg || e.message)) || e).slice(0, 80) }); }
+      })();
     } else if (m.t === 'rpsPeek') {
       // ✊ Oẳn tù tì: chỉ ĐỌC kết quả 10 ván gần nhất của máy chủ (rps.xem) để thống kê – không bao giờ cược
       (async () => {
