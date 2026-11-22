@@ -1253,6 +1253,38 @@ public class AccountControllerTests
     }
 
     [Fact]
+    public void Christmas_event_runs_every_30_minutes_and_reports_what_it_did()
+    {
+        var (ctl, page, cfg) = Make();
+        int Calls() => page.Sent.Count(m => m.GetProperty("t").GetString() == "gs");
+        var t = Run(ctl, T0, 150, Status("game", mode: "farm"));
+        Assert.Equal(1, Calls()); // mặc định bật, 2 phút sau khi vào game
+        var arg = page.Sent.Last(m => m.GetProperty("t").GetString() == "gs").GetProperty("arg");
+        Assert.Equal(0, arg.GetProperty("redKnb").GetInt32()); // Khăn Đỏ mặc định tắt
+        ctl.OnPageMessage("""{"t":"gsResult","r":"ok","nt":3,"gg":2,"bo":2,"giveBo":2,"moc":[20],"pt":22,"q":""}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("ghép 3 Người Tuyết") && e.Text.Contains("tặng 2 Khăn Xanh") && e.Text.Contains("mốc 20"));
+        t = Run(ctl, t, 25 * 60, Status("game", mode: "farm"));
+        Assert.Equal(1, Calls());
+        t = Run(ctl, t, 6 * 60, Status("game", mode: "farm"));
+        Assert.Equal(2, Calls());
+        ctl.OnPageMessage("""{"t":"gsResult","r":"off"}""", t);
+        Run(ctl, t, 40 * 60, Status("game", mode: "farm"));
+        Assert.Equal(2, Calls()); // sự kiện đã hết: thôi
+        _ = cfg;
+    }
+
+    [Fact]
+    public void Assassin_below_the_lowest_tier_is_skipped_quietly()
+    {
+        var (ctl, _, _) = Make();
+        var t = Run(ctl, T0, 15, Status("game", mode: "farm"));
+        for (int i = 0; i < 3; i++) ctl.OnPageMessage("""{"t":"cmdResult","name":"assassin","arg":"","result":"no-tier"}""", t);
+        Assert.DoesNotContain(ctl.Activity.Items, e => e.Text.Contains("Gọi Sát Thủ không được"));
+        for (int i = 0; i < 3; i++) ctl.OnPageMessage("""{"t":"cmdResult","name":"assassin","arg":"","result":"no-tab"}""", t);
+        Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("Gọi Sát Thủ không được")); // lỗi thật vẫn báo
+    }
+
+    [Fact]
     public void Reborn_stops_at_the_game_maximum()
     {
         var (ctl, page, cfg) = Make();

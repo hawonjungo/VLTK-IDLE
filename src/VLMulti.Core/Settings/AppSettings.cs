@@ -85,6 +85,13 @@ public sealed class AppSettings
     public bool HoanTower { get; set; } = true;
     public bool HoanBoss { get; set; } = true;
     public int HoanKeepPoints { get; set; } = 2000;
+    // 🎄 Sự kiện Giáng Sinh (23/11 – 26/12/2026): mỗi 30 phút nhận quà mốc / Hộp quà / quà bảng, ghép Người Tuyết, nâng
+    // Khăn Xanh (mua khăn bằng lượng, luôn chừa GsGoldKeepVan vạn) và tặng Ông Già Noel trong giới hạn ngày. Khăn Đỏ tốn
+    // KNB (100 / cái, trừ KNB khóa trước): chỉ khi bật GsRedOn, tối đa GsRedKnbDay KNB mỗi ngày mỗi acc.
+    public bool GsOn { get; set; } = true;
+    public bool GsRedOn { get; set; }
+    public int GsRedKnbDay { get; set; } = 500;
+    public int GsGoldKeepVan { get; set; } = 1000;
     // Cống hiến vạn mỗi ngày tới GuildDailyAmount vạn (0 = tắt; 5.000 / 10.000 / 20.000 – game cho tối đa 20.000/ngày):
     // thiếu vạn thì mở Hồng Bao, hết Hồng Bao thì chừa lại GuildDonateReserve vạn
     public int GuildDailyAmount { get; set; }

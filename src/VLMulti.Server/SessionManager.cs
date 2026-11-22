@@ -295,6 +295,7 @@ public sealed class SessionManager : IAsyncDisposable
                     auctionMaxKnb = _settings.AuctionMaxKnb,
                     rebornOn = _settings.RebornOn,
                     hoanOn = _settings.HoanOn, hoanTower = _settings.HoanTower, hoanBoss = _settings.HoanBoss, hoanKeepPoints = _settings.HoanKeepPoints,
+                    gsOn = _settings.GsOn, gsRedOn = _settings.GsRedOn, gsRedKnbDay = _settings.GsRedKnbDay, gsGoldKeepVan = _settings.GsGoldKeepVan,
                     guildKnbAmount = _settings.GuildKnbAmount,
                     knbSendOn = _settings.KnbSendOn,
                     knbOpenBig = _settings.KnbOpenBig,
@@ -726,6 +727,10 @@ public sealed class SessionManager : IAsyncDisposable
             if (u.HoanTower is { } ht) _settings.HoanTower = ht;
             if (u.HoanBoss is { } hb) _settings.HoanBoss = hb;
             if (u.HoanKeepPoints is { } hk) _settings.HoanKeepPoints = hk;
+            if (u.GsOn is { } gso) _settings.GsOn = gso;
+            if (u.GsRedOn is { } gsr) _settings.GsRedOn = gsr;
+            if (u.GsRedKnbDay is { } gsk) _settings.GsRedKnbDay = Math.Clamp(gsk, 0, 100000);
+            if (u.GsGoldKeepVan is { } gsg) _settings.GsGoldKeepVan = Math.Clamp(gsg, 0, 1000000);
             if (u.GuildKnbAmount is { } gka) _settings.GuildKnbAmount = gka;
             if (u.KnbMainName is { } km) _settings.KnbMainName = km;
             if (u.KnbSendOn is { } ks) _settings.KnbSendOn = ks;
@@ -970,4 +975,5 @@ public sealed record SettingsUpdate(
     bool? GuildWeekAlert = null, string? KnbMainName = null, int? KnbKeep = null, bool? KnbSendOn = null, bool? KnbOpenBig = null,
     int? KiteFleeHp = null, int? KiteCrowd = null, int? KitePauseMs = null, bool? GuildKnbOn = null, int? GuildKnbAmount = null, bool? JewelSwapOn = null,
     bool? GuildLandOn = null, bool? AuctionOn = null, int? AuctionMaxKnb = null, bool? RebornOn = null,
-    bool? HoanOn = null, bool? HoanTower = null, bool? HoanBoss = null, int? HoanKeepPoints = null);
+    bool? HoanOn = null, bool? HoanTower = null, bool? HoanBoss = null, int? HoanKeepPoints = null,
+    bool? GsOn = null, bool? GsRedOn = null, int? GsRedKnbDay = null, int? GsGoldKeepVan = null);

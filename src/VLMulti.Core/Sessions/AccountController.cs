@@ -538,6 +538,9 @@ public sealed class AccountController
                 case "hoanResult":
                     OnHoanResult(m, now);
                     break;
+                case "gsResult":
+                    OnGsResult(m, now);
+                    break;
                 case "buildSpent":
                 {
                     var parts = new[] { Str(m, "attr"), Str(m, "sk") }.Where(x => x.Length > 0);
@@ -557,7 +560,7 @@ public sealed class AccountController
                     RpsSeen?.Invoke(m.Clone());
                     break;
                 case "horseResult":
-                    Log.Write($"[{Account.Id}] horse {Str(m, "op")}: {Str(m, "r")} stored={Str(m, "stored")} sent={Str(m, "sent")} failed={Str(m, "failed")} opened={Raw(m, "opened")} junk={Raw(m, "junkSold")} bagFull={Raw(m, "bagFull")}");
+                    Log.Write($"[{Account.Id}] horse {Str(m, "op")}: {Str(m, "r")} stored={Str(m, "stored")} sent={Str(m, "sent")} failed={Str(m, "failed")} opened={Raw(m, "opened")} junk={Raw(m, "junkSold")} bagFull={Raw(m, "bagFull")} card={Str(m, "card")}");
                     HorseResult?.Invoke(m.Clone());
                     break;
                 case "unreadable":
@@ -1246,6 +1249,7 @@ public sealed class AccountController
         SuperviseReborn(now);
         SuperviseHorseStore(now);
         SuperviseHoan(now, boss: false);
+        SuperviseGs(now);
         SuperviseSellJunk(now);
         SuperviseKnbTransfer(now);
         SuperviseStuck(now);
@@ -2097,9 +2101,13 @@ public sealed class AccountController
         if (cfg.DailyKnbBuy && _knbDoneDay != DateOnly.FromDateTime(vn)) return;
         _knbSendTry = now;
         _knbSendPending = true;
-        // Góp KNB vào bang hôm nay chưa xong → giữ lại thêm phần đó (góp bang trước, gửi về acc chính sau)
-        Post(new { t = "knbSend", arg = new { op = "send", to = cfg.KnbMainName, keep = cfg.KnbKeep + GuildKnbStillToGive(cfg, now), openBig = cfg.KnbOpenBig, allowed = own, min = 100 } });
+        // Góp KNB vào bang hôm nay chưa xong → giữ lại thêm phần đó (góp bang trước, gửi về acc chính sau).
+        // Từ 23/11 gửi thư kèm KNB cần Thẻ Giao Dịch (200 KNB khóa / 24 giờ) → lượt tự động chỉ gửi khi dư từ
+        // KnbAutoSendMin trở lên (ít hơn thì để dồn sang hôm sau, không tốn thẻ cho vài trăm KNB). Nút 💰 vẫn gửi từ 100.
+        Post(new { t = "knbSend", arg = new { op = "send", to = cfg.KnbMainName, keep = cfg.KnbKeep + GuildKnbStillToGive(cfg, now), openBig = cfg.KnbOpenBig, allowed = own, min = KnbAutoSendMin } });
     }
+
+    public const int KnbAutoSendMin = 3000;
 
     private void OnKnbSendResult(JsonElement m, DateTime now)
     {
@@ -2109,6 +2117,14 @@ public sealed class AccountController
         Log.Write($"[{Account.Id}] knb send: {r} opened={Int("opened")} gained={Int("gained")} sent={Int("sent")} mails={Int("mails")} knb={Int("knb")}");
         if (r is "busy" or "boss-hk") return;
         var cfg = SettingsProvider?.Invoke();
+        var card = Str(m, "card");
+        if (card == "bought") Note(now, "🤝 Mua Thẻ Giao Dịch (−200 KNB khóa, 24 giờ) để gửi KNB", StatusLevel.Ok);
+        if (r == "no-card")
+        {
+            Raise("knb-send", $"Gửi KNB cho {cfg?.KnbMainName} không được: không mua được Thẻ Giao Dịch ({card})");
+            _knbSendDay = VnDate(now);
+            return;
+        }
         if (Int("opened") > 0) Note(now, $"🧧 Mở {Int("opened")} Đại Hồng Bao (+{Int("gained"):N0} KNB)", StatusLevel.Ok);
         if (Int("sent") > 0) Note(now, $"💰 Gửi {Int("sent"):N0} KNB cho {cfg?.KnbMainName} (còn {Int("knb"):N0})", StatusLevel.Ok);
         if (Int("mails") > 0) Note(now, $"💰 Nhận {Int("mails")} thư KNB từ các acc (có {Int("knb"):N0} KNB)", StatusLevel.Ok);
@@ -2508,6 +2524,52 @@ public sealed class AccountController
         Post(new { t = "hoanUse", arg = new { n } });
     }
 
+    // ---------- 🎄 Giáng Sinh (23/11 – 26/12/2026): mỗi 30 phút ghép / tặng Người Tuyết, nhận quà (agent.js gsFlow) ----------
+    private DateTime _gsAt;
+    private bool _gsPending;
+    private string _gsStop = "";
+
+    private void SuperviseGs(DateTime now)
+    {
+        var cfg = SettingsProvider?.Invoke();
+        if (cfg is null || !cfg.GsOn || _gsStop.Length > 0) return;
+        if (Screen != "game" || Away || Maintenance || EventRunning(now) || now - _screenSince < TimeSpan.FromSeconds(120)) return;
+        if (_gsPending && now - _gsAt < TimeSpan.FromMinutes(2)) return;
+        _gsPending = false;
+        if (now - _gsAt < TimeSpan.FromMinutes(30)) return;
+        _gsAt = now;
+        _gsPending = true;
+        Post(new { t = "gs", arg = new { redKnb = cfg.GsRedOn ? cfg.GsRedKnbDay : 0, goldKeep = (long)cfg.GsGoldKeepVan * 10000 } });
+    }
+
+    private void OnGsResult(JsonElement m, DateTime now)
+    {
+        _gsPending = false;
+        int Int(string name) => m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? (int)v.GetDouble() : 0;
+        var r = Str(m, "r");
+        var moc = m.TryGetProperty("moc", out var mv) && mv.ValueKind == JsonValueKind.Array ? string.Join(",", mv.EnumerateArray().Select(x => x.ToString())) : "";
+        Log.Write($"[{Account.Id}] gs: {r} nt={Int("nt")} gg={Int("gg")} bo={Int("bo")} lm={Int("lm")} lang={Int("lang")} tặng={Int("giveNt")}/{Int("giveBo")}/{Int("giveLang")} mốc=[{moc}] hộp={Int("hop")} top={Int("top")} điểm={Int("pt")} đỏ-KNB={Int("redSpent")} | {Str(m, "q")}");
+        if (r is "busy" or "boss-hk") { _gsAt = now - TimeSpan.FromMinutes(25); return; } // 5 phút nữa thử lại
+        if (r == "off") { _gsStop = r; return; }            // sự kiện chưa mở / đã hết: thôi tới lần khởi động sau
+        if (r != "ok") return;                               // low-level / lỗi: 30 phút nữa
+        var parts = new List<string>();
+        if (Int("nt") > 0) parts.Add($"ghép {Int("nt")} Người Tuyết");
+        if (Int("bo") > 0) parts.Add($"{Int("bo")} Khăn Xanh" + (Int("gg") > 0 ? $" (mua {Int("gg")} khăn, −{Int("gg") * 10} vạn)" : ""));
+        if (Int("lang") > 0) parts.Add($"{Int("lang")} Khăn Đỏ" + (Int("lm") > 0 ? $" (mua {Int("lm")} khăn)" : ""));
+        var give = new List<string>();
+        if (Int("giveBo") > 0) give.Add($"{Int("giveBo")} Khăn Xanh");
+        if (Int("giveLang") > 0) give.Add($"{Int("giveLang")} Khăn Đỏ");
+        if (Int("giveNt") > 0) give.Add($"{Int("giveNt")} Người Tuyết");
+        if (give.Count > 0) parts.Add("tặng " + string.Join(", ", give));
+        if (moc.Length > 0) parts.Add($"nhận quà mốc {moc} điểm");
+        if (Int("hop") > 0) parts.Add("nhận Hộp Quà Ông Già Noel");
+        if (Int("top") > 0) parts.Add("nhận quà Bảng Giáng Sinh");
+        if (parts.Count == 0) return;
+        var text = $"🎄 Giáng Sinh: {string.Join(" · ", parts)} — {Int("pt")} điểm";
+        Note(now, text, StatusLevel.Ok);
+        GameLogSink?.Invoke(Account.Id, new[] { new GameLog.Entry(now, "gs", "", Account.CharName ?? "", text) });
+    }
+
     private void OnHoanResult(JsonElement m, DateTime now)
     {
         _hoanPending = false;
@@ -2866,6 +2928,12 @@ public sealed class AccountController
                 break;
             case "need-farm":
                 RunCommand("mode", ModeRules.Farm);
+                break;
+            case "no-tier":
+                // Vừa chuyển sinh, chưa tới cấp Sát Thủ thấp nhất (nút cấp nào cũng mờ): không phải lỗi → bỏ qua 3 giờ, không báo
+                _summonFailures = 0;
+                _modeBlockedUntil[ModeRules.Assassin] = now + TimeSpan.FromHours(3);
+                _assassinPhase = false;
                 break;
             default:
                 if (++_summonFailures >= AssassinMaxFailures)

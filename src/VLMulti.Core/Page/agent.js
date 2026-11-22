@@ -1742,6 +1742,99 @@
   // ---------- 💰 KNB: mở Đại Hồng Bao rồi gửi KNB thừa về nhân vật chính (thư tặng) / nhân vật chính nhận thư ----------
   // KNB thường chính xác (ô #knbTop viết gọn "17.2k"), lấy từ trạng thái game; không có thì đọc ô trên cùng
   const knbExact = () => { const S = gameGet('S'); return S && typeof S.knb === 'number' ? S.knb : ((knbNow() || {}).knb ?? null); };
+  // 🤝 Thẻ Giao Dịch (từ 23/11): gửi thư kèm KNB / đồ (cả ngựa), bày bán và mua ở Chợ đều cần thẻ còn hạn (S.buf.tgd,
+  // mili giây). Thiếu thẻ máy chủ từ chối thư, KNB không bị trừ. Mua đúng 1 thẻ (200 KNB khóa, 24 giờ, cộng dồn) qua Kỳ
+  // Trân Các ngay trước khi gửi – không bật "Tự mua Thẻ Giao Dịch" của game (cái đó mua liên tục mỗi khi đủ KNB khóa).
+  const tradeCardOk = () => { try { const b = (g('S').buf || {}).tgd; return !!b && +b.until > Date.now() + 120000; } catch (_) { return false; } };
+  const ensureTradeCard = async () => {
+    if (tradeCardOk()) return 'have';
+    let S = null;
+    try { S = g('S'); } catch (_) {}
+    if (!S || (+S.knbk || 0) < 200) return 'no-knbk';
+    try { await window.H5.call('ktc.buy', { k: 'tgd', n: 1 }); } catch (e) { return 'fail ' + String((e && (e.msg || e.message)) || e).slice(0, 80); }
+    return (await waitFor(tradeCardOk, 5000)) ? 'bought' : 'bought-unseen';
+  };
+  // 🎄 Sự kiện Giáng Sinh 2026 (23/11 – 26/12): nguyên liệu (Cà Rốt giay, Cành Thông but, Nón muc, Hoa Tuyết hoa) rơi khi
+  // đánh quái (cả trong tháp), nằm ở S.gs (gsSt). Ghép: Người Tuyết (thiep) = 1+1+1 + 2 Hoa; Khăn Xanh (bo) = NT + 3 Hoa + Khăn
+  // Choàng Xanh (10 vạn lượng) → tặng 4 triệu KN + 1 điểm, tối đa 40 điểm/ngày; Khăn Đỏ (lang) = NT + 5 Hoa + Khăn Choàng Đỏ
+  // (GS.gia KNB, trừ KNB khóa trước) → 20 triệu KN + 5 điểm. Dùng đúng các hàm nút của game (gsGhep / gsBuyGG / gsBuyLM /
+  // gsDung / gsMoc / gsHop / gsNhanTop – gọi máy chủ rồi game tự cập nhật). Người Tuyết thường (1 triệu KN) giữ lại để nâng
+  // khi có thêm Hoa Tuyết, chỉ tặng hết trong 2 ngày cuối. Khăn Đỏ chỉ khi bạn bật (arg.redKnb > 0 KNB / ngày).
+  const GS_RED_KEY = 'vl.gsRed';
+  const gsFlow = async (arg) => {
+    if (flowBusy) return { r: 'busy' };
+    if (inBossHk()) return { r: 'boss-hk' };
+    const fn = (n) => { try { const f = g(n); return typeof f === 'function' ? f : null; } catch (_) { return null; } };
+    let GS = null, S = null;
+    try { GS = g('GS'); S = g('S'); } catch (_) {}
+    const stF = fn('gsSt'), fit = fn('gsFit'), can = fn('gsCan');
+    if (!GS || !S || !stF || !fit || !can) return { r: 'no-gs' };
+    if (!GS.on) return { r: 'off' };
+    if (!can()) return { r: 'low-level' };
+    const res = { r: 'ok', moc: [], hop: 0, top: 0, nt: 0, gg: 0, bo: 0, lm: 0, lang: 0, giveNt: 0, giveBo: 0, giveLang: 0, pt: 0, q: '', redSpent: 0 };
+    flowBusy = true;
+    const stop = watchMsgs();
+    const st = () => stF() || { q: {} };
+    const call = async (name, ...a) => { const f = fn(name); if (!f) return null; try { const r = await f(...a); await sleep(400); return r; } catch (_) { return null; } };
+    const claim = async () => {
+      const moc = g('GS_MOC') || [], ok = fn('gsMocOk');
+      for (let i = 0; i < moc.length; i++) if (ok && ok(i) && (await call('gsMoc', i))) res.moc.push(moc[i][0]);
+      const hop = fn('gsHopOk');
+      if (hop && hop() && (await call('gsHop'))) res.hop = 1;
+      if (GS.tme && !GS.tme.nhan && (await call('gsNhanTop'))) res.top = 1;
+    };
+    try {
+      await claim();
+      // 1. Người Tuyết: ghép hết
+      let n = fit('thiep') | 0;
+      if (n > 0 && (await call('gsGhep', 'thiep', n))) res.nt = n;
+      // 2. Khăn Đỏ (bạn bật): mỗi ngày tối đa arg.redKnb KNB
+      if ((+arg.redKnb || 0) > 0) {
+        const day = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+        let rec = { d: day, spent: 0 };
+        try { const x = JSON.parse(localStorage.getItem(GS_RED_KEY) || 'null'); if (x && x.d === day) rec = x; } catch (_) {}
+        const price = +GS.gia || 100;
+        const room = Math.min(st().thiep | 0, Math.floor((st().q.hoa | 0) / 5));
+        const have = (fn('gsLm') || (() => 0))() | 0;
+        const wallet = (+S.knbk || 0) + (+S.knb || 0);
+        const buy = Math.max(0, Math.min(room - have, Math.floor((arg.redKnb - rec.spent) / price), Math.floor(wallet / price)));
+        if (buy > 0 && (await call('gsBuyLM', buy))) { res.lm = buy; rec.spent += buy * price; res.redSpent = rec.spent; try { localStorage.setItem(GS_RED_KEY, JSON.stringify(rec)); } catch (_) {} }
+        n = fit('lang') | 0;
+        if (n > 0 && (await call('gsGhep', 'lang', n))) res.lang = n;
+      }
+      // 3. Khăn Xanh: mua đủ khăn bằng lượng (chừa arg.goldKeep lượng) rồi ghép
+      {
+        const want = Math.min(st().thiep | 0, Math.floor((st().q.hoa | 0) / 3));
+        const price = +g('GS_GG_GIA') || 1e5;
+        const buy = Math.max(0, Math.min(want - (st().gg | 0), Math.floor(((+S.gold || 0) - (+arg.goldKeep || 0)) / price), 200));
+        if (buy > 0 && (await call('gsBuyGG', buy))) res.gg = buy;
+        n = fit('bo') | 0;
+        if (n > 0 && (await call('gsGhep', 'bo', n))) res.bo = n;
+      }
+      // 4. Tặng Ông Già Noel: Khăn Xanh tới 40 điểm/ngày, Khăn Đỏ hết, Người Tuyết thường chỉ 2 ngày cuối
+      const me = GS.me || {};
+      const boLeft = Math.max(0, (+g('GS_BO_NGAY') || 40) - (me.bo_dn | 0));
+      n = Math.min(st().bo | 0, boLeft);
+      if (n > 0 && (await call('gsDung', 'bo', n))) res.giveBo = n;
+      n = st().lang | 0;
+      if (n > 0 && (await call('gsDung', 'lang', n))) res.giveLang = n;
+      const cap = (g('GS_CAP') || {}).thiep || 5e8;
+      if (+GS.den && +GS.den - Date.now() < 2 * 864e5 && (me.exp_thiep | 0) < cap) {
+        n = Math.min(st().thiep | 0, +g('GS_THIEP_NGAY') || 100);
+        if (n > 0 && (await call('gsDung', 'thiep', n))) res.giveNt = n;
+      }
+      await claim();
+    } catch (err) {
+      res.r = 'error: ' + err.message;
+    } finally {
+      stop();
+      flowBusy = false;
+    }
+    try { res.pt = (fn('gsPt') || (() => 0))() | 0; } catch (_) {}
+    const q = st().q || {}, t = st();
+    res.q = `cà rốt ${q.giay | 0} · cành thông ${q.but | 0} · nón ${q.muc | 0} · hoa tuyết ${q.hoa | 0} · NT ${t.thiep | 0} · xanh ${t.bo | 0} · đỏ ${t.lang | 0}`;
+    return res;
+  };
   const knbFlowSend = async (arg) => {
     if (flowBusy || anyWindowOpen()) return { r: 'busy' };
     if (inBossHk()) return { r: 'boss-hk' };
@@ -1781,6 +1874,8 @@
         const have = knbExact();
         const amount = have != null ? Math.floor(have - (arg.keep ?? 1000)) : 0;
         if (arg.op === 'send' && amount >= (arg.min ?? 1)) {
+          res.card = await ensureTradeCard();
+          if (res.card !== 'have' && res.card !== 'bought' && res.card !== 'bought-unseen') { res.r = 'no-card'; res.knb = knbExact() ?? 0; return res; }
           await closeModalSure();
           $('#u20mail')?.click();
           const toBox = await waitFor(() => $('#mBody #nmTo'), 3000);
@@ -2686,6 +2781,9 @@
         }
       } else if (arg.op === 'send') {
         const to = arg.to;
+        // Gửi ngựa bằng thư → cần Thẻ Giao Dịch (xem ensureTradeCard)
+        res.card = (arg.uids || []).length ? await ensureTradeCard() : 'none';
+        if (!['have', 'bought', 'bought-unseen', 'none'].includes(res.card)) { for (const uid of arg.uids || []) res.failed.push(uid + ':no-card'); return res; }
         // Con đang ở Hành trang gửi trước: mỗi con gửi đi trả lại một ô trống để lấy con trong Mã Trường ra
         const queue = [...(arg.uids || [])];
         if (await openStable()) {
@@ -2987,6 +3085,8 @@
           post({ t: 'rpsSeen', hist: (v && v.hist || []).map((x) => ({ r: +x.r, mv: +x.mv })), hu: +(v && v.hu) || 0, now: +(v && v.now) || Date.now() });
         } catch (e) { post({ t: 'rpsSeen', err: String((e && (e.msg || e.message)) || e).slice(0, 80) }); }
       })();
+    } else if (m.t === 'gs') {
+      gsFlow(m.arg || {}).then((res) => post({ t: 'gsResult', ...res }), (err) => post({ t: 'gsResult', r: 'error: ' + err.message }));
     } else if (m.t === 'hoanUse') {
       hoanUseFlow(m.arg || {}).then((res) => post({ t: 'hoanResult', ...res }), (err) => post({ t: 'hoanResult', r: 'error: ' + err.message }));
     } else if (m.t === 'reborn') {
