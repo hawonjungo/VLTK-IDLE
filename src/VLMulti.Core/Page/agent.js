@@ -1769,7 +1769,8 @@
     try { GS = g('GS'); S = g('S'); } catch (_) {}
     const stF = fn('gsSt'), fit = fn('gsFit'), can = fn('gsCan');
     if (!GS || !S || !stF || !fit || !can) return { r: 'no-gs' };
-    if (!GS.on) return { r: 'off' };
+    // GS.on cũng tắt khi trang chưa kết nối máy chủ (chưa đọc được sự kiện) → gửi kèm hạn sự kiện để app biết là hết thật hay chưa
+    if (!GS.on) return { r: 'off', den: +GS.den || 0 };
     if (!can()) return { r: 'low-level' };
     const res = { r: 'ok', moc: [], hop: 0, top: 0, nt: 0, gg: 0, bo: 0, lm: 0, lang: 0, giveNt: 0, giveBo: 0, giveLang: 0, pt: 0, q: '', redSpent: 0 };
     flowBusy = true;
@@ -3164,14 +3165,6 @@
           post({ t: 'choSeen', rows, now: +(v && v.now) || Date.now() });
         } catch (e) { post({ t: 'choSeen', err: String((e && (e.msg || e.message)) || e).slice(0, 80) }); }
       })();
-    } else if (m.t === 'rpsPeek') {
-      // ✊ Oẳn tù tì: chỉ ĐỌC kết quả 10 ván gần nhất của máy chủ (rps.xem) để thống kê – không bao giờ cược
-      (async () => {
-        try {
-          const v = await window.H5.call('rps.xem', {});
-          post({ t: 'rpsSeen', hist: (v && v.hist || []).map((x) => ({ r: +x.r, mv: +x.mv })), hu: +(v && v.hu) || 0, now: +(v && v.now) || Date.now() });
-        } catch (e) { post({ t: 'rpsSeen', err: String((e && (e.msg || e.message)) || e).slice(0, 80) }); }
-      })();
     } else if (m.t === 'gs') {
       gsFlow(m.arg || {}).then((res) => post({ t: 'gsResult', ...res }), (err) => post({ t: 'gsResult', r: 'error: ' + err.message }));
     } else if (m.t === 'hoanUse') {
@@ -3700,7 +3693,9 @@
       if (dtBtn) {
         dtBtn.click();
         const dt = readQuestTab(tab);
-        if (!dt.dt) reportUnreadable('daTau', tabText(tab));
+        // Vừa chuyển sinh, chưa tới cấp nhận Dã Tẩu: game ghi "Dã Tẩu giao nhiệm vụ từ cấp 20." – không phải đổi giao diện,
+        // không báo (23/11: 9 ALERT nhầm ở các acc cấp 13–19)
+        if (!dt.dt && !/giao nhiệm vụ từ cấp \d+/.test(tabText(tab))) reportUnreadable('daTau', tabText(tab));
         mergeQuest(dt);
       }
       // Phó bản không đọc được → coi là chưa biết ('', app bỏ qua bước Phó Bản), KHÔNG giữ số cũ
@@ -3948,6 +3943,8 @@
       boat: screen === 'game' ? quests.boat || '' : '',     // chuyến thuyền còn hôm nay "2/3"
       wb: screen === 'game' ? quests.wb || '' : '',         // lượt Boss tuần còn "3/3" (+ " claim" khi nhận được rương tuần)
       bt: inMaintenance() ? 1 : 0,                          // máy chủ game đang bảo trì
+      // Kết nối máy chủ game (H5.ws): 0 khi đã vào game mà kết nối không mở – mọi lệnh game trả "Chưa kết nối máy chủ"
+      offline: (() => { try { const w = window.H5 && window.H5.ws; return w && w.readyState !== 1 ? 1 : 0; } catch (_) { return 0; } })(),
       away: playHereButton() ? 1 : 0,                       // "Tài khoản đang ở nơi khác" (nút Chơi ở đây đang hiện)
       bag: screen === 'game' ? bag : '',                     // hòm đồ "18/120"
       // Đồ phổ đang giữ, mỗi dòng một món; chưa quét xong lần đầu thì không gửi

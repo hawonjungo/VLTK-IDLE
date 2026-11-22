@@ -1267,10 +1267,28 @@ public class AccountControllerTests
         Assert.Equal(1, Calls());
         t = Run(ctl, t, 6 * 60, Status("game", mode: "farm"));
         Assert.Equal(2, Calls());
-        ctl.OnPageMessage("""{"t":"gsResult","r":"off"}""", t);
+        ctl.OnPageMessage("""{"t":"gsResult","r":"off"}""", t); // trang chưa nạp được sự kiện (chưa kết nối): thử lại
+        t = Run(ctl, t, 31 * 60, Status("game", mode: "farm"));
+        Assert.Equal(3, Calls());
+        ctl.OnPageMessage("""{"t":"gsResult","r":"off","den":1}""", t); // đã quá hạn sự kiện: thôi
         Run(ctl, t, 40 * 60, Status("game", mode: "farm"));
-        Assert.Equal(2, Calls()); // sự kiện đã hết: thôi
+        Assert.Equal(3, Calls());
         _ = cfg;
+    }
+
+    [Fact]
+    public void Lost_game_connection_reloads_after_two_minutes()
+    {
+        var (ctl, page, _) = Make();
+        string Off(int offline) => JsonSerializer.Serialize(new { t = "status", screen = "game", name = "", lv = "50", gold = "1 vạn", knb = "1 🔒1", mode = "farm", modeText = "farm", zone = "Hoa Sơn", offline });
+        var t = Run(ctl, T0, 60, Off(0));
+        int before = page.Reloads;
+        t = Run(ctl, t, 90, Off(1));
+        Assert.Equal(before, page.Reloads); // mới 1,5 phút
+        t = Run(ctl, t, 45, Off(1));
+        Assert.Equal(before + 1, page.Reloads);
+        Run(ctl, t, 60, Off(0));
+        Assert.Equal(before + 1, page.Reloads);
     }
 
     [Fact]

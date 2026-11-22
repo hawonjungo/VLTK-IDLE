@@ -189,7 +189,6 @@ public sealed class AccountController
     // 🐴 Mã Trường: kết quả một bước (xem HorseCoordinator)
     public event Action<JsonElement>? HorseResult;
     public event Action<JsonElement>? ChoSeen; // 🏪 Chợ: Đồ phổ đang bày (chỉ thống kê giá)
-    public event Action<JsonElement>? RpsSeen; // ✊ Oẳn tù tì: kết quả máy chủ đọc được (chỉ thống kê)
 
     // Gửi một bước 🐴 Mã Trường vào trang (bên gọi giữ khoá của acc như mọi lệnh khác)
     public void PostRaw(object message) => Post(message);
@@ -560,9 +559,6 @@ public sealed class AccountController
                 case "choSeen":
                     ChoSeen?.Invoke(m.Clone());
                     break;
-                case "rpsSeen":
-                    RpsSeen?.Invoke(m.Clone());
-                    break;
                 case "horseResult":
                     Log.Write($"[{Account.Id}] horse {Str(m, "op")}: {Str(m, "r")} stored={Str(m, "stored")} sent={Str(m, "sent")} failed={Str(m, "failed")} opened={Raw(m, "opened")} junk={Raw(m, "junkSold")} bagFull={Raw(m, "bagFull")} card={Str(m, "card")}");
                     HorseResult?.Invoke(m.Clone());
@@ -649,6 +645,8 @@ public sealed class AccountController
 
         changed |= SetScreen(screen, now);
         changed |= ApplyAway(s.TryGetProperty("away", out var away) && away.ValueKind == JsonValueKind.Number && away.GetInt32() == 1, now);
+        bool offline = s.TryGetProperty("offline", out var off) && off.ValueKind == JsonValueKind.Number && off.GetInt32() == 1;
+        if (!offline) _offlineSince = null; else _offlineSince ??= now;
 
         // Vài giây đầu sau khi vào game, ô cấp/tiền còn hiện giá trị tạm ("1", "0") trước khi
         // game tải xong dữ liệu → bỏ qua, nếu không sẽ lấy nhầm làm mốc "cấp đầu phiên"
@@ -1540,9 +1538,24 @@ public sealed class AccountController
     private static readonly System.Text.RegularExpressions.Regex BossRewardPattern =
         new(@"thưởng|Boss|Rương|Hoàng Kim", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
+    // Trong game mà mất kết nối máy chủ (H5.ws đóng – mọi lệnh "Chưa kết nối máy chủ", 23/11 sau khi khởi động lại máy
+    // chủ): quá 2 phút thì tải lại ngay, không chờ đủ 10 phút đứng yên. Dùng chung giới hạn 2 lần tải lại / giờ.
+    private DateTime? _offlineSince;
+    public static readonly TimeSpan OfflineReloadAfter = TimeSpan.FromMinutes(2);
+
     private void SuperviseStuck(DateTime now)
     {
-        if (!AutoRecover || Screen != "game" || Away || Maintenance || Watched || EventRunning(now)) return;
+        if (!AutoRecover || Screen != "game" || Away || Maintenance || Watched) return;
+        if (_offlineSince is { } since && now - since > OfflineReloadAfter && _stuckReloadLimiter.TryAcquire(now))
+        {
+            Note(now, $"🔄 Mất kết nối máy chủ game {(now - since).TotalMinutes:0} phút – tự tải lại game", StatusLevel.Warn);
+            Log.Write($"[{Account.Id}] offline {(now - since).TotalMinutes:0} min → reload");
+            _offlineSince = null;
+            Stats.ResetActivity(now);
+            _page.Reload();
+            return;
+        }
+        if (EventRunning(now)) return;
         var idle = Stats.IdleFor(now);
         if (idle < StuckReloadAfter) { _stuckNoted = false; return; }
         if (_stuckReloadLimiter.TryAcquire(now))
@@ -2560,6 +2573,7 @@ public sealed class AccountController
     private DateTime _gsAt;
     private bool _gsPending;
     private string _gsStop = "";
+    private static readonly DateTime GsEventEndUtc = new(2026, 12, 26, 17, 0, 0, DateTimeKind.Utc); // 27/12/2026 00:00 giờ VN
 
     private void SuperviseGs(DateTime now)
     {
@@ -2582,7 +2596,15 @@ public sealed class AccountController
         var moc = m.TryGetProperty("moc", out var mv) && mv.ValueKind == JsonValueKind.Array ? string.Join(",", mv.EnumerateArray().Select(x => x.ToString())) : "";
         Log.Write($"[{Account.Id}] gs: {r} nt={Int("nt")} gg={Int("gg")} bo={Int("bo")} lm={Int("lm")} lang={Int("lang")} tặng={Int("giveNt")}/{Int("giveBo")}/{Int("giveLang")} mốc=[{moc}] hộp={Int("hop")} top={Int("top")} điểm={Int("pt")} đỏ-KNB={Int("redSpent")} | {Str(m, "q")}");
         if (r is "busy" or "boss-hk") { _gsAt = now - TimeSpan.FromMinutes(25); return; } // 5 phút nữa thử lại
-        if (r == "off") { _gsStop = r; return; }            // sự kiện chưa mở / đã hết: thôi tới lần khởi động sau
+        // Sự kiện đã hết hạn thật (hạn game gửi, hoặc quá 27/12/2026 nếu trang chưa đọc được hạn) → thôi tới lần khởi động sau.
+        // Còn lại (vd. trang đang "Chưa kết nối máy chủ" nên game chưa nạp sự kiện, 23/11) → 30 phút nữa thử lại.
+        if (r == "off")
+        {
+            long den = m.TryGetProperty("den", out var dv) && dv.ValueKind == JsonValueKind.Number ? (long)dv.GetDouble() : 0;
+            var end = den > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(den).UtcDateTime : GsEventEndUtc;
+            if (now.ToUniversalTime() > end) _gsStop = r;
+            return;
+        }
         if (r != "ok") return;                               // low-level / lỗi: 30 phút nữa
         var parts = new List<string>();
         if (Int("nt") > 0) parts.Add($"ghép {Int("nt")} Người Tuyết");
