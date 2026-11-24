@@ -2616,12 +2616,12 @@
   const jewelFillers = (prefer) => {
     const G = window.H5.G, S = G('S');
     const ip = G('itemPower');
-    const score = prefer === 'power' ? jewelCombat : (i) => (isHongAnh(i) ? 1e6 + expOf(i) : 0) + powerOf(i) * 1e3 + (typeof ip === 'function' ? (+ip(i) || 0) : 0);
+    const score = prefer === 'power' ? (i) => (isHkJewel(i) ? 1e9 + jewelCombat(i) : isHongAnh(i) ? 1e6 + expOf(i) : -1) : (i) => (isHongAnh(i) ? 1e6 + expOf(i) : 0) + powerOf(i) * 1e3 + (typeof ip === 'function' ? (+ip(i) || 0) : 0);
     const out = [];
     for (const j of JEWEL) {
       const emptyN = j.slots.filter((s) => !S.eq[s]).length;
       if (!emptyN) continue;
-      const bag = (S.inv || []).filter((i) => i && i.d === j.d && !out.includes(i) && canWear(i) && !(prefer === 'power' && isHongAnh(i))).sort((a, b) => score(b) - score(a));
+      const bag = (S.inv || []).filter((i) => i && i.d === j.d && !out.includes(i) && canWear(i) && !(prefer === 'power' && score(i) < 0)).sort((a, b) => score(b) - score(a));
       out.push(...bag.slice(0, emptyN));
     }
     return out;
@@ -2634,7 +2634,8 @@
   const JEWEL_POWER_KEY = 'vl.jewelPower';
   // Mặc được không (đủ yêu cầu cấp / chỉ số / phái – 24/11: dây chuyền "mạnh" trong túi không mặc được, game từ chối)
   const canWear = (i) => { try { const ok = window.H5.G('reqOk'); return typeof ok !== 'function' || !!ok(i); } catch (_) { return true; } };
-  const ipOf = (i) => { try { return +window.H5.G('itemPower')(i) || 0; } catch (_) { return 0; } };
+  // 25/11, bạn dặn: lúc đánh CHỈ đeo đồ Hoàng Kim (không phải Hồng Ảnh); ô không có món Hoàng Kim mặc được → giữ Hồng Ảnh
+  const isHkJewel = (i) => !!(i && i.set && i.set.kind === 'gold' && !isHongAnh(i));
   const jewelCombat = (i) => {
     if (!i || isHongAnh(i) || !canWear(i)) return -1;
     let ip = 0; try { ip = +window.H5.G('itemPower')(i) || 0; } catch (_) {}
@@ -2644,7 +2645,7 @@
   const jewelPowerSave = (S) => {
     const cur = jewelPowerSaved();
     let n = 0;
-    for (const j of JEWEL) for (const s of j.slots) { const it = S.eq[s]; if (it && !isHongAnh(it)) { cur[s] = it.uid; n++; } }
+    for (const j of JEWEL) for (const s of j.slots) { const it = S.eq[s]; if (isHkJewel(it)) { cur[s] = it.uid; n++; } }
     if (n) { cur.at = Date.now(); try { localStorage.setItem(JEWEL_POWER_KEY, JSON.stringify(cur)); } catch (_) {} }
   };
   const jewelFlow = async (arg) => {
@@ -2668,20 +2669,14 @@
         const pick = uniq.filter(isHongAnh).sort((a, b) => expOf(b) - expOf(a));
         fill = [...pick, ...worn.filter((w) => !pick.includes(w))];
       } else {
-        // Bộ mạnh: món đã nhớ trước, rồi món không phải Hồng Ảnh tốt nhất – không bao giờ Hồng Ảnh
-        const mem = j.slots.map((s) => uniq.find((i) => saved[s] != null && String(i.uid) === String(saved[s]) && canWear(i))).filter(Boolean);
-        const rest = uniq.filter((i) => !isHongAnh(i) && !mem.includes(i) && canWear(i)).sort((a, b) => jewelCombat(b) - jewelCombat(a));
-        // Ô chưa có món nhớ: món thay yếu hơn một nửa món Hồng Ảnh đang đeo (chỉ số game) thì giữ Hồng Ảnh – nhân vật không
-        // yếu đi vì đổi sang đồ rác. Bạn tự đeo món khác một lần → tool nhớ món đó.
-        const keepHa = worn.filter((w) => isHongAnh(w)).sort((a, b) => ipOf(b) - ipOf(a));
-        fill = [...mem];
-        for (const it of rest) {
-          if (fill.length >= j.slots.length) break;
-          const ha = keepHa[fill.length - mem.length];
-          if (ha && ipOf(it) < ipOf(ha) * 0.5) { jewelKept.push(`${ha.n} (món thay ${it.n} yếu hơn)`); fill.push(ha); continue; }
-          fill.push(it);
-        }
-        for (const ha of keepHa) if (fill.length < j.slots.length && !fill.includes(ha)) { jewelKept.push(`${ha.n} (không có món thay)`); fill.push(ha); }
+        // Bộ mạnh lúc đánh
+        const mem = j.slots.map((s) => uniq.find((i) => saved[s] != null && String(i.uid) === String(saved[s]) && isHkJewel(i) && canWear(i))).filter(Boolean);
+        const rest = uniq.filter((i) => isHkJewel(i) && !mem.includes(i) && canWear(i)).sort((a, b) => jewelCombat(b) - jewelCombat(a));
+        // Hoàng Kim (đã nhớ trước, rồi tốt nhất) – thiếu thì giữ Hồng Ảnh đang đeo, rồi Hồng Ảnh tốt nhất trong túi; không
+        // bao giờ đồ thường
+        const ha = [...worn.filter(isHongAnh), ...uniq.filter((i) => isHongAnh(i) && !worn.includes(i)).sort((a, b) => expOf(b) - expOf(a))];
+        fill = [...mem, ...rest];
+        for (const h of ha) if (fill.length < j.slots.length && !fill.includes(h)) { jewelKept.push(h.n); fill.push(h); }
       }
       want[j.d] = [...new Set(fill)].slice(0, j.slots.length);
     }
