@@ -1882,23 +1882,42 @@
     dpSetFac = { setOf, fac, pv };
     return dpSetFac;
   };
-  const dpKeepWhy = (made, sects) => {
+  const dpKeepWhy = (made, chars) => {
+    // chars: [{ sect: tên phái, eqt: loại vũ khí chiêu chính (null = chưa biết) }] – các acc của bạn (cũ: mảng tên phái)
     try {
       const { setOf, fac, pv } = dpSetSect();
       const low = String(made || '').toLowerCase();
       if (Object.keys(pv).some((k) => k.toLowerCase() === low)) return 'nâng được Thiên Tứ';
       const st = setOf.get(low), sect = st != null ? fac[st] : '';
-      if (sect && (sects || []).includes(sect)) return 'đồ ' + sect;
+      if (!sect) return '';
+      const list = (chars || []).map((c) => (typeof c === 'string' ? { sect: c, eqt: null } : c)).filter((c) => c && c.sect === sect);
+      if (!list.length) return '';
+      // 24/11: mỗi phái nhiều nhánh – chỉ giữ bộ đúng nhánh (vũ khí của bộ cùng loại với chiêu chính của acc) hoặc món
+      // (không phải vũ khí) có dòng "Tăng Kỹ năng hệ <ngũ hành của phái>" (cộng cấp mọi kỹ năng hệ đó, nhánh nào cũng có ích)
+      const JX = window.JX || {}, gold = (JX.sets && JX.sets.gold) || [], affix = JX.affix || {};
+      const it = gold.find((x) => x && String(x.n).toLowerCase() === low);
+      const setW = gold.find((x) => x && x.grp === st && (x.d === 0 || x.d === 1));
+      const wEqt = setW ? setW.d * 100 + setW.k : null;
+      const F = Object.values(g('FAC') || {}).find((f) => f.n === sect);
+      const he = F && JX.series ? JX.series[F.series] : '';
+      const A = (id) => (Array.isArray(affix) ? affix.find((y) => y && y.id === id) || affix[id] : affix[id]);
+      const heLine = it && he && !(it.d === 0 || it.d === 1)
+        ? [...(it.mag || []), ...(it.ext || [])].map(A).find((a) => a && new RegExp('Tăng Kỹ năng hệ ' + he, 'i').test(String(a.d))) : null;
+      for (const c of list) {
+        if (c.eqt == null) return 'đồ ' + sect; // chưa biết chiêu chính của acc: giữ như trước cho chắc
+        if (wEqt != null ? wEqt === c.eqt : c.eqt <= 0) return `đồ ${sect} đúng nhánh`;
+      }
+      if (heLine) return `${sect}: kỹ năng hệ ${he} +${((heLine.p || [])[0] || [])[0] || '?'}`;
       return '';
     } catch (_) { return ''; }
   };
   // Đồ phổ trong Hành trang: giữ / để bán (acc chính báo sau khi nhận thư)
-  const dpSort = (sects) => {
+  const dpSort = (chars) => {
     const keep = [], sell = [];
     for (const i of dpToSend()) {
       const o = (window.H5.oldItem && window.H5.oldItem(i.id)) || {};
       const made = o.dp || String(i.tpl).replace(/^dp:/, '');
-      const why = dpKeepWhy(made, sects);
+      const why = dpKeepWhy(made, chars);
       if (why) keep.push(`${made} (${why})`); else sell.push(made);
     }
     return { keep, sell };
@@ -1942,7 +1961,7 @@
       for (const i of dpToSend()) {
         const o = (window.H5.oldItem && window.H5.oldItem(i.id)) || {};
         const made = o.dp || String(i.tpl).replace(/^dp:/, '');
-        const why = dpKeepWhy(made, arg.sects || []);
+        const why = dpKeepWhy(made, arg.chars || arg.sects || []);
         const row = { id: i.id, n: made, why, tries: tries[i.id] | 0, price: 0, state: why ? 'keep' : 'wait' };
         res.items.push(row);
         if (why) continue;
@@ -1997,7 +2016,7 @@
             if (await waitFor(() => !$(`#mBody [data-take="${id}"]`), 3000)) { res.mails++; misses = 0; } else misses++;
           }
         }
-        if (res.mails > 0 && arg.sects) { const d = dpSort(arg.sects); if (d.keep.length) res.dpKeep = d.keep.join(', '); if (d.sell.length) res.dpSell = d.sell.join(', '); }
+        if (res.mails > 0 && (arg.chars || arg.sects)) { const d = dpSort(arg.chars || arg.sects); if (d.keep.length) res.dpKeep = d.keep.join(', '); if (d.sell.length) res.dpSell = d.sell.join(', '); }
       } else {
         // 1. Mở hết Đại Hồng Bao
         if (arg.openBig) {
@@ -2784,9 +2803,9 @@
     }
   };
   // ---------- Cộng điểm lại theo lối đánh trước chuyển sinh ----------
-  // Tiềm năng: trước hết đủ yêu cầu của đồ đang mặc (reqDeficit), còn lại giữ đúng tỉ lệ cũ (ví dụ Sức mạnh 88% · Thân pháp 12%).
-  // Kỹ năng: chỉ cộng vào kỹ năng đã có trước chuyển sinh, tới đúng cấp cũ, theo thứ tự: chiêu chính → 4 ô → còn lại (cấp cũ
-  // cao trước). Không bao giờ học kỹ năng mới. Cộng bằng đúng hàm của game (H5.attr → attr.add, skLearn → sk.hoc).
+  // Tiềm năng: trước hết đủ yêu cầu của VŨ KHÍ đang cầm (reqDeficit), còn lại giữ đúng tỉ lệ cũ (ví dụ Sức mạnh 88% · Thân pháp 12%).
+  // Kỹ năng: chỉ kỹ năng đã có trước chuyển sinh, theo nhánh của chiêu chính cũ (xem phần 2 trong restoreBuild). Không bao
+  // giờ học kỹ năng mới. Cộng bằng đúng hàm của game (H5.attr → attr.add, skLearn → sk.hoc).
   const BUILD_KEY = 'vl.rebBuild';
   let buildAt = 0, buildBusy = false;
   const restoreBuild = async () => {
@@ -2811,8 +2830,10 @@
         const rd = g('reqDeficit');
         if (typeof rd === 'function') {
           const need = { str: 0, dex: 0, vit: 0, eng: 0 };
+          // Chỉ vũ khí (d 0 / 1): thiếu yêu cầu thì không cầm được, chiêu chính không dùng được. Đồ khác để tỉ lệ cũ tự đủ
+          // dần (24/11: bù đủ cả bộ đồ ngay cấp 1 làm +240 Sức mạnh cho nhân vật Thân pháp).
           for (const it of Object.values(S.eq || {})) {
-            if (!it) continue;
+            if (!it || !(it.d === 0 || it.d === 1)) continue;
             try { const d = rd(it) || {}; for (const k of keys) need[k] = Math.max(need[k], +d[k] || 0); } catch (_) {}
           }
           for (const k of keys) { const n = Math.min(pts, need[k]); give[k] += n; pts -= n; }
@@ -2831,20 +2852,56 @@
         }
         for (const k of keys) if (give[k] > 0) { H.attr(k, give[k]); done.attr[k] = give[k]; await sleep(600); }
       }
-      // 2. Kỹ năng
+      // 2. Kỹ năng (24/11, bạn báo cộng sai hoàn toàn: sau chuyển sinh 4 nhân vật Đường Môn phi đao ngoại công nhận hết điểm
+      // vào Tích Lịch Đơn / Địa Diệm Hỏa / Độc Thích Cốt – nội công, nhánh khác – vì chiêu chính và 4 ô cấp 80 mới học được).
+      // Nhánh = chiêu chính cũ: loại vũ khí (eqt, -2 = mọi vũ khí) + loại sát thương (ngoại / nội công). Chiêu "hợp nhánh":
+      // cùng vũ khí, hoặc mọi vũ khí mà cùng loại sát thương; bị động hợp nhánh: cùng vũ khí hoặc mọi vũ khí.
+      //  A. Chiêu chính chưa học được (cấp < 80): chỉ cộng bị động hợp nhánh + MỘT chiêu đánh hợp nhánh mạnh nhất đang học
+      //     được (để có chiêu mà đánh), còn lại GIỮ ĐIỂM cho cấp 80. Chưa có chiêu đánh hợp nhánh nào thì cho chiêu đánh mạnh
+      //     nhất của lối đánh cũ tối đa 5 cấp.
+      //  B. Chiêu chính học được: chiêu chính → 4 ô → bị động hợp nhánh → chiêu khác của lối đánh cũ (cấp cũ cao trước),
+      //     mỗi chiêu tới cấp cũ.
+      //  C. Đủ lối đánh cũ mà còn điểm: chiêu chính → 4 ô → bị động hợp nhánh lên tối đa mới (mỗi lần chuyển sinh +1).
       const learn = g('skLearn'), can = g('canLearn'), SK = g('SK');
       if ((S.skPts | 0) > 0 && typeof learn === 'function' && typeof can === 'function' && SK) {
-        const ids = Object.keys(b.sk).map(Number).filter((id) => SK[id] && (+b.sk[id] || 0) > (S.sk[id] | 0));
-        const rank = (id) => (id === +b.main ? 0 : (b.slots || []).includes(id) ? 1 : 2);
-        ids.sort((x, y) => rank(x) - rank(y) || (+b.sk[y] || 0) - (+b.sk[x] || 0));
-        for (const id of ids) {
-          for (let guard = 0; guard < 40 && (g('S').skPts | 0) > 0 && (g('S').sk[id] | 0) < (+b.sk[id] || 0) && can(SK[id]); guard++) {
-            const before = g('S').sk[id] | 0;
+        const mainId = +b.main || 0, M = SK[mainId] || {};
+        const nk = (s) => (/ngoại công/i.test(String(s && s.prop)) ? 'ngoai' : /nội công/i.test(String(s && s.prop)) ? 'noi' : '');
+        const isAtk = (s) => !!s && s.enemy === 1;
+        const fitAtk = (s) => isAtk(s) && (s.eqt === M.eqt || (s.eqt === -2 && nk(s) === nk(M)));
+        const fitPas = (s) => !!s && !isAtk(s) && (s.eqt === M.eqt || s.eqt === -2 || s.eqt == null);
+        const slots = (b.slots || []).filter((x) => x > 0);
+        const old = (id) => +b.sk[id] || 0;
+        const lv = (id) => g('S').sk[id] | 0;
+        const raise = async (id, upTo) => {
+          for (let guard = 0; guard < 40 && (g('S').skPts | 0) > 0 && lv(id) < upTo && can(SK[id]); guard++) {
+            const before = lv(id);
             learn(id);
-            await waitFor(() => (g('S').sk[id] | 0) > before, 3000);
-            if ((g('S').sk[id] | 0) <= before) break;
+            await waitFor(() => lv(id) > before, 3000);
+            if (lv(id) <= before) break;
             done.sk[SK[id].n] = (done.sk[SK[id].n] || 0) + 1;
           }
+        };
+        const oldIds = Object.keys(b.sk).map(Number).filter((id) => SK[id] && old(id) > 0);
+        const pas = oldIds.filter((id) => fitPas(SK[id]));
+        if (!mainId || !SK[mainId] || !can(SK[mainId]) && lv(mainId) < old(mainId)) {
+          // A. trước khi học được chiêu chính
+          for (const id of pas.sort((x, y) => SK[x].req - SK[y].req)) await raise(id, old(id));
+          const atk = oldIds.filter((id) => fitAtk(SK[id]) && can(SK[id])).sort((x, y) => SK[y].req - SK[x].req)[0];
+          if (atk) await raise(atk, old(atk));
+          else {
+            const any = oldIds.filter((id) => isAtk(SK[id]) && can(SK[id])).sort((x, y) => SK[y].req - SK[x].req)[0];
+            if (any) await raise(any, Math.min(old(any), 5));
+          }
+        } else {
+          // B. lối đánh cũ, chiêu chính trước
+          const rank = (id) => (id === mainId ? 0 : slots.includes(id) ? 1 : fitPas(SK[id]) ? 2 : 3);
+          const ids = oldIds.slice().sort((x, y) => rank(x) - rank(y) || old(y) - old(x));
+          for (const id of ids) await raise(id, old(id));
+          // C. còn điểm: lên tối đa mới
+          // Bị động: chỉ chiêu lối đánh cũ đã đầu tư (từ 10 cấp), cấp cũ cao trước (24/11: 11 điểm dư của nhân vật Côn Lôn
+          // đổ vào Thanh Phong Phù – lối đánh cũ chỉ để 5 – thay vì Sương Ngạo Côn Lôn 31)
+          const deep = pas.filter((id) => old(id) >= 10).sort((x, y) => old(y) - old(x));
+          if ((g('S').skPts | 0) > 0) for (const id of [mainId, ...slots, ...deep]) if (SK[id]) await raise(id, 99);
         }
       }
     } catch (err) {
@@ -4018,6 +4075,8 @@
       bt: inMaintenance() ? 1 : 0,                          // máy chủ game đang bảo trì
       // Kết nối máy chủ game (H5.ws): 0 khi đã vào game mà kết nối không mở – mọi lệnh game trả "Chưa kết nối máy chủ"
       offline: (() => { try { const w = window.H5 && window.H5.ws; return w && w.readyState !== 1 ? 1 : 0; } catch (_) { return 0; } })(),
+      // Loại vũ khí chiêu chính (eqt) – để giữ đúng nhánh Đồ phổ. Đang cộng lại sau chuyển sinh thì theo chiêu chính cũ
+      mainEqt: (() => { try { let id = 0; try { id = +(JSON.parse(localStorage.getItem('vl.rebBuild') || 'null') || {}).main || 0; } catch (_) {} if (!id) id = (window.H5.G('R').P.main || {}).id || 0; const s = (window.H5.G('SK') || {})[id]; return s && typeof s.eqt === 'number' ? s.eqt : null; } catch (_) { return null; } })(),
       away: playHereButton() ? 1 : 0,                       // "Tài khoản đang ở nơi khác" (nút Chơi ở đây đang hiện)
       bag: screen === 'game' ? bag : '',                     // hòm đồ "18/120"
       // Đồ phổ đang giữ, mỗi dòng một món; chưa quét xong lần đầu thì không gửi

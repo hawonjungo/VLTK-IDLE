@@ -84,11 +84,11 @@ public sealed class SessionManager : IAsyncDisposable
         c.CredentialProvider = id => { lock (_gate) return _credentials.Get(id); };
         c.Problem += (key, message) => Raise(key, acc, message);
         // Tên nhân vật, môn phái mới → lưu cài đặt (tiền/cấp đổi liên tục thì không cần lưu)
-        var saved = (acc.CharName, acc.Sect);
+        var saved = (acc.CharName, acc.Sect, acc.MainEqt);
         c.InfoChanged += () =>
         {
-            if (saved == (acc.CharName, acc.Sect)) return;
-            saved = (acc.CharName, acc.Sect);
+            if (saved == (acc.CharName, acc.Sect, acc.MainEqt)) return;
+            saved = (acc.CharName, acc.Sect, acc.MainEqt);
             lock (_gate) _settingsDirty = true;
         };
         c.LootFound += (src, text) => OnLoot(acc, src, text);
@@ -986,12 +986,13 @@ public sealed class SessionManager : IAsyncDisposable
     // một lần để trang hiện danh sách Đồ phổ. Cần dữ liệu Chợ mới (đọc trong 20 phút qua).
     private void SuperviseChoSell(DateTime now)
     {
-        bool on; string main; string[] sects;
+        bool on; string main; object[] chars;
         lock (_gate)
         {
             on = _settings.ChoSellOn;
             main = _settings.KnbMainName;
-            sects = _settings.Accounts.Select(a => a.Sect ?? "").Where(x => x.Length > 0).Distinct().ToArray();
+            // Phái + loại vũ khí chiêu chính của từng acc → giữ Đồ phổ đúng nhánh (agent.js dpKeepWhy)
+            chars = _settings.Accounts.Where(a => !string.IsNullOrEmpty(a.Sect)).Select(a => (object)new { sect = a.Sect, eqt = a.MainEqt }).ToArray();
         }
         if (main.Length == 0 || now - _choSellAt < TimeSpan.FromMinutes(on ? 15 : 30) || now - _choSeenAt > TimeSpan.FromMinutes(20)) return;
         var prices = ChoPrices().ToDictionary(x => x.Key, x => new { p = x.Value.P, floor = x.Value.Floor });
@@ -1001,7 +1002,7 @@ public sealed class SessionManager : IAsyncDisposable
             s.Locked(c =>
             {
                 if (c.Account.CharName != main || c.Screen != "game" || c.Away) return;
-                c.PostRaw(new { t = "choSell", arg = new { prices, sects, maxMine = 8, sell = on } });
+                c.PostRaw(new { t = "choSell", arg = new { prices, chars, maxMine = 8, sell = on } });
                 ok = true;
             });
             if (ok) { _choSellAt = now; return; }

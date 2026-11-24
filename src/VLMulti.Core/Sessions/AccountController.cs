@@ -764,6 +764,11 @@ public sealed class AccountController
                 Account.Sect = sect;
                 changed = true;
             }
+            if (s.TryGetProperty("mainEqt", out var me) && me.ValueKind == JsonValueKind.Number && me.GetInt32() is var eqt && eqt != Account.MainEqt)
+            {
+                Account.MainEqt = eqt;
+                changed = true;
+            }
         }
         if (changed) InfoChanged?.Invoke();
     }
@@ -2137,8 +2142,8 @@ public sealed class AccountController
             _knbCollectAt = now;
             _knbSendTry = now;
             _knbSendPending = true;
-            var sects = cfg.Accounts.Select(a => a.Sect ?? "").Where(x => x.Length > 0).Distinct().ToArray();
-            Post(new { t = "knbSend", arg = new { op = "collect", from = own, sects } });
+            var chars = cfg.Accounts.Where(a => !string.IsNullOrEmpty(a.Sect)).Select(a => new { sect = a.Sect, eqt = a.MainEqt }).ToArray();
+            Post(new { t = "knbSend", arg = new { op = "collect", from = own, chars } });
             return;
         }
         // Acc khác: mỗi ngày một lần, sau khi đã đổi KNB và làm việc bang

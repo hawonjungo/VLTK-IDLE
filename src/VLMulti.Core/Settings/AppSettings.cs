@@ -221,6 +221,8 @@ public sealed class AccountSlot
     // Tên nhân vật lấy từ game; nhớ lại để lần mở sau hiện ngay, trước khi game tải xong
     public string? CharName { get; set; }
     public string? Sect { get; set; }
+    // Loại vũ khí chiêu chính (eqt của game: 1 đao, 3 thương, 101 phi đao…; -2 không cần vũ khí) – Đồ phổ giữ đúng nhánh
+    public int? MainEqt { get; set; }
 
     // Có nằm trong nhóm nhận lệnh/đồng bộ hay không
     public bool Selected { get; set; }
