@@ -2611,38 +2611,78 @@
     return { r: 'ok', knb, now, items };
   };
 
-  // Ô trang sức đang trống và món trong túi để lấp (mỗi ô một món; nhẫn tối đa 2)
-  const jewelFillers = () => {
+  // Ô trang sức đang trống và món trong túi để lấp (mỗi ô một món; nhẫn tối đa 2). prefer "power": KHÔNG lấp bằng Hồng Ảnh
+  // (24/11: đang leo tháp mà ô trống được lấp bằng nhẫn Hồng Ảnh)
+  const jewelFillers = (prefer) => {
     const G = window.H5.G, S = G('S');
     const ip = G('itemPower');
-    const score = (i) => (isHongAnh(i) ? 1e6 + expOf(i) : 0) + powerOf(i) * 1e3 + (typeof ip === 'function' ? (+ip(i) || 0) : 0);
+    const score = prefer === 'power' ? jewelCombat : (i) => (isHongAnh(i) ? 1e6 + expOf(i) : 0) + powerOf(i) * 1e3 + (typeof ip === 'function' ? (+ip(i) || 0) : 0);
     const out = [];
     for (const j of JEWEL) {
       const emptyN = j.slots.filter((s) => !S.eq[s]).length;
       if (!emptyN) continue;
-      const bag = (S.inv || []).filter((i) => i && i.d === j.d && !out.includes(i)).sort((a, b) => score(b) - score(a));
+      const bag = (S.inv || []).filter((i) => i && i.d === j.d && !out.includes(i) && canWear(i) && !(prefer === 'power' && isHongAnh(i))).sort((a, b) => score(b) - score(a));
       out.push(...bag.slice(0, emptyN));
     }
     return out;
   };
   const jewelEmpty = () => { try { return jewelFillers().length; } catch (_) { return 0; } };
+  // 💍 Bộ trang sức mạnh (24/11, bạn dặn: chỉ đeo Hồng Ảnh khi làm việc để lên cấp – Luyện Công, Dã Tẩu, Lửa trại; còn lại
+  // đeo bộ mạnh nhất trước đó). Tool nhớ đúng từng món không phải Hồng Ảnh đang đeo ngay trước khi đổi sang Hồng Ảnh
+  // (JEWEL_POWER_KEY, theo uid) và đeo lại đúng các món đó. Chưa nhớ / món đã mất: chọn món không phải Hồng Ảnh tốt nhất:
+  // kỹ năng vốn có → đồ môn phái → đồ Hoàng Kim (bộ hiếm như Vô Danh) → chỉ số game (itemPower).
+  const JEWEL_POWER_KEY = 'vl.jewelPower';
+  // Mặc được không (đủ yêu cầu cấp / chỉ số / phái – 24/11: dây chuyền "mạnh" trong túi không mặc được, game từ chối)
+  const canWear = (i) => { try { const ok = window.H5.G('reqOk'); return typeof ok !== 'function' || !!ok(i); } catch (_) { return true; } };
+  const ipOf = (i) => { try { return +window.H5.G('itemPower')(i) || 0; } catch (_) { return 0; } };
+  const jewelCombat = (i) => {
+    if (!i || isHongAnh(i) || !canWear(i)) return -1;
+    let ip = 0; try { ip = +window.H5.G('itemPower')(i) || 0; } catch (_) {}
+    return powerOf(i) * 1e4 + (i.set && i.set.kind === 'gold' ? 5e3 : 0) + ip;
+  };
+  const jewelPowerSaved = () => { try { return JSON.parse(localStorage.getItem(JEWEL_POWER_KEY) || 'null') || {}; } catch (_) { return {}; } };
+  const jewelPowerSave = (S) => {
+    const cur = jewelPowerSaved();
+    let n = 0;
+    for (const j of JEWEL) for (const s of j.slots) { const it = S.eq[s]; if (it && !isHongAnh(it)) { cur[s] = it.uid; n++; } }
+    if (n) { cur.at = Date.now(); try { localStorage.setItem(JEWEL_POWER_KEY, JSON.stringify(cur)); } catch (_) {} }
+  };
   const jewelFlow = async (arg) => {
     if (flowBusy || anyWindowOpen()) return { r: 'busy' };
     if (inBossHk() && arg.mode === 'exp') return { r: 'boss-hk' };
     const G = window.H5.G, S = G('S');
     const equip = G('equip'), unequip = G('unequip');
     if (!S || typeof equip !== 'function' || typeof unequip !== 'function') return { r: 'no-fn' };
+    // Sắp đổi sang Hồng Ảnh: nhớ bộ mạnh đang đeo (món không phải Hồng Ảnh) để lúc đánh đeo lại đúng
+    if (arg.mode === 'exp') jewelPowerSave(S);
+    const saved = jewelPowerSaved();
+    const jewelKept = [];
     const want = {};
     for (const j of JEWEL) {
       const pool = [...j.slots.map((s) => S.eq[s]), ...(S.inv || []).filter((i) => i && i.d === j.d)].filter(Boolean);
       const uniq = [...new Set(pool)];
-      // "fill": chỉ lấp ô trống, không đổi món đang đeo
-      const pick = arg.mode === 'fill' ? [] : arg.mode === 'exp'
-        ? uniq.filter(isHongAnh).sort((a, b) => expOf(b) - expOf(a))
-        : uniq.filter((i) => powerOf(i) > 0).sort((a, b) => powerOf(b) - powerOf(a));
-      // Thiếu món hợp thì lấp bằng món đang đeo (giữ nguyên), rồi món Hồng Ảnh tốt nhất
       const worn = j.slots.map((s) => S.eq[s]).filter(Boolean);
-      const fill = arg.mode === 'fill' ? worn : [...pick, ...worn.filter((w) => !pick.includes(w)), ...uniq.filter(isHongAnh).sort((a, b) => expOf(b) - expOf(a))];
+      let fill;
+      if (arg.mode === 'fill') fill = worn; // chỉ lấp ô trống, không đổi món đang đeo
+      else if (arg.mode === 'exp') {
+        const pick = uniq.filter(isHongAnh).sort((a, b) => expOf(b) - expOf(a));
+        fill = [...pick, ...worn.filter((w) => !pick.includes(w))];
+      } else {
+        // Bộ mạnh: món đã nhớ trước, rồi món không phải Hồng Ảnh tốt nhất – không bao giờ Hồng Ảnh
+        const mem = j.slots.map((s) => uniq.find((i) => saved[s] != null && String(i.uid) === String(saved[s]) && canWear(i))).filter(Boolean);
+        const rest = uniq.filter((i) => !isHongAnh(i) && !mem.includes(i) && canWear(i)).sort((a, b) => jewelCombat(b) - jewelCombat(a));
+        // Ô chưa có món nhớ: món thay yếu hơn một nửa món Hồng Ảnh đang đeo (chỉ số game) thì giữ Hồng Ảnh – nhân vật không
+        // yếu đi vì đổi sang đồ rác. Bạn tự đeo món khác một lần → tool nhớ món đó.
+        const keepHa = worn.filter((w) => isHongAnh(w)).sort((a, b) => ipOf(b) - ipOf(a));
+        fill = [...mem];
+        for (const it of rest) {
+          if (fill.length >= j.slots.length) break;
+          const ha = keepHa[fill.length - mem.length];
+          if (ha && ipOf(it) < ipOf(ha) * 0.5) { jewelKept.push(`${ha.n} (món thay ${it.n} yếu hơn)`); fill.push(ha); continue; }
+          fill.push(it);
+        }
+        for (const ha of keepHa) if (fill.length < j.slots.length && !fill.includes(ha)) { jewelKept.push(`${ha.n} (không có món thay)`); fill.push(ha); }
+      }
       want[j.d] = [...new Set(fill)].slice(0, j.slots.length);
     }
     const changed = [];
@@ -2671,13 +2711,16 @@
         }
         await sleep(300);
       }
-      // Không để ô trang sức trống: ô nào còn trống → món tốt nhất trong túi (Hồng Ảnh, rồi món sức mạnh, rồi món mạnh nhất)
-      for (const it of jewelFillers()) { if (await wear(it)) changed.push(it.n + ' (ô trống)'); await sleep(300); }
+      // Không để ô trang sức trống. Lúc đánh: chỉ món không phải Hồng Ảnh.
+      const prefer = arg.mode === 'fill' ? (arg.prefer || '') : arg.mode;
+      for (const it of jewelFillers(prefer)) { if (await wear(it)) changed.push(it.n + ' (ô trống)'); await sleep(300); }
+      // Đang đeo bộ mạnh: nhớ lại đúng bộ này (kể cả món bạn tự đổi lúc đánh)
+      if (arg.mode === 'power') jewelPowerSave(G('S'));
     } finally {
       await closeModalSure();
       flowBusy = false;
     }
-    return { r: 'ok', mode: arg.mode, changed: changed.join(', '), exp: Math.round((G('R').P || {}).expPct || 0) };
+    return { r: 'ok', mode: arg.mode, changed: changed.join(', '), kept: [...new Set(jewelKept)].join(', '), exp: Math.round((G('R').P || {}).expPct || 0) };
   };
   const lockInnateFlow = async () => {
     if (flowBusy || anyWindowOpen()) return { r: 'busy' };

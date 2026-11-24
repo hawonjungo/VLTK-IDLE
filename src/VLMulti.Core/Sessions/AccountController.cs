@@ -2318,8 +2318,14 @@ public sealed class AccountController
         bool fight = ModeCode is ModeRules.Tower or ModeRules.Dungeon || BossHkSchedule(now) || BossHkSchedule(now + BossPrepAhead)
                      || AssassinActive || EventRunning(now) || _eventPhase is not null || _assassinPhase;
         if (fight) return "power";
-        return ModeCode is ModeRules.Farm or ModeRules.Quest ? "exp" : "";
+        // 24/11, bạn dặn: Hồng Ảnh chỉ khi làm việc để lên cấp (Luyện Công, Nhiệm vụ Dã Tẩu, Lửa trại – ở trên), và 10 phút
+        // tới không có việc đánh (Boss Hoàng Kim) – tránh đổi sang Hồng Ảnh rồi vài giây sau đổi lại. Còn lại (kể cả đứng
+        // chờ) → bộ mạnh đã nhớ. Chưa rõ việc (đang tải trang / đang chuyển việc) → giữ nguyên.
+        if (ModeCode.Length == 0) return "";
+        if (ModeCode is ModeRules.Farm or ModeRules.Quest && !BossHkSchedule(now + JewelExpQuietAhead)) return "exp";
+        return "power";
     }
+    private static readonly TimeSpan JewelExpQuietAhead = TimeSpan.FromMinutes(10);
 
     private void SuperviseJewel(DateTime now)
     {
@@ -2340,7 +2346,7 @@ public sealed class AccountController
         if (now < _jewelNextTry || _ldtBuyingSince is not null) return;
         _jewelAt = now;
         _jewelPending = true;
-        Post(new { t = "jewel", arg = new { mode = want } });
+        Post(new { t = "jewel", arg = new { mode = want, prefer = JewelMode } });
         if (fill) Log.Write($"[{Account.Id}] jewel: ô trang sức trống ({JewelEmpty}) → đeo món trong túi");
     }
 
@@ -2350,7 +2356,7 @@ public sealed class AccountController
         var r = Str(m, "r");
         var mode = Str(m, "mode");
         var changed = Str(m, "changed");
-        Log.Write($"[{Account.Id}] jewel: {r} mode={mode} changed={changed} exp={Raw(m, "exp")}");
+        Log.Write($"[{Account.Id}] jewel: {r} mode={mode} changed={changed} exp={Raw(m, "exp")}" + (Str(m, "kept").Length > 0 ? $" giữ Hồng Ảnh: {Str(m, "kept")}" : ""));
         switch (r)
         {
             case "ok":
