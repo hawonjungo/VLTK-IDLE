@@ -1786,8 +1786,14 @@
     };
     try {
       await claim();
-      // 1. Người Tuyết: ghép hết
-      let n = fit('thiep') | 0;
+      // 24/11, bạn dặn: GIỮ Hoa Tuyết cho bạn tự ép Khăn Đỏ (1 Người Tuyết + 5 Hoa Tuyết + Khăn Đỏ mua bằng KNB – tool
+      // không ghép Khăn Đỏ). Trước đây tool ghép hết thành Khăn Xanh, nhưng mỗi ngày chỉ tặng được 40 → tồn 150–470 con,
+      // mỗi con giữ 3 Hoa Tuyết, không còn Hoa Tuyết cho Khăn Đỏ. Nay: Người Tuyết thường (2 Hoa Tuyết) chỉ ghép khi kho
+      // dưới GS_NT_KEEP con; Khăn Xanh chỉ ghép đủ tặng trong ngày (40 − đã tặng − đang tồn).
+      const GS_NT_KEEP = 50;
+      const boLeftToday = () => Math.max(0, (+g('GS_BO_NGAY') || 40) - ((GS.me || {}).bo_dn | 0));
+      // 1. Người Tuyết: chỉ khi kho còn ít (đủ cho Khăn Xanh hôm nay và Khăn Đỏ bạn tự ép)
+      let n = Math.min(fit('thiep') | 0, Math.max(0, GS_NT_KEEP - (st().thiep | 0)));
       if (n > 0 && (await call('gsGhep', 'thiep', n))) res.nt = n;
       // 2. Khăn Đỏ (bạn bật): mỗi ngày tối đa arg.redKnb KNB
       if ((+arg.redKnb || 0) > 0) {
@@ -1805,11 +1811,12 @@
       }
       // 3. Khăn Xanh: mua đủ khăn bằng lượng (chừa arg.goldKeep lượng) rồi ghép
       {
-        const want = Math.min(st().thiep | 0, Math.floor((st().q.hoa | 0) / 3));
+        const need = Math.max(0, boLeftToday() - (st().bo | 0)); // đủ tặng hôm nay, không ghép dư
+        const want = Math.min(need, st().thiep | 0, Math.floor((st().q.hoa | 0) / 3));
         const price = +g('GS_GG_GIA') || 1e5;
         const buy = Math.max(0, Math.min(want - (st().gg | 0), Math.floor(((+S.gold || 0) - (+arg.goldKeep || 0)) / price), 200));
         if (buy > 0 && (await call('gsBuyGG', buy))) res.gg = buy;
-        n = fit('bo') | 0;
+        n = Math.min(fit('bo') | 0, want);
         if (n > 0 && (await call('gsGhep', 'bo', n))) res.bo = n;
       }
       // 4. Tặng Ông Già Noel: Khăn Xanh tới 40 điểm/ngày, Khăn Đỏ hết, Người Tuyết thường chỉ 2 ngày cuối

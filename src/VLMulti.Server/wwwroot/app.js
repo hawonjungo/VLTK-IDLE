@@ -992,7 +992,7 @@ function renderSettings() {
         check(rebornOn, '🔄 Tự chuyển sinh ở cấp 200', 'Tới tối đa 10 lần. Cộng điểm lại đúng lối đánh cũ (tỉ lệ tiềm năng, chỉ kỹ năng đã có), đặt lại 4 ô kỹ năng. Sau chuyển sinh Luyện Công tới hết cấp 80 rồi mới vào tháp.'),
       ]),
       section('🎄 Giáng Sinh (tới 26/12)', [
-        check(gsOn, '🎄 Ghép và tặng Người Tuyết', 'Mỗi 30 phút: nhận quà mốc điểm / Hộp quà Ông Già Noel / quà bảng; ghép Người Tuyết, nâng Khăn Xanh (mua khăn bằng lượng) rồi tặng Ông Già Noel trong giới hạn ngày (40 điểm). Người Tuyết thường giữ lại để nâng, chỉ tặng hết trong 2 ngày cuối.'),
+        check(gsOn, '🎄 Ghép và tặng Người Tuyết', 'Mỗi 30 phút: nhận quà mốc điểm / Hộp quà Ông Già Noel / quà bảng; tặng Khăn Xanh tới giới hạn ngày (40 điểm), chỉ ghép thêm Khăn Xanh khi kho không đủ tặng hôm nay (mua khăn bằng lượng). Giữ Hoa Tuyết cho bạn tự ép Khăn Đỏ: Người Tuyết thường chỉ ghép khi kho dưới 50 con. Người Tuyết thường tặng hết trong 2 ngày cuối.'),
         sub(gsOn, [
           grid(['Luôn chừa lại', gsGold]),
           check(gsRed, '🧣 Khăn Đỏ (100 KNB / cái, trừ KNB khóa trước)', '5 điểm + 20 triệu kinh nghiệm mỗi Người Tuyết Khăn Đỏ, 30% có thêm quà. Ưu tiên trước Khăn Xanh.'),
