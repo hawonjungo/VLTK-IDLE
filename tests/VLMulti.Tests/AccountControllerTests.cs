@@ -1,5 +1,6 @@
 using System.Text.Json;
 using VLMulti.Core.Accounts;
+using VLMulti.Core.GameData;
 using VLMulti.Core.Sessions;
 using VLMulti.Core.Settings;
 
@@ -278,6 +279,30 @@ public class AccountControllerTests
     {
         t = Run(ctl, t, lived, Tower(floor));
         return Run(ctl, t, after, Status("game", mode: "farm"));
+    }
+
+    [Fact]
+    public void Thien_Bao_Kho_is_chosen_only_while_minutes_are_left()
+    {
+        var cfg = new AppSettings { AutoModeFallback = ModeRules.Tower };
+        var q = new QuestCounts("200/200");
+        Assert.Equal(ModeRules.Tower, ModeRules.Decide(q, "0/3", _ => false, cfg, tbkLeft: 40)!.Value.Mode);
+        Assert.Equal(ModeRules.Farm, ModeRules.Decide(q, "0/3", _ => false, cfg, tbkLeft: 0)!.Value.Mode);
+        Assert.Equal(ModeRules.Tower, ModeRules.Decide(q, "0/3", _ => false, cfg, tbkLeft: -1)!.Value.Mode); // chưa đọc được: thử
+    }
+
+    [Fact]
+    public void Leaving_Thien_Bao_Kho_when_minutes_run_out_is_not_a_death()
+    {
+        var (ctl, _, _) = Make();
+        string In(int left) => JsonSerializer.Serialize(new { t = "status", screen = "game", name = "", lv = "50", gold = "1 vạn", knb = "1 🔒1", mode = "tower", modeText = "tower", zone = "Thiên Bảo Khố", inTower = 1, tbkLeft = left, tbkChest = "12/12" });
+        string Out(int left) => JsonSerializer.Serialize(new { t = "status", screen = "game", name = "", lv = "50", gold = "1 vạn", knb = "1 🔒1", mode = "farm", modeText = "farm", zone = "Hoa Sơn", inTower = 0, tbkLeft = left, tbkChest = "12/12" });
+        var t = Run(ctl, T0, 15, Out(60));
+        ctl.RequestMode("tower", t);
+        t = Run(ctl, t, 120, In(1));
+        t = Run(ctl, t, 30, Out(0));
+        Assert.DoesNotContain(ctl.Activity.Items, e => e.Text.Contains("Chết"));
+        Assert.Contains(ctl.Activity.Items, e => e.Text.Contains("Hết phút Thiên Bảo Khố"));
     }
 
     [Fact]

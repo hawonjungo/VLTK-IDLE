@@ -892,7 +892,7 @@ function renderSettings() {
     const o = h('option', { value: n, text: n }); o.selected = n === s.knbMainName; return o;
   })));
   const knbKeep = pick([500, 1000, 2000, 5000], s.knbKeep ?? 1000, (n) => `${n0(n)} KNB`);
-  const fallback = h('select', {}, [['tower', 'Leo Tháp'], ['farm', 'Luyện Công']].map(([v, t]) => { const o = h('option', { value: v, text: t }); o.selected = v === s.autoFallback; return o; }));
+  const fallback = h('select', {}, [['tower', '🏛 Thiên Bảo Khố (60 phút / ngày, rồi Luyện Công)'], ['farm', 'Luyện Công']].map(([v, t]) => { const o = h('option', { value: v, text: t }); o.selected = v === s.autoFallback; return o; }));
   const rest = pick([10, 15, 30, 60, 120, 240], s.towerRest, (n) => `${n} phút`);
 
   // Mật khẩu game: acc đã lưu chỉ hiện tên tài khoản + nút "Đổi"
@@ -1002,7 +1002,7 @@ function renderSettings() {
       section('Hành trang', [
         check(sellJunk, '💰 Sắp đầy thì "Bán thừa"', 'Món không khớp ⚙ Nhặt đồ, không khoá.'),
         sub(sellJunk, [grid(['Bán khi còn ≤ ô trống', sellFree])]),
-        check(jewelOn, '💍 Đổi trang sức theo việc', 'Luyện Công / Nhiệm Vụ đeo Hồng Ảnh; Leo Tháp / Boss đeo trang sức sức mạnh. Riêng từng acc ở nút ⋯.'),
+        check(jewelOn, '💍 Đổi trang sức theo việc', 'Luyện Công / Nhiệm Vụ / Lửa trại đeo Hồng Ảnh; Thiên Bảo Khố / Boss đeo trang sức sức mạnh. Riêng từng acc ở nút ⋯.'),
       ]),
       save('Lưu', () => ({ dailyKnb: dailyKnb.checked, buffTtl: buffTtl.checked, buffTtlSpecial: buffTtlSp.checked, buffQht: buffQht.checked,
         autoSellJunk: sellJunk.checked, autoSellFreeSlots: +sellFree.value, jewelSwapOn: jewelOn.checked, rebornOn: rebornOn.checked,

@@ -342,7 +342,7 @@ public sealed class AccountController
             : towerState == "current" ? string.Join(" · ", new[]
                 {
                     TowerFloor is { } f ? $"tầng {f}" : "",
-                    _fastDeaths.Count > 0 ? $"chết {_fastDeaths.Count}/{cfg.TowerFastDeathCount} ở tầng {_deathFloor}" : "",
+                    _fastDeaths.Count > 0 ? $"chết {_fastDeaths.Count}/{cfg.TowerFastDeathCount} ở {(_deathFloor is null or -1 ? "Thiên Bảo Khố" : $"tầng {_deathFloor}")}" : "",
                 }.Where(x => x.Length > 0))
             : "";
 
@@ -729,6 +729,9 @@ public sealed class AccountController
             ApplyHunt(Str(s, "hunt"), now);
             ApplyGoldBoss(Str(s, "gbw"), now);
             InTower = s.TryGetProperty("inTower", out var it) && it.ValueKind == JsonValueKind.Number ? it.GetInt32() : -1;
+            // 🏛 Thiên Bảo Khố: phút còn lại hôm nay (-1 = chưa đọc được), rương đã nhận / tối đa
+            TbkLeft = s.TryGetProperty("tbkLeft", out var tl) && tl.ValueKind == JsonValueKind.Number ? tl.GetInt32() : -1;
+            TbkChest = s.TryGetProperty("tbkChest", out var tc) && tc.ValueKind == JsonValueKind.String ? tc.GetString() ?? "" : TbkChest;
             Reborn = s.TryGetProperty("cs", out var cs) && cs.ValueKind == JsonValueKind.Number ? cs.GetInt32() : -1;
             HorsesToStore = s.TryGetProperty("hst", out var hst) && hst.ValueKind == JsonValueKind.Number ? hst.GetInt32() : 0;
             InnateUnlocked = s.TryGetProperty("innate", out var inn) && inn.ValueKind == JsonValueKind.Number ? inn.GetInt32() : 0;
@@ -1738,6 +1741,13 @@ public sealed class AccountController
             Log.Write($"[{Account.Id}] mode {from} -> {to} khi đang {ModeRules.Label(_eventPhase ?? "")}");
             return;
         }
+        if (from == ModeRules.Tower && to == ModeRules.Farm && !byYou && TbkLeft == 0)
+        {
+            // Hết 60 phút Thiên Bảo Khố hôm nay: game tự về Luyện Công – không phải chết
+            Log.Write($"[{Account.Id}] tbk: hết phút hôm nay ({TbkChest} rương) → Luyện Công");
+            Note(now, $"🏛 Hết phút Thiên Bảo Khố hôm nay ({TbkChest} rương) – Luyện Công", StatusLevel.Ok);
+            return;
+        }
         if (from == ModeRules.Tower && to == ModeRules.Farm && !byYou)
         {
             OnTowerDeath(now);
@@ -1793,19 +1803,22 @@ public sealed class AccountController
     {
         var cfg = SettingsProvider?.Invoke() ?? new AppSettings();
         var lived = now - _towerEnteredAt;
-        var floor = _lastTowerFloor?.ToString() ?? "?";
+        // Thiên Bảo Khố không có tầng: đếm chết theo "Thiên Bảo Khố" (khoá -1) – trước đây không có tầng thì không bao
+        // giờ nghỉ, 25/11 một acc vào–chết–vào 122 lần
+        int deathKey = _lastTowerFloor ?? -1;
+        var floor = _lastTowerFloor?.ToString() ?? "Thiên Bảo Khố";
         Tower.OnFall(now);
         Log.Write($"[{Account.Id}] tower death at floor {floor} after {lived.TotalMinutes:0.0} min");
 
-        if (_lastTowerFloor != _deathFloor) { _fastDeaths.Clear(); _deathFloor = _lastTowerFloor; }
+        if (deathKey != _deathFloor) { _fastDeaths.Clear(); _deathFloor = deathKey; }
         _fastDeaths.Add(now);
-        if (_lastTowerFloor is not null) _hoanTowerPending = true; // chết trong tháp: dùng Hoàn khi vào lại (tối đa mỗi 25 phút)
-        if (_lastTowerFloor is not null && _fastDeaths.Count >= cfg.TowerFastDeathCount)
+        _hoanTowerPending = true; // chết trong tháp / Thiên Bảo Khố: dùng Hoàn khi vào lại (tối đa mỗi 25 phút)
+        if (_fastDeaths.Count >= cfg.TowerFastDeathCount)
         {
             _fastDeaths.Clear();
             // Nghỉ đúng mức bạn đặt (Luyện Công kiếm ít kinh nghiệm – không kéo dài). Kẹt "tường" (nghỉ xong vào lại vẫn chết
             // nhanh ở đúng tầng đó 3 lượt) → báo một lần để bạn nâng đồ / kỹ năng.
-            if (_wallFloor == _lastTowerFloor) _wallRests++; else (_wallFloor, _wallRests) = (_lastTowerFloor, 1);
+            if (_wallFloor == deathKey) _wallRests++; else (_wallFloor, _wallRests) = (deathKey, 1);
             var rest = TimeSpan.FromMinutes(cfg.TowerRestMinutes);
             _modeBlockedUntil[ModeRules.Tower] = now + rest;
             if (_wallRests == 3)
@@ -1827,6 +1840,8 @@ public sealed class AccountController
     // Acc bật luật 🔁 thì luật tự đưa vào lại (tháp đứng trước Luyện Công).
     // Đang trong game có biết ở tháp hay không (-1 = trang không đọc được)
     public int InTower { get; private set; } = -1;
+    public int TbkLeft { get; private set; } = -1;   // 🏛 phút Thiên Bảo Khố còn lại hôm nay (-1 = chưa đọc được)
+    public string TbkChest { get; private set; } = "";
     private DateTime? _towerAbsentSince;
     private DateTime _towerAbsentFixAt;
 
@@ -1836,6 +1851,16 @@ public sealed class AccountController
     {
         bool absent = Screen == "game" && ModeCode == ModeRules.Tower && InTower == 0 && !AssassinActive && !IsModeBlocked(ModeRules.Tower, now);
         if (!absent) { _towerAbsentSince = null; return; }
+        if (TbkLeft == 0)
+        {
+            // Hết phút Thiên Bảo Khố mà vẫn ở chế độ "tower": game không đưa vào nữa → về Luyện Công, không bấm lại
+            _towerAbsentSince = null;
+            if (now - _towerAbsentFixAt < TimeSpan.FromMinutes(3)) return;
+            _towerAbsentFixAt = now;
+            Log.Write($"[{Account.Id}] tbk: hết phút hôm nay → Luyện Công");
+            RunCommand("mode", ModeRules.Farm);
+            return;
+        }
         _towerAbsentSince ??= now;
         if (now - _towerAbsentSince < TimeSpan.FromMinutes(2) || now - _towerAbsentFixAt < TimeSpan.FromMinutes(3)) return;
         _towerAbsentFixAt = now;
@@ -1847,7 +1872,7 @@ public sealed class AccountController
     private void SuperviseTowerReturn(DateTime now)
     {
         if (!Account.StayInTower || Account.AutoMode || Screen != "game" || ModeCode != ModeRules.Farm) return;
-        if (now < _towerReturnAt || IsModeBlocked(ModeRules.Tower, now) || now - _lastTowerCmd < TowerCmdGap) return;
+        if (now < _towerReturnAt || IsModeBlocked(ModeRules.Tower, now) || now - _lastTowerCmd < TowerCmdGap || TbkLeft == 0) return;
         _lastTowerCmd = now;
         _pendingAutoMode = ModeRules.Tower;
         _lastAutoModeCmd = now;
@@ -1891,7 +1916,7 @@ public sealed class AccountController
         // Hôm nay đã thử mua lệnh bài rồi: không tính "còn mua được" nữa, tránh quay lại Nhiệm Vụ khi đã hết tiền
         var quest = _ldtTriedDay == now.Date ? QuestCounts with { LdtBuy = "" } : QuestCounts;
         if (ModeRules.Decide(quest, PhoBan, m => IsModeBlocked(m, now) || EventTooCloseToBossHk(m, now), s,
-                             AssassinTokens, BoatLeft, WeekBossLeft) is not { } want) return;
+                             AssassinTokens, BoatLeft, WeekBossLeft, TbkLeft) is not { } want) return;
 
         // Bước Sát Thủ / Đi thuyền / Boss tuần = ở Luyện Công rồi bấm nút trong bảng Nhiệm vụ
         // (SuperviseAssassin / SuperviseEvents); chưa ở Luyện Công thì chuyển sang trước
@@ -2587,7 +2612,7 @@ public sealed class AccountController
         {
             if (!_hoanTowerPending || !cfg.HoanTower) { _hoanTowerPending = false; return; }
             if (InTower != 1 || now - _hoanTowerAt < TimeSpan.FromMinutes(25)) return;
-            (n, _hoanWhy) = (6, $"vừa chết ở tầng {_lastTowerFloor}");
+            (n, _hoanWhy) = (6, _lastTowerFloor is { } hf ? $"vừa chết ở tầng {hf}" : "vừa chết ở Thiên Bảo Khố");
         }
         _hoanAt = now;
         _hoanPending = true;

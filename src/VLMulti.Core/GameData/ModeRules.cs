@@ -24,7 +24,7 @@ public static partial class ModeRules
     private static partial Regex FractionPattern();
 
     public static (string Mode, string Reason)? Decide(QuestCounts quest, string phoBan, Func<string, bool> isBlocked, AppSettings cfg,
-                                                       int assassinTokens = 0, int boatLeft = 0, int weekBossLeft = 0)
+                                                       int assassinTokens = 0, int boatLeft = 0, int weekBossLeft = 0, int tbkLeft = -1)
     {
         if (cfg.AutoModeQuest && !isBlocked(Quest) && QuestLeft(quest) is { } why)
             return (Quest, why);
@@ -41,10 +41,14 @@ public static partial class ModeRules
         if (cfg.AutoModeAssassin && !isBlocked(Assassin) && assassinTokens > 0)
             return (Assassin, $"còn {assassinTokens} Lệnh Bài Sát Thủ");
 
+        // 25/11: chế độ "tower" của game giờ là Thiên Bảo Khố (60 phút / ngày). Hết phút (tbkLeft = 0) → Luyện Công cả ngày;
+        // chưa đọc được (-1) thì vẫn thử (game tự trả về Luyện Công nếu hết)
+        if (cfg.AutoModeFallback == Tower && tbkLeft == 0)
+            return (Farm, "hết phút Thiên Bảo Khố hôm nay");
         if (cfg.AutoModeFallback == Tower && !isBlocked(Tower))
-            return (Tower, "đã xong Dã Tẩu và Phó bản");
+            return (Tower, tbkLeft > 0 ? $"Thiên Bảo Khố còn {tbkLeft} phút" : "đã xong Dã Tẩu và Phó bản");
 
-        return (Farm, cfg.AutoModeFallback == Tower ? "tháp đang tạm nghỉ" : "đã xong Dã Tẩu và Phó bản");
+        return (Farm, cfg.AutoModeFallback == Tower ? "Thiên Bảo Khố đang tạm nghỉ" : "đã xong Dã Tẩu và Phó bản");
     }
 
     public static (string Mode, string Reason)? Decide(string daTau, string phoBan, Func<string, bool> isBlocked, AppSettings cfg) =>
@@ -77,7 +81,7 @@ public static partial class ModeRules
     {
         Dungeon => "Phó Bản",
         Quest => "Nhiệm Vụ",
-        Tower => "Leo Tháp",
+        Tower => "Thiên Bảo Khố",
         Assassin => "Sát Thủ",
         Boat => "Đi thuyền",
         WeekBoss => "Boss tuần",

@@ -3536,8 +3536,23 @@
   // S.gb = {key: "2026-11-08#1" (null ngoài đợt), killed, hpf, n, zn, end, next}; đợt 08/11 15:30: acc hạ xong thì
   // killed = true, acc chưa đánh thì hpf vẫn 1 dù acc khác đã hạ
   // Chế độ thật trong game: S.mode ("farm" / "tower" / …), đang trong tháp (R.tower), phó bản (R.dg)
+  // 🏛 25/11: game thay Thông Thiên Tháp bằng Thiên Bảo Khố – chế độ "tower" của game giờ là vào Thiên Bảo Khố (bãi riêng,
+  // 60 phút / ngày, cứ 5 phút 1 rương, tối đa 12). Đang ở Thiên Bảo Khố (R.zoneShown 'tbk' / tbkSt.dang) tính như "ở tháp".
+  // Trạng thái (H5.tbkSt: con = ms còn lại, dang, ruong / max) game tự cập nhật khi ở trong; ở ngoài thì 3 phút đọc lại.
+  let tbkReadAt = 0;
+  const tbkState = () => {
+    try {
+      const H = window.H5;
+      if (Date.now() - tbkReadAt > 180000 && H && typeof H.call === 'function' && H.inGame) {
+        tbkReadAt = Date.now();
+        H.call('tbk.xem', {}).then((v) => { if (v && v.st) H.tbkSt = v.st; }).catch(() => {});
+      }
+      return (H && H.tbkSt) || null;
+    } catch (_) { return null; }
+  };
+  const inTbk = () => { try { const R = window.H5.G('R'), t = window.H5.tbkSt; return !!((R && R.zoneShown === 'tbk') || (t && t.dang)); } catch (_) { return false; } };
   const gameModeNow = () => {
-    try { const S = window.H5.G('S'), R = window.H5.G('R'); return S ? { m: String(S.mode || ''), tower: !!(R && R.tower), dg: !!(R && R.dg) } : null; } catch (_) { return null; }
+    try { const S = window.H5.G('S'), R = window.H5.G('R'); return S ? { m: String(S.mode || ''), tower: !!(R && R.tower) || inTbk(), dg: !!(R && R.dg) } : null; } catch (_) { return null; }
   };
   // 08/11 22:07: 2 nhân vật chết trong tháp, game đưa ra Luyện Công (S.mode = farm) nhưng nút "🗼 Leo Tháp"
   // vẫn sáng → app tưởng đang leo tháp, không đưa vào lại suốt 25 phút. Nút "Leo Tháp" sáng mà game không ở tháp
@@ -4142,6 +4157,8 @@
       mode: realMode,
       modeText: realMode !== btnMode ? `${realMode} (nút: ${btnMode})` : on ? on.textContent.trim() : '',
       inTower: screen === 'game' ? ((gm) => (gm ? (gm.tower ? 1 : 0) : -1))(gameModeNow()) : -1,
+      // Thiên Bảo Khố: phút còn lại hôm nay (-1 = chưa đọc được), rương đã nhận / tối đa, đang ở trong
+      ...(screen === 'game' ? ((t) => (t ? { tbkLeft: Math.max(0, Math.floor((+t.con || 0) / 60000)) + ((+t.con || 0) > 0 && (+t.con || 0) < 60000 ? 1 : 0), tbkOpen: t.bat === false ? 0 : 1, tbkChest: `${t.ruong | 0}/${t.max | 0}`, tbkIn: inTbk() ? 1 : 0 } : { tbkLeft: -1 }))(tbkState()) : {}),
       cs: screen === 'game' ? rebornNow() : -1,            // số lần đã chuyển sinh (-1 = chưa đọc được)
       hst: screen === 'game' ? horseStoreCount() : 0,     // ngựa loài mới ở Hành trang chờ cất vào Mã Trường
     };
